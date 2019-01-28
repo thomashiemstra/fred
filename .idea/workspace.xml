@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="3e32dd51-4cb8-4fc7-9c56-4cb0f9b7a722" name="Default Changelist" comment="" />
+    <list default="true" id="1c0859ce-ee43-4ca0-92e6-464a857bd51f" name="Default Changelist" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+    </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -9,36 +12,243 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="FUSProjectUsageTrigger">
+    <session id="1382666997">
+      <usages-collector id="statistics.lifecycle.project">
+        <counts>
+          <entry key="project.closed" value="3" />
+          <entry key="project.open.time.1" value="1" />
+          <entry key="project.open.time.2" value="2" />
+          <entry key="project.opened" value="3" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.open">
+        <counts>
+          <entry key="py" value="58" />
+          <entry key="txt" value="1" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.open">
+        <counts>
+          <entry key="PLAIN_TEXT" value="1" />
+          <entry key="Python" value="58" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.edit">
+        <counts>
+          <entry key="dummy" value="119" />
+          <entry key="py" value="4330" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.edit">
+        <counts>
+          <entry key="PLAIN_TEXT" value="119" />
+          <entry key="Python" value="4330" />
+        </counts>
+      </usages-collector>
+    </session>
+    <session id="-1251397687">
+      <usages-collector id="statistics.lifecycle.project">
+        <counts>
+          <entry key="project.closed" value="15" />
+          <entry key="project.open.time.0" value="1" />
+          <entry key="project.open.time.3" value="10" />
+          <entry key="project.open.time.4" value="5" />
+          <entry key="project.opened" value="16" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.edit">
+        <counts>
+          <entry key="dummy" value="16" />
+          <entry key="py" value="12081" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.edit">
+        <counts>
+          <entry key="PLAIN_TEXT" value="16" />
+          <entry key="Python" value="12081" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.open">
+        <counts>
+          <entry key="py" value="101" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.open">
+        <counts>
+          <entry key="Python" value="101" />
+        </counts>
+      </usages-collector>
+    </session>
     <session id="-1037011141">
+      <usages-collector id="statistics.file.extensions.edit">
+        <counts>
+          <entry key="py" value="165" />
+          <entry key="txt" value="48" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.edit">
+        <counts>
+          <entry key="PLAIN_TEXT" value="48" />
+          <entry key="Python" value="165" />
+        </counts>
+      </usages-collector>
       <usages-collector id="statistics.lifecycle.project">
         <counts>
           <entry key="project.closed" value="1" />
-          <entry key="project.open.time.0" value="1" />
+          <entry key="project.open.time.3" value="1" />
           <entry key="project.opened" value="1" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.open">
+        <counts>
+          <entry key="py" value="2" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.open">
+        <counts>
+          <entry key="Python" value="2" />
         </counts>
       </usages-collector>
     </session>
   </component>
+  <component name="FileEditorManager">
+    <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
+      <file pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/main.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="-1742">
+              <caret line="23" column="14" selection-start-line="23" selection-start-column="14" selection-end-line="23" selection-end-column="14" />
+              <folding>
+                <element signature="e#0#31#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/servo_handling/servo_controller.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="477">
+              <caret line="48" lean-forward="true" selection-start-line="48" selection-end-line="48" />
+              <folding>
+                <marker date="1548715118337" expanded="true" signature="279:280" ph="..." />
+                <marker date="1548715118337" expanded="true" signature="2232:2325" ph="..." />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+    </leaf>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="FindInProjectRecents">
+    <findStrings>
+      <find>status check</find>
+      <find>status</find>
+      <find>Status</find>
+      <find>MIN_POSITION</find>
+      <find>has been successfully connected</find>
+      <find>forward_orientation_kinematics</find>
+      <find>ADDR_PROFILE_VELOCITY</find>
+      <find>LEN_PROFILE_VELOCITY</find>
+    </findStrings>
+  </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="IdeDocumentHistory">
+    <option name="CHANGED_PATHS">
+      <list>
+        <option value="$PROJECT_DIR$/getch.py" />
+        <option value="$PROJECT_DIR$/xl430_config.py" />
+        <option value="$PROJECT_DIR$/servo_setup.py" />
+        <option value="$PROJECT_DIR$/servo_config.py" />
+        <option value="$PROJECT_DIR$/servo.py" />
+        <option value="$PROJECT_DIR$/dynamixel_x_config.py" />
+        <option value="$PROJECT_DIR$/servo_handler.py" />
+        <option value="$PROJECT_DIR$/servo_controller/read_write_utils.py" />
+        <option value="$PROJECT_DIR$/servo_controller/servo_utils.py" />
+        <option value="$PROJECT_DIR$/servo_controller/test.py" />
+        <option value="$PROJECT_DIR$/xbox_controller/xinput.py" />
+        <option value="$PROJECT_DIR$/xbox_controller/XboxController.py" />
+        <option value="$PROJECT_DIR$/xbox_controller/test.py" />
+        <option value="$PROJECT_DIR$/kinematics/inverse_kinematics.py" />
+        <option value="$PROJECT_DIR$/servo_controller/main.py" />
+        <option value="$PROJECT_DIR$/tests/servo_controller_tests/servo_handler_tests.py" />
+        <option value="$PROJECT_DIR$/servo_controller/servo.py" />
+        <option value="$PROJECT_DIR$/servo_controller/dynamixel_x_config.py" />
+        <option value="$PROJECT_DIR$/servo_controller/dynamixel_utils.py" />
+        <option value="$PROJECT_DIR$/servo_controller/servo_controller.py" />
+        <option value="$PROJECT_DIR$/servo_controller/servo_handler.py" />
+        <option value="$PROJECT_DIR$/kinematics/kinematics_utils.py" />
+        <option value="$PROJECT_DIR$/kinematics/kinematics.py" />
+        <option value="$PROJECT_DIR$/servo_handling/servo.py" />
+        <option value="$PROJECT_DIR$/servo_handling/dynamixel_x_config.py" />
+        <option value="$PROJECT_DIR$/servo_handling/servo_handler.py" />
+        <option value="$PROJECT_DIR$/servo_handling/dynamixel_utils.py" />
+        <option value="$PROJECT_DIR$/servo_handling/servo_controller.py" />
+        <option value="$PROJECT_DIR$/main.py" />
+      </list>
+    </option>
+  </component>
   <component name="ProjectFrameBounds" extendedState="6">
-    <option name="x" value="291" />
-    <option name="y" value="-8" />
+    <option name="x" value="-10" />
+    <option name="y" value="4" />
     <option name="width" value="2576" />
     <option name="height" value="1416" />
+  </component>
+  <component name="ProjectInspectionProfilesVisibleTreeState">
+    <entry key="Project Default">
+      <profile-state>
+        <expanded-state>
+          <State />
+          <State>
+            <id>Python</id>
+          </State>
+        </expanded-state>
+        <selected-state>
+          <State>
+            <id>PyCompatibilityInspection</id>
+          </State>
+        </selected-state>
+      </profile-state>
+    </entry>
   </component>
   <component name="ProjectView">
     <navigator proportions="" version="1">
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
-      <pane id="ProjectPane" />
       <pane id="Scope" />
+      <pane id="ProjectPane">
+        <subPane>
+          <expand>
+            <path>
+              <item name="fred" type="b2602c69:ProjectViewProjectNode" />
+              <item name="fred" type="462c0819:PsiDirectoryNode" />
+            </path>
+          </expand>
+          <select />
+        </subPane>
+      </pane>
     </panes>
   </component>
   <component name="PropertiesComponent">
     <property name="last_opened_file_path" value="$PROJECT_DIR$" />
+  </component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\thomas\PycharmProjects\dynamixel_arm\tests" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\thomas\PycharmProjects\dynamixel_arm\servo_controller" />
+    </key>
   </component>
   <component name="RunDashboard">
     <option name="ruleStates">
@@ -52,36 +262,203 @@
       </list>
     </option>
   </component>
+  <component name="RunManager" selected="Python.main">
+    <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true">
+      <module name="dynamixel_arm" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="servo_controller" type="PythonConfigurationType" factoryName="Python">
+      <module name="dynamixel_arm" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/servo_controller" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/servo_controller/servo_controller.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_angle_6" type="tests" factoryName="Unittests" temporary="true" nameIsGenerated="true">
+      <module name="dynamixel_arm" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests/servo_controller_tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;servo_handler_tests.TestServoHandler.test_convert_angle_6&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_7" type="tests" factoryName="Unittests" temporary="true" nameIsGenerated="true">
+      <module name="dynamixel_arm" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests/servo_controller_tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;servo_handler_tests.TestServoHandler.test_convert_position_7&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_8" type="tests" factoryName="Unittests" temporary="true" nameIsGenerated="true">
+      <module name="dynamixel_arm" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests/servo_controller_tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;servo_handler_tests.TestServoHandler.test_convert_position_8&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" type="tests" factoryName="Unittests" temporary="true" nameIsGenerated="true">
+      <module name="dynamixel_arm" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests/servo_controller_tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;servo_handler_tests.TestServoHandler.test_convert_position_9&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <list>
+      <item itemvalue="Python.servo_controller" />
+      <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_position_7" />
+      <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_angle_6" />
+      <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_position_8" />
+      <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" />
+      <item itemvalue="Python.main" />
+    </list>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.main" />
+        <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_position_7" />
+        <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_position_8" />
+        <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" />
+        <item itemvalue="Python tests.Unittests for servo_handler_tests.TestServoHandler.test_convert_angle_6" />
+      </list>
+    </recent_temporary>
+  </component>
   <component name="SvnConfiguration">
     <configuration />
   </component>
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
-      <changelist id="3e32dd51-4cb8-4fc7-9c56-4cb0f9b7a722" name="Default Changelist" comment="" />
-      <created>1548622234752</created>
+      <changelist id="1c0859ce-ee43-4ca0-92e6-464a857bd51f" name="Default Changelist" comment="" />
+      <created>1545574761349</created>
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
-      <updated>1548622234752</updated>
+      <updated>1545574761349</updated>
     </task>
+    <task id="LOCAL-00001" summary="enable setting PID and some code cleanup">
+      <created>1548712408049</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1548712408049</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="TestHistory">
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_8 - 2019.01.26 at 18h 23m 38s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_8" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_9 - 2019.01.26 at 18h 24m 07s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_9 - 2019.01.26 at 18h 24m 25s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_9 - 2019.01.26 at 18h 24m 41s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_9 - 2019.01.26 at 18h 24m 47s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_9 - 2019.01.26 at 18h 25m 20s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_9 - 2019.01.26 at 18h 25m 47s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_9" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_8 - 2019.01.26 at 18h 25m 49s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_8" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_7 - 2019.01.26 at 18h 25m 51s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_7" configurationId="tests" />
+    </history-entry>
+    <history-entry file="Unittests_for_servo_handler_tests_TestServoHandler_test_convert_position_7 - 2019.01.26 at 18h 26m 04s.xml">
+      <configuration name="Unittests for servo_handler_tests.TestServoHandler.test_convert_position_7" configurationId="tests" />
+    </history-entry>
+  </component>
+  <component name="TodoView">
+    <todo-panel id="selected-file">
+      <is-autoscroll-to-source value="true" />
+    </todo-panel>
+    <todo-panel id="all">
+      <are-packages-shown value="true" />
+      <is-autoscroll-to-source value="true" />
+    </todo-panel>
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-8" width="2576" height="1416" extended-state="6" />
+    <editor active="true" />
     <layout>
-      <window_info id="Favorites" side_tool="true" />
-      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.24980299" />
+      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.115445234" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
-      <window_info anchor="bottom" id="Version Control" />
-      <window_info anchor="bottom" id="Python Console" />
-      <window_info anchor="bottom" id="Terminal" />
-      <window_info anchor="bottom" id="Event Log" side_tool="true" />
+      <window_info id="Favorites" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Message" order="0" />
-      <window_info anchor="bottom" id="Find" order="1" />
-      <window_info anchor="bottom" id="Run" order="2" />
-      <window_info anchor="bottom" id="Debug" order="3" weight="0.4" />
+      <window_info anchor="bottom" id="Find" order="1" weight="0.3299532" />
+      <window_info active="true" anchor="bottom" id="Run" order="2" visible="true" weight="0.33541343" />
+      <window_info anchor="bottom" id="Debug" order="3" weight="0.34789392" />
       <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
       <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
-      <window_info anchor="bottom" id="TODO" order="6" />
+      <window_info anchor="bottom" id="TODO" order="6" weight="0.3299532" />
+      <window_info anchor="bottom" id="Version Control" order="7" show_stripe_button="false" weight="0.3299532" />
+      <window_info anchor="bottom" id="Terminal" order="8" weight="0.3299532" />
+      <window_info anchor="bottom" id="Event Log" order="9" side_tool="true" />
+      <window_info anchor="bottom" id="Python Console" order="10" />
       <window_info anchor="right" id="Commander" internal_type="SLIDING" order="0" type="SLIDING" weight="0.4" />
       <window_info anchor="right" id="Ant Build" order="1" weight="0.25" />
       <window_info anchor="right" content_ui="combo" id="Hierarchy" order="2" weight="0.25" />
@@ -89,5 +466,382 @@
   </component>
   <component name="VcsContentAnnotationSettings">
     <option name="myLimit" value="2678400000" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="enable setting PID and some code cleanup" />
+    <option name="LAST_COMMIT_MESSAGE" value="enable setting PID and some code cleanup" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/servo_handling/main.py</url>
+          <line>49</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+  <component name="debuggerHistoryManager">
+    <expressions id="evaluateCodeFragment">
+      <expression>
+        <expression-string>np.interp(position, [self.max_position, self.min_position],
+                             [self.max_angle, self.min_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(position, [self.max_position, self.min_position],
+                             [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(2048, [self.max_position, self.min_position ],
+                                    [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(1536, [self.max_position, self.min_position ],
+                                    [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(0, [self.max_position, self.min_position ],
+                                    [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(position, [self.max_position, self.min_position ],
+                                    [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(position, [self.max_position self.min_position, ],
+                                    [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>np.interp(position, [self.min_position, self.max_position],
+                                    [self.min_angle, self.max_angle])</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>math.floor(np.interp(angle, [self.min_angle, self.max_angle],
+                                                    [self.min_position, self.max_position]))</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
+      </expression>
+    </expressions>
+    <expressions id="setValue">
+      <expression>
+        <expression-string>4</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>5</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+    </expressions>
+    <expressions id="evaluateExpression">
+      <expression>
+        <expression-string>servo.p</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>inverse_kinematics(start_pose, dynamixel_robot_config)</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>t[2,2]</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>arctan2(-sqrt(0.1), d)</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>arctan2(-sqrt(0), d)</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>sqrt(0)</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>sqrt(1 - d ** 2)</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>d</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+      <expression>
+        <expression-string>arctan2(yc, xc)</expression-string>
+        <language-id>Python</language-id>
+        <evaluation-mode>EXPRESSION</evaluation-mode>
+      </expression>
+    </expressions>
+  </component>
+  <component name="editorHistoryManager">
+    <entry file="file://$PROJECT_DIR$/dynamixel/setup.py" />
+    <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/group_bulk_write.py" />
+    <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/protocol2_packet_handler.py" />
+    <entry file="file://$PROJECT_DIR$/dynamixel/README.txt" />
+    <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/packet_handler.py" />
+    <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/port_handler.py" />
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/__init__.py">
+      <provider selected="true" editor-type-id="text-editor" />
+    </entry>
+    <entry file="file://$USER_HOME$/.PyCharmCE2018.2/system/python_stubs/652478984/builtins.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="411">
+          <caret line="765" column="23" selection-start-line="765" selection-start-column="4" selection-end-line="765" selection-end-column="23" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_controller/servo_utils.py" />
+    <entry file="file://$PROJECT_DIR$/servo_controller/getch.py" />
+    <entry file="file://$PROJECT_DIR$/servo_handling/__init__.py">
+      <provider selected="true" editor-type-id="text-editor" />
+    </entry>
+    <entry file="file://$PROJECT_DIR$/tests/__init__.py">
+      <provider selected="true" editor-type-id="text-editor" />
+    </entry>
+    <entry file="file://$PROJECT_DIR$/tests/servo_controller_tests/__init__.py">
+      <provider selected="true" editor-type-id="text-editor" />
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/site-packages/serial/serialutil.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="278">
+          <caret line="239" selection-start-line="239" selection-end-line="239" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/protocol1_packet_handler.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="277">
+          <caret line="36" selection-start-line="36" selection-end-line="36" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/robotis_def.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="1083">
+          <caret line="57" column="4" selection-start-line="57" selection-start-column="4" selection-end-line="57" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/site-packages/inputs.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="679">
+          <caret line="3677" column="23" selection-start-line="3677" selection-start-column="23" selection-end-line="3677" selection-end-column="23" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$APPLICATION_HOME_DIR$/helpers/pydev/pydevd.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="698">
+          <caret line="1663" selection-start-line="1663" selection-end-line="1663" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$APPLICATION_HOME_DIR$/helpers/pydev/_pydev_imps/_pydev_execfile.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="323">
+          <caret line="17" selection-start-line="17" selection-end-line="17" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/threading.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="16663">
+          <caret line="883" selection-start-line="883" selection-end-line="883" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/xbox_controller/XboxController.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="372">
+          <caret line="55" column="19" lean-forward="true" selection-start-line="55" selection-start-column="19" selection-end-line="55" selection-end-column="19" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_controller/test.py" />
+    <entry file="file://$PROJECT_DIR$/servo_handling/main.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="722">
+          <caret line="50" lean-forward="true" selection-start-line="50" selection-end-line="50" />
+          <folding>
+            <element signature="e#0#54#0" expanded="true" />
+            <marker date="1548607813114" expanded="true" signature="321:322" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$USER_HOME$/.PyCharmCE2018.2/system/python_stubs/652478984/numpy/core/umath.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="279">
+          <caret line="883" column="4" selection-start-line="883" selection-start-column="4" selection-end-line="883" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/site-packages/numpy/lib/function_base.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="305">
+          <caret line="1178" column="4" selection-start-line="1178" selection-start-column="4" selection-end-line="1178" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$APPLICATION_HOME_DIR$/helpers/pycharm/teamcity/diff_tools.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="278">
+          <caret line="31" selection-start-line="31" selection-end-line="31" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/unittest/case.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="14079">
+          <caret line="823" column="8" selection-start-line="823" selection-start-column="8" selection-end-line="823" selection-end-column="8" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/tests/servo_controller_tests/servo_handler_tests.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="911">
+          <caret line="79" column="67" selection-start-line="79" selection-start-column="67" selection-end-line="79" selection-end-column="67" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/xbox_controller/test.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="456">
+          <caret line="27" lean-forward="true" selection-start-line="27" selection-end-line="27" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/protocol2_packet_handler.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="410">
+          <caret line="241" selection-start-line="241" selection-end-line="241" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/port_handler.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="532">
+          <caret line="82" selection-start-line="82" selection-end-line="82" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/site-packages/serial/serialwin32.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="479">
+          <caret line="313" selection-start-line="313" selection-end-line="313" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/group_bulk_read.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="390">
+          <caret line="58" column="8" selection-start-line="58" selection-start-column="8" selection-end-line="58" selection-end-column="8" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_handling/servo.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="95">
+          <caret line="7" column="20" lean-forward="true" selection-start-line="7" selection-start-column="20" selection-end-line="7" selection-end-column="20" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_handling/dynamixel_x_config.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="171">
+          <caret line="9" column="6" selection-start-line="9" selection-end-line="9" selection-end-column="6" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/kinematics/kinematics.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="538">
+          <caret line="126" column="67" lean-forward="true" selection-start-line="126" selection-start-column="67" selection-end-line="126" selection-end-column="67" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/kinematics/kinematics_utils.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="114">
+          <caret line="7" column="8" selection-start-line="7" selection-start-column="8" selection-end-line="7" selection-end-column="8" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/group_bulk_write.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="565">
+          <caret line="61" selection-start-line="61" selection-end-line="61" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_handling/dynamixel_utils.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="211">
+          <caret line="23" column="24" selection-start-line="23" selection-start-column="24" selection-end-line="23" selection-end-column="24" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_handling/servo_handler.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="547">
+          <caret line="68" selection-start-line="68" selection-end-line="68" />
+          <folding>
+            <element signature="e#33#66#0" expanded="true" />
+            <marker date="1548711847378" expanded="true" signature="286:287" ph="..." />
+            <marker date="1548711847378" expanded="true" signature="286:1360" ph="..." />
+            <marker date="1548711847378" expanded="true" signature="1360:1366" ph="..." />
+            <marker date="1548711847378" expanded="true" signature="1860:1862" ph="..." />
+            <marker date="1548711847378" expanded="true" signature="3517:3523" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_handling/servo_controller.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="477">
+          <caret line="48" lean-forward="true" selection-start-line="48" selection-end-line="48" />
+          <folding>
+            <marker date="1548715118337" expanded="true" signature="279:280" ph="..." />
+            <marker date="1548715118337" expanded="true" signature="2232:2325" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/main.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-1742">
+          <caret line="23" column="14" selection-start-line="23" selection-start-column="14" selection-end-line="23" selection-end-column="14" />
+          <folding>
+            <element signature="e#0#31#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
   </component>
 </project>
