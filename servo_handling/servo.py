@@ -9,7 +9,10 @@ class Servo:
     target_position = 0
     current_position = -1  # set by the servo handler
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0):
+    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0, p=1600, i=40, d=20):
+        self.p = p
+        self.i = i
+        self.d = d
         self.max_angle = max_angle
         self.min_angle = min_angle
         self.min_position = min_position

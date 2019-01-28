@@ -117,14 +117,14 @@ def forward_orientation_kinematics(angles):
     q6 = angles[6]
 
     sx = cos(q6) * (cos(q4) * sin(q1) - cos(q1) * cos(q2 + q3) * sin(q4)) - (cos(q5) * sin(q1) * sin(q4) + cos(q1) * (
-                cos(q2 + q3) * cos(q4) * cos(q5) - sin(q2 + q3) * sin(q5))) * sin(q6);
+                cos(q2 + q3) * cos(q4) * cos(q5) - sin(q2 + q3) * sin(q5))) * sin(q6)
     sy = cos(q1) * (-cos(q4) * cos(q6) + cos(q5) * sin(q4) * sin(q6)) - sin(q1) * (
                 -sin(q2 + q3) * sin(q5) * sin(q6) + cos(q2 + q3) * (cos(q6) * sin(q4) + cos(q4) * cos(q5) * sin(q6)))
     sz = -cos(q6) * sin(q2 + q3) * sin(q4) - (cos(q4) * cos(q5) * sin(q2 + q3) + cos(q2 + q3) * sin(q5)) * sin(q6)
 
     ax = sin(q1) * sin(q4) * sin(q5) + cos(q1) * (cos(q5) * sin(q2 + q3) + cos(q2 + q3) * cos(q4) * sin(q5))
     ay = cos(q5) * sin(q1) * sin(q2 + q3) + (cos(q2 + q3) * cos(q4) * sin(q1) - cos(q1) * sin(q4)) * sin(q5)
-    az = -cos(q2 + q3) * cos(q5) + cos(q4) * sin(q2 + q3) * sin(q5);
+    az = -cos(q2 + q3) * cos(q5) + cos(q4) * sin(q2 + q3) * sin(q5)
 
     s = np.array([sx, sy, sz])
     a = np.array([ax, ay, az])

@@ -51,6 +51,10 @@ class ServoController:
         self.base_servo_handler.set_profile_velocity_and_acceleration()
         self.wrist_servo_handler.set_profile_velocity_and_acceleration()
 
+    def set_pid(self):
+        self.base_servo_handler.set_pid()
+        # self.wrist_servo_handler.set_pid()
+
     def set_servo_torque(self, servo_id, enable):
         self.wrist_servo_handler.set_servo_torque(servo_id, enable)
 

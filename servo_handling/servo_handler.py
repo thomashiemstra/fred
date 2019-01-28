@@ -62,6 +62,33 @@ class ServoHandler(object):
 
         self.__write_and_clear()
 
+    def set_pid(self):
+        """set the velocity profile of the servos, this get's wiped after a reboot"""
+        self.group_bulk_write.clearParam()
+
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+            self.__add_to_write(self.config.ADDR_P,
+                                self.config.LEN_PID, servo_id, servo.p)
+
+        self.__write_and_clear()
+
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+
+            self.__add_to_write(self.config.ADDR_I,
+                                self.config.LEN_PID, servo_id, servo.i)
+
+        self.__write_and_clear()
+
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+
+            self.__add_to_write(self.config.ADDR_D,
+                                self.config.LEN_PID, servo_id, servo.d)
+
+        self.__write_and_clear()
+
     def read_current_pos(self):
         """update the current_position parameter of all the servo objects"""
         self.group_bulk_read.clearParam()

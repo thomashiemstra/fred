@@ -10,12 +10,19 @@ class Pose:
         self.y = y
         self.z = z
         self.flip = flip
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
         self.euler_matrix(alpha, beta, gamma)
 
     def euler_matrix(self, alpha, beta, gamma):
         """alpha is a turn around the world z-axis"""
         """beta is a turn around the world y-axis"""
         """gamma is a turn around the world x-axis"""
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+
         ca = cos(alpha)
         cb = cos(beta)
         cy = cos(gamma)
@@ -33,6 +40,11 @@ class Pose:
         self.orientation[0, 2] = ca * sb * sy - sa * cy
         self.orientation[1, 2] = sa * sb * sy + ca * cy
         self.orientation[2, 2] = cb * sy
+
+    def __copy__(self):
+        res = Pose(self.x, self.y, self.z, self.flip, self.alpha, self.beta, self.gamma)
+        res.orientation = self.orientation.copy()
+        return res
 
 
 class RobotConfig:

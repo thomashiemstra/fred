@@ -18,10 +18,16 @@ def set_torque(packet_handler, port_handler, config, servo_id, enable):
 
 def add_group_write(group_bulk_write, servo_id, address, address_len, value):
     """Add the byte array to the group bulk write for a given servo based on the position"""
-    byte_array = [dynamixel.DXL_LOBYTE(dynamixel.DXL_LOWORD(value)),
-                  dynamixel.DXL_HIBYTE(dynamixel.DXL_LOWORD(value)),
-                  dynamixel.DXL_LOBYTE(dynamixel.DXL_HIWORD(value)),
-                  dynamixel.DXL_HIBYTE(dynamixel.DXL_HIWORD(value))]
+    if address_len == 4:
+        byte_array = [dynamixel.DXL_LOBYTE(dynamixel.DXL_LOWORD(value)),
+                      dynamixel.DXL_HIBYTE(dynamixel.DXL_LOWORD(value)),
+                      dynamixel.DXL_LOBYTE(dynamixel.DXL_HIWORD(value)),
+                      dynamixel.DXL_HIBYTE(dynamixel.DXL_HIWORD(value))]
+    elif address_len == 2:
+        byte_array = [dynamixel.DXL_LOBYTE(dynamixel.DXL_LOWORD(value)),
+                      dynamixel.DXL_HIBYTE(dynamixel.DXL_LOWORD(value))]
+    else:
+        raise RuntimeError("cannot deal with this length %d" % address_len)
 
     res = group_bulk_write.addParam(servo_id, address, address_len, byte_array)
     if not res:
