@@ -49,7 +49,7 @@ class Pose:
 
 class RobotConfig:
 
-    def __init__(self, d1=9.1, a2=15.8, d4=21.9, d6=2):
+    def __init__(self, d1=9.1, a2=15.8, d4=22.0, d6=2.0):
         self.initial_d1 = self.d1 = d1  # ground to joint 2
         self.initial_a2 = self.a2 = a2  # joint 2 to join 3
         self.initial_d4 = self.d4 = d4  # joint 3 to wrist centre

@@ -1,6 +1,7 @@
+# from __future__ import division
 import numpy as np
 from numpy import sqrt
-from numpy import arctan2, sin, cos, pi
+from numpy import arctan2, sin, cos, pi, power
 
 
 def inverse_kinematics(pose, robot_config):
@@ -20,15 +21,15 @@ def inverse_kinematics(pose, robot_config):
 
     angles[1] = arctan2(yc, xc)
 
-    d = (xc ** 2 + yc ** 2 + (zc - d1) ** 2 - a2 ** 2 - d4 ** 2) / (2 * a2 * d4)
-    if np.isclose(d, 1):
-        d = d - 0.00001
+    d = (power(xc, 2) + power(yc, 2) + power((zc - d1), 2) - power(a2, 2) - power(d4, 2)) / (2.0 * a2 * d4)
+    if d >= 1 or d <= -1:
+        d = 1
     angles[3] = arctan2(-sqrt(1 - d ** 2), d)
 
     k1 = a2 + d4 * cos(angles[3])
     k2 = d4 * sin(angles[3])
-    angles[2] = arctan2((zc - d1), sqrt(xc ** 2 + yc ** 2)) - arctan2(k2, k1)
-    1 - d ** 2
+    angles[2] = arctan2((zc - d1), sqrt(power(xc, 2) + power(yc, 2))) - arctan2(k2, k1)
+
     angles[3] += pi / 2
 
     q1 = angles[1]

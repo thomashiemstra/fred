@@ -8,7 +8,6 @@ from time import sleep
 import numpy as np
 from numpy import pi
 from math import ceil
-from copy import copy
 
 
 def line(start_pose, stop_pose, time, robot_config, servo_controller):
@@ -21,17 +20,17 @@ def line(start_pose, stop_pose, time, robot_config, servo_controller):
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
 
-    steps = 10
+    steps = 20
     total_steps = ceil(time * steps)  # 50 steps per second
     dt = 1.0 / steps
 
     current_angles = inverse_kinematics(start_pose, robot_config)
+    servo_controller.move_servos(current_angles)
 
     for i in range(total_steps + 1):
         t = i / total_steps
 
         curve_value = (6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3))
-        print(curve_value)
         x = start_pose.x + dx * curve_value
         y = start_pose.y + dy * curve_value
         z = start_pose.z + dz * curve_value
@@ -43,11 +42,17 @@ def line(start_pose, stop_pose, time, robot_config, servo_controller):
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
         current_angles = inverse_kinematics(temp_pose, robot_config)
+        # angles = dynamixel_servo_controller.get_angles()
 
         servo_controller.move_servos(current_angles)
         sleep(dt)
 
-    angles = dynamixel_servo_controller.get_angles()
+        # diff_2 = abs(current_angles[2] - angles[2])
+        # diff_3 = abs(current_angles[3] - angles[3])
+        # print(angles[2], current_angles[2])
+        # print(diff_2*57)
+
+    angles = servo_controller.get_angles()
     # for i in range(1, 7):
     #     print("angle{} difference = {}pi".format(i, round((current_angles[i] -angles[i])/pi, 4)))
 
@@ -103,16 +108,17 @@ def read_stuff():
 
 
 def ik_test():
-    dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=21.9, d6=2)
-    pose = Pose(0, 37.7, 9.1, flip=False, gamma=pi/2, beta=-pi/2)
+    dynamixel_robot_config = RobotConfig()
+    pose = Pose(0, 25, 9.1, flip=False)
     print(pose.orientation)
     angles = inverse_kinematics(pose, dynamixel_robot_config)
+    p1, p2, p3, p4, p6 = forward_position_kinematics(angles, dynamixel_robot_config)
     for i in range(1, 7):
         print("angle{} = {}pi".format(i, round(angles[i] / pi, 2)))
 
 
 if __name__ == '__main__':
-    dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=21.9, d6=2)
+    dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=2.0)
     dynamixel_servo_controller = ServoController("COM5")
     dynamixel_servo_controller.enable_servos()
     dynamixel_servo_controller.set_velocity_profile()
@@ -125,7 +131,7 @@ if __name__ == '__main__':
     start_pose = Pose(p6[0], p6[1], p6[2])
     start_pose.orientation = rot_matrix.copy()
 
-    lift_pose = Pose(start_pose.x, start_pose.y, start_pose.z + 15)
+    lift_pose = Pose(start_pose.x, start_pose.y, start_pose.z + 5)
 
     pose_1 = Pose(-20, 20, 15)
     pose_2 = Pose(20, 20, 15)
@@ -143,7 +149,7 @@ if __name__ == '__main__':
     for position in positions:
         pose, time = position
         current_pose = line(current_pose, pose, time, dynamixel_robot_config, dynamixel_servo_controller)
-        input("Press Enter to continue...")
+        # input("Press Enter to continue...")
 
     current_pose = point_to_point(current_pose, lift_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
     current_pose = point_to_point(current_pose, start_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)

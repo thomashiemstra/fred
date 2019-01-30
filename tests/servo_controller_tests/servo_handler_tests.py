@@ -28,8 +28,8 @@ class TestServoHandler(unittest.TestCase):
         self.assertEqual(expected_position, self.servo_handler.get_servo(2).target_position)
 
     def test_convert_angle_3(self):
-        expected_position = 2048
-        self.servo_handler.set_angle(2, pi/2)
+        expected_position = 1280
+        self.servo_handler.set_angle(2, pi/8)
         self.assertEqual(expected_position, self.servo_handler.get_servo(2).target_position)
 
     def test_convert_angle_4(self):
