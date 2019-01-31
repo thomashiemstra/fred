@@ -42,19 +42,22 @@ def line(start_pose, stop_pose, time, robot_config, servo_controller):
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
         current_angles = inverse_kinematics(temp_pose, robot_config)
-        # angles = dynamixel_servo_controller.get_angles()
 
         servo_controller.move_servos(current_angles)
         sleep(dt)
 
-        # diff_2 = abs(current_angles[2] - angles[2])
-        # diff_3 = abs(current_angles[3] - angles[3])
-        # print(angles[2], current_angles[2])
-        # print(diff_2*57)
+    sleep(1)
+    print("---------------------------------")
+    measured_angles = servo_controller.get_angles()
+    p1, p2, p3, p4, p6 = forward_position_kinematics(measured_angles, dynamixel_robot_config)
+    print(p6)
 
-    angles = servo_controller.get_angles()
-    # for i in range(1, 7):
-    #     print("angle{} difference = {}pi".format(i, round((current_angles[i] -angles[i])/pi, 4)))
+    p1, p2, p3, p4, p6 = forward_position_kinematics(current_angles, dynamixel_robot_config)
+    print(p6)
+
+    for i in range(1, 4):
+        diff = round((current_angles[i] - measured_angles[i])/pi, 4)
+        print("angle{} current_angle={} measured_angle={}  difference = {}degrees".format(i, current_angles[i], measured_angles[i], diff*57))
 
     return stop_pose
 
@@ -140,11 +143,10 @@ if __name__ == '__main__':
     pose_5 = Pose(0, 15, 5)
     pose_6 = Pose(0, 35, 5)
 
-    # positions = [(pose_1, 2), (pose_2, 3), (pose_3, 2), (pose_4, 2), (pose_5, 3), (pose_6, 2), (pose_3, 3), (pose_1, 3)]
-
-    positions = [(pose_5, 2), (pose_6, 3), (pose_5, 3)]
+    positions = [(pose_6, 3), (pose_5, 3)]
 
     current_pose = point_to_point(start_pose, lift_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
+    current_pose = point_to_point(current_pose, pose_5, 2, dynamixel_robot_config, dynamixel_servo_controller)
 
     for position in positions:
         pose, time = position
