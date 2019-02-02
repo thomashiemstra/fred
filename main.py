@@ -8,6 +8,7 @@ from time import sleep
 import numpy as np
 from numpy import pi
 from math import ceil
+import matplotlib.pyplot as plt
 
 
 def line(start_pose, stop_pose, time, robot_config, servo_controller):
@@ -20,44 +21,44 @@ def line(start_pose, stop_pose, time, robot_config, servo_controller):
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
 
-    steps = 20
+    steps = 10
     total_steps = ceil(time * steps)  # 50 steps per second
     dt = 1.0 / steps
 
-    current_angles = inverse_kinematics(start_pose, robot_config)
-    servo_controller.move_servos(current_angles)
+    y_plot = []
+    z_plot = []
 
-    for i in range(total_steps + 1):
+    for i in range(total_steps):
         t = i / total_steps
 
         curve_value = (6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3))
         x = start_pose.x + dx * curve_value
         y = start_pose.y + dy * curve_value
         z = start_pose.z + dz * curve_value
+        z_adjust = y*0.008
 
         alpha = start_pose.alpha + d_alpha * curve_value
         beta = start_pose.beta + d_beta * curve_value
         gamma = start_pose.gamma + d_gamma * curve_value
 
-        temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
+        temp_pose = Pose(x, y, z + z_adjust, flip, alpha, beta, gamma)
 
         current_angles = inverse_kinematics(temp_pose, robot_config)
 
         servo_controller.move_servos(current_angles)
         sleep(dt)
+        measured_angles = servo_controller.get_angles()
+        p1, p2, p3, p4, p6 = forward_position_kinematics(measured_angles, dynamixel_robot_config)
+        print("y ={}, z = {}".format(p6[1], p6[2]))
 
-    sleep(1)
-    print("---------------------------------")
-    measured_angles = servo_controller.get_angles()
-    p1, p2, p3, p4, p6 = forward_position_kinematics(measured_angles, dynamixel_robot_config)
-    print(p6)
+        y_plot.append(p6[1])
+        z_plot.append(p6[2])
 
-    p1, p2, p3, p4, p6 = forward_position_kinematics(current_angles, dynamixel_robot_config)
-    print(p6)
+    current_angles = inverse_kinematics(stop_pose, robot_config)
+    servo_controller.move_servos(current_angles)
 
-    for i in range(1, 4):
-        diff = round((current_angles[i] - measured_angles[i])/pi, 4)
-        print("angle{} current_angle={} measured_angle={}  difference = {}degrees".format(i, current_angles[i], measured_angles[i], diff*57))
+    plt.plot(y_plot, z_plot)
+    plt.show()
 
     return stop_pose
 
