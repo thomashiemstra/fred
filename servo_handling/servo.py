@@ -1,6 +1,5 @@
 import numpy as np
 import logging
-import math
 
 
 class Servo:
@@ -31,6 +30,8 @@ class Servo:
                                                     [self.min_position, self.max_position])))
 
     def get_angle_from_position(self, position):
+        if position is None:
+            return 0
         if position > self.max_position:
             logging.debug("input position is larger than max position")
         if position < self.min_position:
