@@ -3,12 +3,14 @@ from numpy import sin, cos
 
 
 class Pose:
+
     orientation = np.eye(3, dtype=np.float64)
 
-    def __init__(self, x, y, z, flip=False, alpha=0, beta=0, gamma=0):
+    def __init__(self, x, y, z, time=8, flip=False, alpha=0, beta=0, gamma=0):
         self.x = x
         self.y = y
         self.z = z
+        self.time = time
         self.flip = flip
         self.alpha = alpha
         self.beta = beta
@@ -42,9 +44,13 @@ class Pose:
         self.orientation[2, 2] = cb * sy
 
     def __copy__(self):
-        res = Pose(self.x, self.y, self.z, self.flip, self.alpha, self.beta, self.gamma)
+        res = Pose(self.x, self.y, self.z, self.time, self.flip, self.alpha, self.beta, self.gamma)
         res.orientation = self.orientation.copy()
         return res
+
+    def __str__(self):
+        return 'POSE: x={} y={} z={}, a={} b={} g={} ,time={} filp={}'\
+            .format(self.x, self.y, self.z, self.alpha, self.beta, self.gamma, self.time, self.flip)
 
 
 class RobotConfig:
