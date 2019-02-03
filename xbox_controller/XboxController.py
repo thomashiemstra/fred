@@ -54,8 +54,7 @@ class XboxController(threading.Thread):
         LTHUMBY = 1
         RTHUMBX = 2
         RTHUMBY = 3
-        RTRIGGER = 4
-        LTRIGGER = 5
+        LRTRIGGER = 4
         A = 6
         B = 7
         X = 8
@@ -73,10 +72,9 @@ class XboxController(threading.Thread):
     class PyGameAxis():
         LTHUMBX = 0
         LTHUMBY = 1
-        RTHUMBX = 2
+        RTHUMBX = 4
         RTHUMBY = 3
-        RTRIGGER = 4
-        LTRIGGER = 5
+        LRTRIGGER = 2
 
     # pygame constants for the buttons of the xbox controller
     class PyGameButtons():
@@ -99,8 +97,7 @@ class XboxController(threading.Thread):
                       PyGameAxis.RTHUMBY: XboxControls.RTHUMBY}
 
     # map between pygame axis (trigger) ids and xbox control ids
-    TRIGGERCONTROLMAP = {PyGameAxis.RTRIGGER: XboxControls.RTRIGGER,
-                         PyGameAxis.LTRIGGER: XboxControls.LTRIGGER}
+    TRIGGERCONTROLMAP = {PyGameAxis.LRTRIGGER: XboxControls.LRTRIGGER}
 
     # map between pygame buttons ids and xbox contorl ids
     BUTTONCONTROLMAP = {PyGameButtons.A: XboxControls.A,
@@ -141,8 +138,7 @@ class XboxController(threading.Thread):
                               self.XboxControls.LTHUMBY: 0,
                               self.XboxControls.RTHUMBX: 0,
                               self.XboxControls.RTHUMBY: 0,
-                              self.XboxControls.RTRIGGER: 0,
-                              self.XboxControls.LTRIGGER: 0,
+                              self.XboxControls.LRTRIGGER: 0,
                               self.XboxControls.A: 0,
                               self.XboxControls.B: 0,
                               self.XboxControls.X: 0,
@@ -329,8 +325,6 @@ class XboxController(threading.Thread):
 
     # turns the trigger value into something sensible and scales it
     def _sortOutTriggerValue(self, value):
-        # trigger goes -1 to 1 (-1 is off, 1 is full on, half is 0) - I want this to be 0 - 1
-        value = max(0, (value + 1) / 2)
         # scale the value
         value = value * self.scale
         return value
