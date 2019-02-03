@@ -1,4 +1,7 @@
 from __future__ import division
+
+from pyglet.resource import file
+
 from kinematics.kinematics_utils import Pose, RobotConfig
 from kinematics.kinematics import inverse_kinematics
 from kinematics.kinematics import forward_position_kinematics
@@ -9,9 +12,14 @@ import numpy as np
 from numpy import pi
 from math import ceil
 import matplotlib.pyplot as plt
+from yaml import load, dump
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
 
 
-def line(start_pose, stop_pose, time, robot_config, servo_controller):
+def line(start_pose, stop_pose, robot_config, servo_controller):
     """go from start to stop pose in time amount of seconds"""
     flip = start_pose.flip if start_pose.flip == stop_pose.flip else stop_pose.flip
     dx = stop_pose.x - start_pose.x
@@ -20,8 +28,9 @@ def line(start_pose, stop_pose, time, robot_config, servo_controller):
     d_alpha = stop_pose.alpha - start_pose.alpha
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
+    time = stop_pose.time
 
-    steps = 10
+    steps = 5
     total_steps = ceil(time * steps)  # 50 steps per second
     dt = 1.0 / steps
 
@@ -35,30 +44,31 @@ def line(start_pose, stop_pose, time, robot_config, servo_controller):
         x = start_pose.x + dx * curve_value
         y = start_pose.y + dy * curve_value
         z = start_pose.z + dz * curve_value
-        z_adjust = y*0.008
+        r = np.sqrt(np.power(x, 2) + np.power(y, 2))
 
         alpha = start_pose.alpha + d_alpha * curve_value
         beta = start_pose.beta + d_beta * curve_value
         gamma = start_pose.gamma + d_gamma * curve_value
 
+        z_adjust = r * 0.008 if i > 3 else 0
         temp_pose = Pose(x, y, z + z_adjust, flip, alpha, beta, gamma)
 
         current_angles = inverse_kinematics(temp_pose, robot_config)
-
         servo_controller.move_servos(current_angles)
-        sleep(dt)
-        measured_angles = servo_controller.get_angles()
-        p1, p2, p3, p4, p6 = forward_position_kinematics(measured_angles, dynamixel_robot_config)
-        print("y ={}, z = {}".format(p6[1], p6[2]))
 
-        y_plot.append(p6[1])
-        z_plot.append(p6[2])
+        sleep(dt)
+        # measured_angles = servo_controller.get_angles()
+        # p1, p2, p3, p4, p6 = forward_position_kinematics(measured_angles, dynamixel_robot_config)
+        # print("y ={}, z = {}".format(p6[1], p6[2]))
+        #
+        # y_plot.append(p6[1])
+        # z_plot.append(p6[2])
 
     current_angles = inverse_kinematics(stop_pose, robot_config)
     servo_controller.move_servos(current_angles)
 
-    plt.plot(y_plot, z_plot)
-    plt.show()
+    # plt.plot(y_plot, z_plot)
+    # plt.show()
 
     return stop_pose
 
@@ -135,26 +145,32 @@ if __name__ == '__main__':
     start_pose = Pose(p6[0], p6[1], p6[2])
     start_pose.orientation = rot_matrix.copy()
 
-    lift_pose = Pose(start_pose.x, start_pose.y, start_pose.z + 5)
+    lift_pose = Pose(start_pose.x, start_pose.y, start_pose.z + 10)
 
-    pose_1 = Pose(-20, 20, 15)
-    pose_2 = Pose(20, 20, 15)
-    pose_3 = Pose(0, 20, 15)
-    pose_4 = Pose(0, 20, 30)
-    pose_5 = Pose(0, 15, 5)
-    pose_6 = Pose(0, 35, 5)
+    pose_1 = Pose(-20, 20, 15, 2)
+    pose_2 = Pose(20, 20, 15, 2)
+    pose_3 = Pose(0, 20, 15, 2)
+    pose_4 = Pose(0, 20, 30, 2)
+    pose_5 = Pose(0, 15, 5, 2)
+    pose_6 = Pose(15, 30, 5, 2)
 
-    positions = [(pose_6, 3), (pose_5, 3)]
+    positions = [pose_6, pose_5]
 
-    current_pose = point_to_point(start_pose, lift_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
+    # f = open('test.yaml', 'w')
+    # stream = file('test.yaml', 'w')
+    # dump(positions, stream)
+
+    # f = open('test.yaml', 'r')
+    # read_pos = load(f)
+
+    current_pose = point_to_point(start_pose, lift_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
     current_pose = point_to_point(current_pose, pose_5, 2, dynamixel_robot_config, dynamixel_servo_controller)
 
-    for position in positions:
-        pose, time = position
-        current_pose = line(current_pose, pose, time, dynamixel_robot_config, dynamixel_servo_controller)
+    for pose in positions:
+        current_pose = line(current_pose, pose, dynamixel_robot_config, dynamixel_servo_controller)
         # input("Press Enter to continue...")
 
-    current_pose = point_to_point(current_pose, lift_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
+    current_pose = point_to_point(current_pose, lift_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
     current_pose = point_to_point(current_pose, start_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
 
     dynamixel_servo_controller.disable_servos()
