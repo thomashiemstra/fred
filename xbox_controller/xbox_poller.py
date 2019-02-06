@@ -1,6 +1,7 @@
 from xbox_controller.XboxController import XboxController
 import threading
 import time
+import numpy as np
 
 
 class XboxPoller:
@@ -58,6 +59,8 @@ class XboxPoller:
             self.r_thumb_y = y_value
 
     def __left_right_trigger(self, lr_trigger_value):
+        if np.abs(lr_trigger_value) < 0.1:
+            lr_trigger_value = 0
         with self.lock:
             self.lr_trigger = lr_trigger_value
 
