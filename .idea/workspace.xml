@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="BookmarkManager">
+    <bookmark url="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" line="23" />
+  </component>
   <component name="ChangeListManager">
     <list default="true" id="1c0859ce-ee43-4ca0-92e6-464a857bd51f" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/templates/main_page.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/xbox_controller/xbox_utill.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/dictionaries/thomas.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dictionaries/thomas.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utils/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utils/threading_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/kinematics/kinematics_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/kinematics/kinematics_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/servo_handling/servo_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/servo_handling/servo_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/xbox_controll.py" beforeDir="false" afterPath="$PROJECT_DIR$/xbox_controll.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/xbox_controller/xboxutiil.py" beforeDir="false" afterPath="$PROJECT_DIR$/server.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/server.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" beforeDir="false" afterPath="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/xbox_controller/xbox_utill.py" beforeDir="false" afterPath="$PROJECT_DIR$/xbox_controller/xbox_utill.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
@@ -91,14 +92,14 @@
         <counts>
           <entry key="dummy" value="44" />
           <entry key="gitignore" value="21" />
-          <entry key="py" value="6901" />
-          <entry key="txt" value="511" />
+          <entry key="py" value="7499" />
+          <entry key="txt" value="518" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.types.edit">
         <counts>
-          <entry key="PLAIN_TEXT" value="576" />
-          <entry key="Python" value="6901" />
+          <entry key="PLAIN_TEXT" value="583" />
+          <entry key="Python" value="7499" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.lifecycle.project">
@@ -115,7 +116,7 @@
         <counts>
           <entry key="gitignore" value="3" />
           <entry key="html" value="1" />
-          <entry key="py" value="49" />
+          <entry key="py" value="51" />
           <entry key="yaml" value="1" />
         </counts>
       </usages-collector>
@@ -123,7 +124,7 @@
         <counts>
           <entry key="HTML" value="1" />
           <entry key="PLAIN_TEXT" value="3" />
-          <entry key="Python" value="49" />
+          <entry key="Python" value="51" />
           <entry key="YAML" value="1" />
         </counts>
       </usages-collector>
@@ -143,8 +144,11 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_utill.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="-1">
-              <caret column="31" lean-forward="true" selection-start-column="31" selection-end-column="31" />
+            <state relative-caret-position="133">
+              <caret line="7" column="59" selection-start-line="7" selection-start-column="59" selection-end-line="7" selection-end-column="59" />
+              <folding>
+                <element signature="e#0#31#0" expanded="true" />
+              </folding>
             </state>
           </provider>
         </entry>
@@ -152,12 +156,21 @@
       <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="640">
-              <caret line="49" selection-start-line="49" selection-end-line="49" />
+            <state relative-caret-position="608">
+              <caret line="74" column="46" selection-start-line="74" selection-start-column="46" selection-end-line="74" selection-end-column="46" />
               <folding>
                 <element signature="e#0#31#0" expanded="true" />
-                <marker date="1549729526771" expanded="true" signature="1307:1312" ph="..." />
+                <marker date="1549749011646" expanded="true" signature="983:988" ph="..." />
               </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/utils/threading_utils.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="133">
+              <caret line="7" column="18" selection-start-line="7" selection-start-column="8" selection-end-line="7" selection-end-column="18" />
             </state>
           </provider>
         </entry>
@@ -165,10 +178,11 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/server.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="209">
-              <caret line="11" lean-forward="true" selection-start-line="11" selection-end-line="11" />
+            <state relative-caret-position="285">
+              <caret line="15" selection-start-line="15" selection-end-line="16" selection-end-column="15" />
               <folding>
                 <element signature="e#0#40#0" expanded="true" />
+                <marker date="1549747160839" expanded="true" signature="360:363" ph="..." />
               </folding>
             </state>
           </provider>
@@ -235,10 +249,11 @@
         <option value="$PROJECT_DIR$/movement_utils.py" />
         <option value="$PROJECT_DIR$/servo_handling/servo.py" />
         <option value="$PROJECT_DIR$/xbox_controll.py" />
-        <option value="$PROJECT_DIR$/xbox_controller/xbox_utill.py" />
         <option value="$PROJECT_DIR$/servo_handling/servo_controller.py" />
         <option value="$PROJECT_DIR$/kinematics/kinematics_utils.py" />
+        <option value="$PROJECT_DIR$/utils/threading_utils.py" />
         <option value="$PROJECT_DIR$/server.py" />
+        <option value="$PROJECT_DIR$/xbox_controller/xbox_utill.py" />
         <option value="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" />
       </list>
     </option>
@@ -281,12 +296,7 @@
             <path>
               <item name="fred" type="b2602c69:ProjectViewProjectNode" />
               <item name="fred" type="462c0819:PsiDirectoryNode" />
-              <item name="kinematics" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="fred" type="b2602c69:ProjectViewProjectNode" />
-              <item name="fred" type="462c0819:PsiDirectoryNode" />
-              <item name="xbox_controller" type="462c0819:PsiDirectoryNode" />
+              <item name="utils" type="462c0819:PsiDirectoryNode" />
             </path>
           </expand>
           <select />
@@ -573,7 +583,14 @@
       <option name="project" value="LOCAL" />
       <updated>1549490076628</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="cleanup">
+      <created>1549730167493</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1549730167493</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TestHistory">
@@ -619,18 +636,19 @@
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-8" width="2576" height="1416" extended-state="6" />
+    <editor active="true" />
     <layout>
       <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.115445234" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Favorites" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Message" order="0" />
       <window_info anchor="bottom" id="Find" order="1" weight="0.3299532" />
-      <window_info anchor="bottom" id="Run" order="2" weight="0.27925116" />
+      <window_info active="true" anchor="bottom" id="Run" order="2" visible="true" weight="0.27925116" />
       <window_info anchor="bottom" id="Debug" order="3" weight="0.28783152" />
       <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
       <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
       <window_info anchor="bottom" id="TODO" order="6" weight="0.3299532" />
-      <window_info active="true" anchor="bottom" id="Version Control" order="7" visible="true" weight="0.3299532" />
+      <window_info anchor="bottom" id="Version Control" order="7" weight="0.3299532" />
       <window_info anchor="bottom" id="Terminal" order="8" weight="0.18018721" />
       <window_info anchor="bottom" id="Event Log" order="9" side_tool="true" />
       <window_info anchor="bottom" id="Python Console" order="10" />
@@ -657,7 +675,8 @@
     <MESSAGE value="seperate some functions to a util file" />
     <MESSAGE value="I can't help but messing with PID values" />
     <MESSAGE value="Xbox controller movment first steps, it moves!" />
-    <option name="LAST_COMMIT_MESSAGE" value="Xbox controller movment first steps, it moves!" />
+    <MESSAGE value="cleanup" />
+    <option name="LAST_COMMIT_MESSAGE" value="cleanup" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -795,8 +814,6 @@
     </expressions>
   </component>
   <component name="editorHistoryManager">
-    <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/protocol2_packet_handler.py" />
-    <entry file="file://$PROJECT_DIR$/dynamixel/README.txt" />
     <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/packet_handler.py" />
     <entry file="file://$PROJECT_DIR$/dynamixel_sdk_test/port_handler.py" />
     <entry file="jar://C:/Python3.6/Lib/site-packages/dynamixel_sdk-3.6.0-py3.6.egg!/dynamixel_sdk/__init__.py">
@@ -1058,13 +1075,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_utill.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="-1">
-          <caret column="31" lean-forward="true" selection-start-column="31" selection-end-column="31" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/kinematics/kinematics_utils.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="855">
@@ -1072,16 +1082,6 @@
           <folding>
             <element signature="e#0#18#0" expanded="true" />
             <marker date="1549729392932" expanded="true" signature="1311:1446" ph="..." />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/server.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="209">
-          <caret line="11" lean-forward="true" selection-start-line="11" selection-end-line="11" />
-          <folding>
-            <element signature="e#0#40#0" expanded="true" />
           </folding>
         </state>
       </provider>
@@ -1097,13 +1097,48 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py">
+    <entry file="file://$PROJECT_DIR$/server.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="640">
-          <caret line="49" selection-start-line="49" selection-end-line="49" />
+        <state relative-caret-position="285">
+          <caret line="15" selection-start-line="15" selection-end-line="16" selection-end-column="15" />
+          <folding>
+            <element signature="e#0#40#0" expanded="true" />
+            <marker date="1549747160839" expanded="true" signature="360:363" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/utils/threading_utils.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="133">
+          <caret line="7" column="18" selection-start-line="7" selection-start-column="8" selection-end-line="7" selection-end-column="18" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://C:/Python3.6/Lib/site-packages/flask/__init__.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="380">
+          <caret line="44" selection-start-line="44" selection-end-line="44" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_utill.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="133">
+          <caret line="7" column="59" selection-start-line="7" selection-start-column="59" selection-end-line="7" selection-end-column="59" />
           <folding>
             <element signature="e#0#31#0" expanded="true" />
-            <marker date="1549729526771" expanded="true" signature="1307:1312" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="608">
+          <caret line="74" column="46" selection-start-line="74" selection-start-column="46" selection-end-line="74" selection-end-column="46" />
+          <folding>
+            <element signature="e#0#31#0" expanded="true" />
+            <marker date="1549749011646" expanded="true" signature="983:988" ph="..." />
           </folding>
         </state>
       </provider>
