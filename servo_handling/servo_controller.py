@@ -1,14 +1,17 @@
+from kinematics.kinematics_utils import Pose
 from servo_handling import dynamixel_x_config as cfg
 from servo_handling.dynamixel_utils import setup_dynamixel_handlers
 from servo_handling.servo import Servo
 from servo_handling.servo_handler import ServoHandler
+from kinematics.kinematics import inverse_kinematics,forward_position_kinematics, forward_orientation_kinematics
 import numpy as np
 from numpy import pi
 
 
 class ServoController:
 
-    def __init__(self, port):
+    def __init__(self, port, robot_config):
+        self.robot_config = robot_config
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
         self.servo1 = Servo(1024, 3072, 0, pi, 50, 15)
@@ -27,6 +30,9 @@ class ServoController:
         self. wrist_servo_handler = ServoHandler(wrist_servos, cfg, port_handler,
                                                  packet_handler, group_bulk_write, group_bulk_read)
 
+        self.set_velocity_profile()
+        self.set_pid()
+
     def enable_servos(self):
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
@@ -34,6 +40,10 @@ class ServoController:
     def disable_servos(self):
         self.base_servo_handler.set_torque(enable=False)
         self.wrist_servo_handler.set_torque(enable=False)
+
+    def move_to_pose(self, pose):
+        angles = inverse_kinematics(pose, self.robot_config)
+        self.move_servos(angles)
 
     def move_servos(self, angles):
         self.base_servo_handler.set_angle(1, angles[1])
@@ -82,3 +92,13 @@ class ServoController:
 
         return angles
 
+    def get_current_pose(self):
+        angles = self.get_angles()
+        p1, p2, p3, p4, p6 = forward_position_kinematics(angles, self.robot_config)
+        rot_matrix = forward_orientation_kinematics(angles)
+        x, y, z = p6[0], p6[1], p6[2]
+
+        pose = Pose(x, y, z)
+        pose.orientation = rot_matrix.copy()
+
+        return pose

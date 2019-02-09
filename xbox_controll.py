@@ -44,7 +44,7 @@ if __name__ == '__main__':
     v_y = 0
     v_z = 0
 
-    steps_per_second = 5
+    steps_per_second = 15
     dt = 1.0 / steps_per_second
     maximum_speed = 20.0  # cm/sec
     ramp_up_time = 0.1  # 1 second to reach max speed

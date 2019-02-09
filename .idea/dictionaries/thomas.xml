@@ -2,6 +2,8 @@
   <dictionary name="thomas">
     <words>
       <w>dynamixel</w>
+      <w>poller</w>
+      <w>xbox</w>
     </words>
   </dictionary>
 </component>

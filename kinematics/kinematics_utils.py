@@ -43,6 +43,12 @@ class Pose:
         self.orientation[1, 2] = sa * sb * sy + ca * cy
         self.orientation[2, 2] = cb * sy
 
+    def reset_orientation(self):
+        self.alpha = 0
+        self.gamma = 0
+        self.beta = 0
+        self.euler_matrix(self.alpha, self.beta, self.gamma)
+
     def __copy__(self):
         res = Pose(self.x, self.y, self.z, self.time, self.flip, self.alpha, self.beta, self.gamma)
         res.orientation = self.orientation.copy()
