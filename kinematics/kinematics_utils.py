@@ -72,13 +72,14 @@ class RobotConfig:
 
     @property
     def d6(self):
-        return self.__d6
+        return self._d6
 
     @d6.setter
     def d6(self, length):
         if length < self.initial_d6:
-            self.__d6 = self.initial_d6
-        self.__d6 = length
+            self._d6 = self.initial_d6
+        else:
+            self._d6 = length
 
     def restore_initial_values(self):
         self.d1 = self.initial_d1
