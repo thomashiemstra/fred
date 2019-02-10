@@ -49,6 +49,9 @@ class Pose:
         self.beta = 0
         self.euler_matrix(self.alpha, self.beta, self.gamma)
 
+    def update_orientation(self):
+        self.euler_matrix(self.alpha, self.beta, self.gamma)
+
     def __copy__(self):
         res = Pose(self.x, self.y, self.z, self.time, self.flip, self.alpha, self.beta, self.gamma)
         res.orientation = self.orientation.copy()
@@ -67,8 +70,15 @@ class RobotConfig:
         self.initial_d4 = self.d4 = d4  # joint 3 to wrist centre
         self.initial_d6 = self.d6 = d6  # wrist centre to tip of the end effector
 
-    def set_end_effector_length(self, length):
-        self.d6 = length
+    @property
+    def d6(self):
+        return self.__d6
+
+    @d6.setter
+    def d6(self, length):
+        if length < 0:
+            raise ValueError("cannot set a negative end effector length")
+        self.__d6 = length
 
     def restore_initial_values(self):
         self.d1 = self.initial_d1
