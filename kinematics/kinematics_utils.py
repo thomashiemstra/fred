@@ -76,8 +76,8 @@ class RobotConfig:
 
     @d6.setter
     def d6(self, length):
-        if length < 0:
-            raise ValueError("cannot set a negative end effector length")
+        if length < self.initial_d6:
+            self.__d6 = self.initial_d6
         self.__d6 = length
 
     def restore_initial_values(self):
