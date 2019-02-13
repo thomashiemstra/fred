@@ -6,7 +6,7 @@ from kinematics.kinematics import forward_orientation_kinematics
 from kinematics.kinematics import forward_position_kinematics
 from kinematics.kinematics import inverse_kinematics
 from kinematics.kinematics_utils import Pose, RobotConfig
-from movement_utils import point_to_point
+from utils.movement_utils import pose_to_pose
 from servo_handling.servo_controller import ServoController
 from xbox_controller.xbox_poller import XboxPoller
 
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     pos_z += 5
     xbox_pose = Pose(pos_x, pos_y, pos_z)
 
-    current_pose = point_to_point(start_pose, xbox_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
+    current_pose = pose_to_pose(start_pose, xbox_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
 
     try:
         while True:

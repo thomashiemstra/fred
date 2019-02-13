@@ -7,7 +7,7 @@ from numpy import pi
 
 class PosePoller:
 
-    def __init__(self, maximum_speed=20.0, ramp_up_time=0.1, position_limit=30.0):
+    def __init__(self, maximum_speed=20.0, ramp_up_time=0.1, position_limit=35.0):
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
         self.steps_per_second = 15
