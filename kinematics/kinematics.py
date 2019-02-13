@@ -11,7 +11,7 @@ def inverse_kinematics(pose, robot_config):
     a2 = robot_config.a2
 
     x, y, z = pose.x, pose.y, pose.z
-    t = pose.orientation
+    t = pose.get_euler_matrix()
     flip = pose.flip
 
     xc = x - d6 * t[0, 2]
