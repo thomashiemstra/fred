@@ -4,6 +4,8 @@ from servo_handling.dynamixel_utils import setup_dynamixel_handlers
 from servo_handling.servo import Servo
 from servo_handling.servo_handler import ServoHandler
 from kinematics.kinematics import inverse_kinematics,forward_position_kinematics, forward_orientation_kinematics
+from utils.movement_utils import angles_to_angles
+
 import numpy as np
 from numpy import pi
 
@@ -92,13 +94,8 @@ class ServoController:
 
         return angles
 
-    def get_current_pose(self):
-        angles = self.get_angles()
-        p1, p2, p3, p4, p6 = forward_position_kinematics(angles, self.robot_config)
-        rot_matrix = forward_orientation_kinematics(angles)
-        x, y, z = p6[0], p6[1], p6[2]
+    def from_current_angles_to_pose(self, pose, time):
+        current_angles = self.get_angles()
+        target_angles = inverse_kinematics(pose, self.robot_config)
 
-        pose = Pose(x, y, z)
-        pose.orientation = rot_matrix.copy()
-
-        return pose
+        angles_to_angles(current_angles, target_angles, time, self)

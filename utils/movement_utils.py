@@ -5,15 +5,10 @@ import numpy as np
 from kinematics.kinematics import inverse_kinematics
 from kinematics.kinematics_utils import Pose
 
-try:
-    from yaml import CLoader as Loader, CDumper as Dumper
-except ImportError:
-    from yaml import Loader, Dumper
-
 
 def line(start_pose, stop_pose, robot_config, servo_controller):
     """go from start to stop pose in time amount of seconds"""
-    flip = start_pose.flip if start_pose.flip == stop_pose.flip else stop_pose.flip
+    flip = stop_pose.flip
     dx = stop_pose.x - start_pose.x
     dy = stop_pose.y - start_pose.y
     dz = stop_pose.z - start_pose.z
@@ -50,10 +45,17 @@ def line(start_pose, stop_pose, robot_config, servo_controller):
     return stop_pose
 
 
-def point_to_point(start_pose, stop_pose, time, robot_config, servo_controller):
+def pose_to_pose(start_pose, stop_pose, robot_config, servo_controller, time=None):
     start_angles = inverse_kinematics(start_pose, robot_config)
     stop_angles = inverse_kinematics(stop_pose, robot_config)
+    if time is None:
+        time = stop_pose.time
 
+    angles_to_angles(start_angles, stop_angles, time, servo_controller)
+    return stop_pose
+
+
+def angles_to_angles(start_angles, stop_angles, time, servo_controller):
     """go from start to stop angles in time amount of seconds"""
     delta_angle = np.zeros(7, dtype=np.float64)
 
@@ -63,17 +65,16 @@ def point_to_point(start_pose, stop_pose, time, robot_config, servo_controller):
     current_angles = start_angles.copy()
 
     steps = 10
-    total_steps = ceil(time*steps)  # 50 steps per second
-    dt = 1.0/steps
+    total_steps = ceil(time * steps)  # 50 steps per second
+    dt = 1.0 / steps
 
     for i in range(total_steps + 1):
         t = i / total_steps
 
+        curve_value = (6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3))
         for j in range(1, 7):
-            current_angles[j] = start_angles[j] + delta_angle[j]*(6*np.power(t, 5) - 15*np.power(t, 4) + 10*np.power(t, 3))
+            current_angles[j] = start_angles[j] + delta_angle[j] * curve_value
 
         sleep(dt)
-
         servo_controller.move_servos(current_angles)
 
-    return stop_pose
