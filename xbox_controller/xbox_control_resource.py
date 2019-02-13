@@ -1,19 +1,28 @@
 from __future__ import division
+
+import threading
+import time
+from copy import copy
+
+import numpy as np
+from flask import Blueprint
 from flask import jsonify
 
-import time
-
-from flask import Blueprint
-
+from kinematics.kinematics_utils import Pose
 from kinematics.kinematics_utils import RobotConfig
-from movement_utils import point_to_point
+from utils.movement_utils import pose_to_pose, line
 from servo_handling.servo_controller import ServoController
-from xbox_controller.xbox_utils import PosePoller
-from xbox_controller.xbox_poller import Buttons
-import threading
 from utils.threading_utils import CountDownLatch
-from copy import copy
-import numpy as np
+from xbox_controller.xbox_utils import PosePoller
+from time import sleep
+
+from ruamel.yaml import load, dump, round_trip_dump
+import yaml
+
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
 
 xbox_api = Blueprint('xbox_api', __name__)
 
@@ -48,15 +57,14 @@ def run_xbox_poller(countdown_latch):
     dynamixel_servo_controller = ServoController("COM5", dynamixel_robot_config)
     dynamixel_servo_controller.enable_servos()
 
-    start_pose = dynamixel_servo_controller.get_current_pose()
+    start_pose = Pose(-26, 11.0, 6)
+    current_pose = copy(start_pose)
 
-    lift_pose = copy(start_pose)
-    lift_pose.z += 5
-    lift_pose.reset_orientation()
+    dynamixel_servo_controller.from_current_angles_to_pose(current_pose, 2)
 
-    current_pose = copy(lift_pose)
-    point_to_point(start_pose, current_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
     countdown_latch.count_down()
+
+    recorded_positions = []
 
     global done
     while True:
@@ -69,9 +77,18 @@ def run_xbox_poller(countdown_latch):
         # Button handling
         buttons = pose_poller.get_buttons()
         if buttons.start:
-            current_pose = back_to_start(current_pose, lift_pose, dynamixel_robot_config, dynamixel_servo_controller)
+            with open('recorded_positions.yml', 'w') as outfile:
+                round_trip_dump(recorded_positions, outfile)
         elif buttons.b:
             current_pose = reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
+        elif buttons.a:
+            current_pose.flip = not current_pose.flip
+        elif buttons.y:
+            recorded_positions.append(current_pose)
+            print("added position!")
+        elif buttons.x:
+            playback_recorded_positions(current_pose, recorded_positions,
+                                        dynamixel_robot_config, dynamixel_servo_controller)
 
         if buttons.rb:
             back_it_up(current_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
@@ -83,8 +100,8 @@ def run_xbox_poller(countdown_latch):
     pose_poller.stop()
     reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
 
-    current_pose = point_to_point(current_pose, lift_pose, 3, dynamixel_robot_config, dynamixel_servo_controller)
-    point_to_point(current_pose, start_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
+    current_pose = pose_to_pose(current_pose, start_pose, dynamixel_robot_config, dynamixel_servo_controller, time=3)
+
     time.sleep(1)
     dynamixel_servo_controller.disable_servos()
 
@@ -92,27 +109,38 @@ def run_xbox_poller(countdown_latch):
 # this changes current_pose and d6 of robot_config as a side effect, refactor?
 # move to pose_poller?
 def back_it_up(current_pose, direction, dynamixel_robot_config, dynamixel_servo_controller):
+    if dynamixel_robot_config.d6 + direction < dynamixel_robot_config.initial_d6:
+        return
+
     world_gripper_vector = current_pose.orientation.dot(np.array([0, 0, 1]))
     old_pose = copy(current_pose)
-    current_pose.x += direction * world_gripper_vector[0]
-    current_pose.y += direction * world_gripper_vector[1]
-    current_pose.z += direction * world_gripper_vector[2]
-    point_to_point(old_pose, current_pose, 0.1, dynamixel_robot_config, dynamixel_servo_controller)
-    dynamixel_robot_config.d6 -= direction
-
-
-def back_to_start(current_pose, lift_pose, dynamixel_robot_config, dynamixel_servo_controller):
-    point_to_point(current_pose, lift_pose, 2, dynamixel_robot_config, dynamixel_servo_controller)
-    return copy(lift_pose)
+    current_pose.x -= direction * world_gripper_vector[0]
+    current_pose.y -= direction * world_gripper_vector[1]
+    current_pose.z -= direction * world_gripper_vector[2]
+    pose_to_pose(old_pose, current_pose, dynamixel_robot_config, dynamixel_servo_controller, time=0.5)
+    dynamixel_robot_config.d6 += direction
 
 
 def reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller):
+    current_pose.flip = False
     dynamixel_robot_config.restore_initial_values()
     new_orientation = copy(current_pose)
     new_orientation.reset_orientation()
-    point_to_point(current_pose, new_orientation, 1, dynamixel_robot_config, dynamixel_servo_controller)
+    pose_to_pose(current_pose, new_orientation, dynamixel_robot_config, dynamixel_servo_controller, time=1)
     return new_orientation
 
+
+def playback_recorded_positions(current_pose, recorded_poses, dynamixel_robot_config, dynamixel_servo_controller):
+    if len(recorded_poses) < 1:
+        return
+    current__playback_pose = pose_to_pose(current_pose, recorded_poses[0], dynamixel_robot_config,
+                                          dynamixel_servo_controller, time=2)
+
+    for pose in recorded_poses[1::]:
+        current__playback_pose = line(current__playback_pose, pose, dynamixel_robot_config, dynamixel_servo_controller)
+        sleep(1)
+
+    pose_to_pose(current__playback_pose, current_pose, dynamixel_robot_config, dynamixel_servo_controller, time=2)
 
 
 @xbox_api.route('/stop', methods=['POST'])
@@ -129,9 +157,3 @@ def stop():
 
     resp = jsonify(success=True)
     return resp
-
-
-if __name__ == '__main__':
-    latch = CountDownLatch(1)
-    run_xbox_poller(latch)
-
