@@ -157,3 +157,9 @@ def stop():
 
     resp = jsonify(success=True)
     return resp
+
+
+@xbox_api.route('/runfile/<file>', methods=['POST'])
+def run_file(file):
+    file = file + '.yml'
+    return "doing " + file
