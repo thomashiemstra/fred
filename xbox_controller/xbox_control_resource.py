@@ -16,8 +16,8 @@ from utils.threading_utils import CountDownLatch
 from xbox_controller.xbox_utils import PosePoller
 from time import sleep
 
-from ruamel.yaml import load, dump, round_trip_dump
-import yaml
+from yaml import load, dump
+
 
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
@@ -78,7 +78,7 @@ def run_xbox_poller(countdown_latch):
         buttons = pose_poller.get_buttons()
         if buttons.start:
             with open('recorded_positions.yml', 'w') as outfile:
-                round_trip_dump(recorded_positions, outfile)
+                dump(recorded_positions, outfile)
         elif buttons.b:
             current_pose = reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
         elif buttons.a:
