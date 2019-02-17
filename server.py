@@ -1,9 +1,11 @@
 from flask import Flask, render_template
 from xbox_controller.xbox_control_resource import xbox_api
 from flask import jsonify
+from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
 app.register_blueprint(xbox_api, url_prefix='/xbox')
+CORS(app)
 
 
 @app.route('/')
