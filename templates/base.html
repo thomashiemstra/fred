@@ -1,0 +1,12 @@
+{% extends 'bootstrap/base.html' %}
+
+{% block title %}
+    {% if title %}{{ title }} - Stuff{% else %}Welcome to Stuff{% endif %}
+{% endblock %}
+
+{% block navbar %}
+    {{nav.mynavbar.render()}}
+{% endblock %}
+
+
+

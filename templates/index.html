@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <p> robot status: <span id="status"> Idle </span> </p>
+
+    <h1>Hello, {{ username }}!</h1>
+    <div>
+        <button type="button" class="btn btn-primary btn-lg" id="changeTitle">Change title </button>
+        <br>
+        <button type="button" class="btn btn-success" id="getData">GET DATA FROM LOCAL (borked)</button>
+        <button type="button" class="btn btn-success"id="getAPI">GET DATA FROM API </button>
+
+        <p id="result"></p>
+    </div>
+{% endblock %}
+
+
+{% block scripts %}
+    <script>
+    var triggered = false
+    document.getElementById('changeTitle').addEventListener('click', changeTitle);
+    document.getElementById('getData').addEventListener('click', getData);
+    document.getElementById('getAPI').addEventListener('click', getAPI);
+
+
+    function changeTitle(){
+        if (triggered){
+            document.getElementById('status').innerHTML='Idle'
+            triggered = false
+        } else {
+            document.getElementById('status').innerHTML='Running'
+            triggered = true
+        }
+    }
+
+    function getData(){
+        fetch('junk.json')
+        .then(function (res) {
+            return res.json();
+        })
+        .then(function (data) {
+            console.log(data)
+            let result = `<h2> User Info From junk.json </h2>`;
+            data.forEach((user) => {
+                const { id, name, email } = user
+                result +=
+                `<div>
+                    <h5> User ID: ${id} </h5>
+                    <ul class="w3-ul">
+                        <li> User Name : ${name}</li>
+                        <li> User Email: ${email} </li>
+                    </ul>
+                </div>`;
+
+                document.getElementById('result').innerHTML = result;
+            });
+           })
+    }
+
+    function getAPI(){
+        fetch('http://127.0.0.1:5000/xbox/test')
+            .then((res) => {return res.json()})
+            .then((data) => {
+                console.log(data)
+                let result = '<h2> local results are in! </h2>';
+
+                result +=
+                `<div>
+                    <h2> result: ${data.x} </h2>
+                </div>`;
+
+                document.getElementById('result').innerHTML = result;
+            })
+    }
+    </script>
+{% endblock %}
