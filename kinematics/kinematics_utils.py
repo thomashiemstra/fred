@@ -2,6 +2,7 @@ import numpy as np
 from numpy import sin, cos
 import yaml
 from copy import copy
+import json
 
 
 class Pose(yaml.YAMLObject):
@@ -18,7 +19,7 @@ class Pose(yaml.YAMLObject):
         return dumper.represent_yaml_object(cls.yaml_tag, to_save_pose, cls,
                                             flow_style=cls.yaml_flow_style)
 
-    def __init__(self, x, y, z, flip=False, alpha=0, beta=0, gamma=0, time=2):
+    def __init__(self, x, y, z, flip=False, alpha=0.0, beta=0.0, gamma=0.0, time=2.0):
         self.x = x
         self.y = y
         self.z = z
@@ -94,12 +95,21 @@ class RobotConfig:
 
 
 if __name__ == '__main__':
-    pose = Pose(1.0, 2.0, 3.0)
 
-    print(yaml.dump(pose))
+    json_string = json.dumps(Pose(1.0, 2.0, 3.0, alpha=0.5).__dict__, indent=4)
+    print(json_string)
+    x = json.loads(json_string)
 
-    with open('test.yml', 'w') as outfile:
-        yaml.dump(pose, outfile)
+    p = Pose(0, 0, 0)
+    p.__dict__ = x
+    print(p)
 
-    with open('test.yml', 'r') as infile:
-        print(yaml.load(infile))
+    # pose = Pose(1.0, 2.0, 3.0)
+    #
+    # print(yaml.dump(pose))
+    #
+    # with open('test.yml', 'w') as outfile:
+    #     yaml.dump(pose, outfile)
+    #
+    # with open('test.yml', 'r') as infile:
+    #     print(yaml.load(infile))
