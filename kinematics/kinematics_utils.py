@@ -95,21 +95,21 @@ class RobotConfig:
 
 
 if __name__ == '__main__':
+    listx = []
+    listx.append(Pose(1, 1, 1))
+    listx.append(Pose(2, 2, 2))
 
-    json_string = json.dumps(Pose(1.0, 2.0, 3.0, alpha=0.5).__dict__, indent=4)
-    print(json_string)
-    x = json.loads(json_string)
+    to_serialize = list(map(lambda x: x.__dict__, listx))
 
-    p = Pose(0, 0, 0)
-    p.__dict__ = x
-    print(p)
+    print(json.dumps(to_serialize, indent=2))
 
-    # pose = Pose(1.0, 2.0, 3.0)
+    with open('test.json', 'w') as outfile:
+        json.dump(to_serialize, outfile, indent=2)
+
+    # json_string = json.dumps(Pose(1.0, 2.0, 3.0, alpha=0.5).__dict__, indent=4)
+    # print(json_string)
+    # x = json.loads(json_string)
     #
-    # print(yaml.dump(pose))
-    #
-    # with open('test.yml', 'w') as outfile:
-    #     yaml.dump(pose, outfile)
-    #
-    # with open('test.yml', 'r') as infile:
-    #     print(yaml.load(infile))
+    # p = Pose(0, 0, 0)
+    # p.__dict__ = x
+    # print(p)
