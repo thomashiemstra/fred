@@ -13,10 +13,12 @@ from kinematics.kinematics_utils import RobotConfig
 from utils.movement_utils import pose_to_pose, line
 from servo_handling.servo_controller import ServoController
 from utils.threading_utils import CountDownLatch
-from xbox_controller.xbox_utils import PosePoller
+from xbox_controller.pose_poller import PosePoller
 from time import sleep
+import globals
+from xbox_controller.xbox_robot_controller import XboxRobotController
 
-from yaml import load, dump
+from yaml import dump
 
 
 try:
@@ -30,6 +32,17 @@ api_lock = threading.Lock()
 started = False
 done = False
 running_thread = None
+
+
+@xbox_api.route('/test', methods=['GET'])
+def test():
+    resp = jsonify(Pose(5.5, 2.0, 3.0).__dict__)
+    return resp
+
+
+@xbox_api.route('/testpost', methods=['POST'])
+def test_post(json):
+    print(json)
 
 
 @xbox_api.route('/start', methods=['POST'])
@@ -52,11 +65,12 @@ def start():
 
 # TODO convert to class
 def run_xbox_poller(countdown_latch):
+    # xbox_robot_controller = XboxRobotController(dynamixel_robot_config, dynamixel_servo_controller)
     pose_poller = PosePoller()
-    dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=2.0)
-    dynamixel_servo_controller = ServoController("COM5", dynamixel_robot_config)
+    dynamixel_servo_controller = globals.get_robot('COM5')
+    dynamixel_robot_config = globals.dynamixel_robot_config
     dynamixel_servo_controller.enable_servos()
-
+    print(dynamixel_servo_controller)
     start_pose = Pose(-26, 11.0, 6)
     current_pose = copy(start_pose)
 
