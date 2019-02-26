@@ -1,17 +1,63 @@
 {% extends "base.html" %}
+{% set active_page = "index" %}
+
+
+{% block title -%}
+    <h1>Robot control centre</h1>
+{%- endblock title %}
 
 {% block content %}
-    <p> robot status: <span id="status"> Idle </span> </p>
 
-    <h1>Hello, {{ username }}!</h1>
-    <div>
-        <button type="button" class="btn btn-primary btn-lg" id="changeTitle">Change title </button>
-        <br>
-        <button type="button" class="btn btn-success" id="getData">GET DATA FROM LOCAL (borked)</button>
-        <button type="button" class="btn btn-success"id="getAPI">GET DATA FROM API </button>
 
-        <p id="result"></p>
+    <div class="container">
+      <div class="row">
+        <div class="col-sm-4">
+          <h3>Column 1</h3>
+          <h1>Hello, {{ username }}!</h1>
+            <button type="button" class="btn btn-primary btn-lg" id="changeTitle">Change title </button>
+        </div>
+        <div class="col-sm-4">
+          <div class="container">
+              <h2>Button Group</h2>
+              <div class="btn-group">
+                <button type="button" class="btn btn-success">On</button>
+                <button type="button" class="btn btn-danger">Off</button>
+              </div>
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <h3>Column 3</h3>
+          <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit...</p>
+          <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris...</p>
+            <button type="button" class="btn btn-success" id="getAPI" onclick="getAPI()">GET DATA FROM API </button>
+            <p id="result"></p>
+        </div>
+      </div>
     </div>
+
+    <div class="container">
+        <div class="col-sm-4">
+        </div>
+        <div class="col-sm-4">
+            <form onsubmit="myFunction()">
+              <div class="form-group">
+                <label for="email">Email address:</label>
+                <input type="email" class="form-control" id="email">
+              </div>
+              <div class="form-group">
+                <label for="pwd">Password:</label>
+                <input type="password" class="form-control" id="pwd">
+              </div>
+              <div class="checkbox">
+                <label><input type="checkbox"> Remember me</label>
+              </div>
+              <button type="submit" class="btn btn-default">Submit</button>
+            </form>
+        </div>
+        <div class="col-sm-4">
+        </div>
+    </div>
+
 {% endblock %}
 
 
@@ -19,8 +65,6 @@
     <script>
     var triggered = false
     document.getElementById('changeTitle').addEventListener('click', changeTitle);
-    document.getElementById('getData').addEventListener('click', getData);
-    document.getElementById('getAPI').addEventListener('click', getAPI);
 
 
     function changeTitle(){
@@ -32,45 +76,22 @@
             triggered = true
         }
     }
-
-    function getData(){
-        fetch('junk.json')
-        .then(function (res) {
-            return res.json();
-        })
-        .then(function (data) {
-            console.log(data)
-            let result = `<h2> User Info From junk.json </h2>`;
-            data.forEach((user) => {
-                const { id, name, email } = user
-                result +=
-                `<div>
-                    <h5> User ID: ${id} </h5>
-                    <ul class="w3-ul">
-                        <li> User Name : ${name}</li>
-                        <li> User Email: ${email} </li>
-                    </ul>
-                </div>`;
-
-                document.getElementById('result').innerHTML = result;
-            });
-           })
-    }
-
-    function getAPI(){
-        fetch('http://127.0.0.1:5000/xbox/test')
-            .then((res) => {return res.json()})
-            .then((data) => {
-                console.log(data)
-                let result = '<h2> local results are in! </h2>';
-
-                result +=
-                `<div>
-                    <h2> result: ${data.x} </h2>
-                </div>`;
-
-                document.getElementById('result').innerHTML = result;
-            })
-    }
+    //
+    // function getAPI(){
+    //     fetch('http://127.0.0.1:5000/xbox/test')
+    //         .then((res) => {return res.json()})
+    //         .then((data) => {
+    //             console.log(data)
+    //             let result = '<h2> local results are in! </h2>';
+    //
+    //             result +=
+    //             `<div>
+    //                 <h2> result: ${data.x} </h2>
+    //             </div>`;
+    //
+    //             document.getElementById('result').innerHTML = result;
+    //         })
+    // }
     </script>
+    {{super()}}
 {% endblock %}

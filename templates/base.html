@@ -1,12 +1,58 @@
-{% extends 'bootstrap/base.html' %}
+<!DOCTYPE html>
+<html lang="En">
+  <head>
+    <!-- Bootstrap -->
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+      <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+      <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+      <script type="text/javascript" src="{{ url_for('static', filename='functions.js') }}"></script>
 
-{% block title %}
-    {% if title %}{{ title }} - Stuff{% else %}Welcome to Stuff{% endif %}
-{% endblock %}
+    <link href="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap4-toggle@3.4.0/css/bootstrap4-toggle.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap4-toggle@3.4.0/js/bootstrap4-toggle.min.js"></script>
+    <title>
+      Fred the robot arm
+    </title>
+  </head>
 
-{% block navbar %}
-    {{nav.mynavbar.render()}}
-{% endblock %}
+  <body>
+      <div class="jumbotron text-center" style="background-color:lavender;">
+        {% block title -%}
+        {%- endblock title %}
+      robot status: &emsp; <input id="status-button" type="checkbox" disabled data-toggle="toggle" data-on="Busy" data-off="Idle" data-onstyle="danger" data-offstyle="success">
+    </div>
+
+
+    <div id="topheader">
+        <nav class="nav nav-pills justify-content-center">
+          <ul class="nav nav-pills">
+
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if active_page == 'index' else '' }}" href="{{url_for('index')}}">Home</a>
+            </li>
+
+            <li class="nav-item">
+              <a class="nav-link {{ 'active' if active_page == 'xbox' else '' }}" href="{{url_for('xbox')}}">xbox</a>
+            </li>
+
+          </ul>
+        </nav>
+        <br>
+    </div>
+
+
+    {% block content -%}
+    {%- endblock content %}
+
+      <script>
+        getRobotStatus();
+    </script>
+  {% block scripts %}
+  {% endblock %}
+  </body>
+</html>
 
 
 

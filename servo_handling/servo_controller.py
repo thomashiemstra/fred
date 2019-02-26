@@ -1,10 +1,11 @@
-from kinematics.kinematics_utils import Pose
 from servo_handling import dynamixel_x_config as cfg
 from servo_handling.dynamixel_utils import setup_dynamixel_handlers
 from servo_handling.servo import Servo
 from servo_handling.servo_handler import ServoHandler
-from kinematics.kinematics import inverse_kinematics,forward_position_kinematics, forward_orientation_kinematics
+from kinematics.kinematics import inverse_kinematics
 from utils.movement_utils import angles_to_angles
+from utils.decorators import synchronized_with_lock
+import threading
 
 import numpy as np
 from numpy import pi
@@ -34,6 +35,8 @@ class ServoController:
 
         self.set_velocity_profile()
         self.set_pid()
+        self.status = False
+        self.lock = threading.RLock()
 
     def enable_servos(self):
         self.base_servo_handler.set_torque(enable=True)
@@ -99,3 +102,11 @@ class ServoController:
         target_angles = inverse_kinematics(pose, self.robot_config)
 
         angles_to_angles(current_angles, target_angles, time, self)
+
+    @synchronized_with_lock("lock")
+    def get_status(self):
+        return self.status
+
+    @synchronized_with_lock("lock")
+    def change_status(self, new_state):
+        self.status = new_state

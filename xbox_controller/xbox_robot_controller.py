@@ -15,63 +15,56 @@ from servo_handling.servo_controller import ServoController
 from utils.threading_utils import CountDownLatch
 from xbox_controller.pose_poller import PosePoller
 from time import sleep
-import globals
-from xbox_controller.xbox_robot_controller import XboxRobotController
+from utils.decorators import synchronized_with_lock
 
 from yaml import dump
 
 
-try:
-    from yaml import CLoader as Loader, CDumper as Dumper
-except ImportError:
-    from yaml import Loader, Dumper
+class XboxRobotController:
+    start_pose = Pose(-26, 11.0, 6)
 
-xbox_api = Blueprint('xbox_api', __name__)
+    def __init__(self, dynamixel_robot_config, dynamixel_servo_controller):
+        self.pose_poller = PosePoller()
+        self.dynamixel_robot_config = dynamixel_robot_config
+        self.dynamixel_servo_controller = dynamixel_servo_controller
+        self.lock = threading.RLock()
+        self.done = False
+        self.recorded_positions = []
 
-api_lock = threading.Lock()
-started = False
-done = False
-running_thread = None
+    @synchronized_with_lock("lock")
+    def is_done(self):
+        return self.done
 
+    @synchronized_with_lock("lock")
+    def stop(self):
+        self.done = True
 
-@xbox_api.route('/test', methods=['GET'])
-def test():
-    resp = jsonify(Pose(5.5, 2.0, 3.0).__dict__)
-    return resp
+    @synchronized_with_lock("lock")
+    def reset(self):
+        self.done = False
 
+    def start(self, latch):
+        self.dynamixel_servo_controller.enable_servos()
+        current_pose = copy(self.start_pose)
+        self.dynamixel_servo_controller.from_current_angles_to_pose(current_pose, 2)
+        latch.count_down()
 
-@xbox_api.route('/testpost', methods=['POST'])
-def test_post(json):
-    print(json)
+        while True:
+            if self.is_done:
+                break
+            current_pose = self.pose_poller.get_updated_pose_from_controller(current_pose)
+            self.dynamixel_servo_controller.move_to_pose(current_pose)
 
-
-@xbox_api.route('/start', methods=['POST'])
-def start():
-    global started, done, running_thread
-    with api_lock:
-        if started:
-            return "already started"
-        else:
-            started = True
-            done = False
-
-    latch = CountDownLatch(1)
-    running_thread = threading.Thread(target=run_xbox_poller, args=(latch,))
-    running_thread.start()
-
-    resp = jsonify(success=True)
-    return resp
+            buttons = self.pose_poller.get_buttons()
+            # todo, neatly implement buttons. no more global variables...
 
 
-# TODO convert to class
 def run_xbox_poller(countdown_latch):
-    # xbox_robot_controller = XboxRobotController(dynamixel_robot_config, dynamixel_servo_controller)
     pose_poller = PosePoller()
-    dynamixel_servo_controller = globals.get_robot('COM5')
-    dynamixel_servo_controller.change_status(True)
-    dynamixel_robot_config = globals.dynamixel_robot_config
+    dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=2.0)
+    dynamixel_servo_controller = ServoController("COM5", dynamixel_robot_config)
     dynamixel_servo_controller.enable_servos()
-    print(dynamixel_servo_controller)
+
     start_pose = Pose(-26, 11.0, 6)
     current_pose = copy(start_pose)
 
@@ -119,7 +112,6 @@ def run_xbox_poller(countdown_latch):
 
     time.sleep(1)
     dynamixel_servo_controller.disable_servos()
-    dynamixel_servo_controller.change_status(False)
 
 
 # this changes current_pose and d6 of robot_config as a side effect, refactor?
@@ -157,25 +149,3 @@ def playback_recorded_positions(current_pose, recorded_poses, dynamixel_robot_co
         sleep(1)
 
     pose_to_pose(current__playback_pose, current_pose, dynamixel_robot_config, dynamixel_servo_controller, time=2)
-
-
-@xbox_api.route('/stop', methods=['POST'])
-def stop():
-    global started, done, running_thread
-    with api_lock:
-        if started:
-            started = False
-            done = True
-        else:
-            return "already stopped"
-
-    running_thread.join()
-
-    resp = jsonify(success=True)
-    return resp
-
-
-@xbox_api.route('/runfile/<file>', methods=['POST'])
-def run_file(file):
-    file = file + '.yml'
-    return "doing " + file
