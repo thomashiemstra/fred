@@ -12,25 +12,22 @@
     <div class="container">
       <div class="row">
         <div class="col-sm-4">
-            <button type="button" class="btn btn-primary btn-lg" id="changeTitle">Change title </button>
+            <h3>Instructions:</h3>
+          <p>See the buttons?</p>
+          <p>Click em!</p>
         </div>
         <div class="col-sm-4">
           <div class="container">
-              <h2>Button Group</h2>
-
-
-             <div class="checkbox disabled">
-              <label>
-
-              </label>
-            </div>
-
+              <h2>Xbox control</h2>
+              <div class="btn-group">
+                <button type="button" class="btn btn-success" id="onButton" onclick="turnOn()">On</button>
+                <button type="button" class="btn btn-danger" onclick="turnOff()">Off</button>
+              </div>
           </div>
         </div>
+
         <div class="col-sm-4">
-          <h3>General info:</h3>
-          <p>This is the control panel for Fred the robot arm</p>
-          <p>Everything you see is still work in progress</p>
+
         </div>
       </div>
     </div>
@@ -44,18 +41,41 @@
 {% block scripts %}
 {{super()}}
     <script>
-    var triggered = false;
-    document.getElementById('changeTitle').addEventListener('click', changeTitle);
 
+    function turnOn(){
+         fetch('http://127.0.0.1:5000/xbox/start', {
+                method: 'post',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Content-Type': 'application/json'
+                },
+                body: ""
+             }
 
-    function changeTitle(){
-        if (triggered){
-            document.getElementById('status').innerHTML='Idle';
-            triggered = false
-        } else {
-            document.getElementById('status').innerHTML='Running';
-            triggered = true
-        }
+         )
+        .then((res) => {return res.json()})
+        .then((data) => {
+            console.log(data);
+            getRobotStatus()
+        })
+    }
+
+    function turnOff() {
+        fetch('http://127.0.0.1:5000/xbox/stop', {
+                method: 'post',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Content-Type': 'application/json'
+                },
+                body: ""
+             }
+
+         )
+        .then((res) => {return res.json()})
+        .then((data) => {
+            console.log(data);
+            getRobotStatus()
+        })
     }
 
     </script>

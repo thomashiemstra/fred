@@ -1,21 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="1c0859ce-ee43-4ca0-92e6-464a857bd51f" name="Default Changelist" comment="added magic to enable post and get from a website">
-      <change afterPath="$PROJECT_DIR$/static/functions.js" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/templates/test.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/templates/xbox_control.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/xbox_controller/xbox_robot_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/dynamixel_arm.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dynamixel_arm.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="1c0859ce-ee43-4ca0-92e6-464a857bd51f" name="Default Changelist" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/server.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/servo_handling/servo_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/servo_handling/servo_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/base.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/templates/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/index.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" beforeDir="false" afterPath="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/functions.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/functions.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/templates/xbox_control.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/xbox_control.html" afterDir="false" />
     </list>
+    <list id="e5057a1a-1c31-4af0-b1c2-92c215ae24f4" name="status button for the frontend (and some more experiments)" comment="status button for the frontend (and some more experiments)" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -23,7 +14,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="CoverageDataManager">
-    <SUITE FILE_PATH="coverage/fred$server.coverage" NAME="server Coverage Results" MODIFIED="1551216714423" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/fred$server.coverage" NAME="server Coverage Results" MODIFIED="1552425402570" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
   <component name="DatabaseView">
     <option name="SHOW_INTERMEDIATE" value="true" />
@@ -39,15 +30,29 @@
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="true">
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/server.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="494">
-              <caret line="34" column="30" selection-start-line="34" selection-start-column="30" selection-end-line="34" selection-end-column="30" />
+            <state relative-caret-position="532">
+              <caret line="28" column="11" lean-forward="true" selection-start-line="28" selection-start-column="11" selection-end-line="28" selection-end-column="11" />
               <folding>
                 <element signature="e#0#40#0" expanded="true" />
-                <marker date="1551216670576" expanded="true" signature="622:860" ph="..." />
-                <marker date="1551216670576" expanded="true" signature="701:860" ph="..." />
+                <marker date="1551216712336" expanded="true" signature="622:824" ph="..." />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="-906">
+              <caret line="40" lean-forward="true" selection-start-line="40" selection-end-line="40" />
+              <folding>
+                <element signature="e#0#31#0" expanded="true" />
+                <marker date="1550915879250" expanded="true" signature="4025:4456" ph="..." />
+                <marker date="1550915879250" expanded="true" signature="5478:5480" ph="..." />
+                <marker date="1550915879250" expanded="true" signature="5795:5797" ph="..." />
               </folding>
             </state>
           </provider>
@@ -56,39 +61,17 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/static/functions.js">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="475">
-              <caret line="25" column="27" selection-start-line="25" selection-start-column="27" selection-end-line="25" selection-end-column="27" />
+            <state relative-caret-position="95">
+              <caret line="5" column="60" lean-forward="true" selection-start-line="5" selection-start-column="60" selection-end-line="5" selection-end-column="60" />
             </state>
           </provider>
         </entry>
       </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/templates/base.html">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="285">
-              <caret line="15" column="24" lean-forward="true" selection-start-line="15" selection-start-column="24" selection-end-line="15" selection-end-column="24" />
-              <folding>
-                <element signature="n#style#0;n#div#0;n#body#0;n#html#0;n#!!top" expanded="true" />
-                <element signature="e#1139#1145#0" expanded="true" />
-              </folding>
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/templates/index.html">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="380">
-              <caret line="59" selection-start-line="59" selection-end-line="59" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
+      <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/templates/xbox_control.html">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="152">
-              <caret line="8" column="19" lean-forward="true" selection-start-line="8" selection-start-column="19" selection-end-line="8" selection-end-column="19" />
+            <state relative-caret-position="451">
+              <caret line="45" column="50" lean-forward="true" selection-start-line="45" selection-start-column="50" selection-end-line="45" selection-end-column="50" />
             </state>
           </provider>
         </entry>
@@ -174,11 +157,11 @@
         <option value="$PROJECT_DIR$/xbox_controller/xbox_control_resource.py" />
         <option value="$PROJECT_DIR$/templates/functions.js" />
         <option value="$PROJECT_DIR$/templates/fucntions.js" />
-        <option value="$PROJECT_DIR$/templates/xbox_control.html" />
         <option value="$PROJECT_DIR$/templates/index.html" />
-        <option value="$PROJECT_DIR$/static/functions.js" />
         <option value="$PROJECT_DIR$/templates/base.html" />
         <option value="$PROJECT_DIR$/server.py" />
+        <option value="$PROJECT_DIR$/static/functions.js" />
+        <option value="$PROJECT_DIR$/templates/xbox_control.html" />
       </list>
     </option>
   </component>
@@ -189,8 +172,8 @@
     <auto-save>true</auto-save>
   </component>
   <component name="ProjectFrameBounds" extendedState="6">
-    <option name="x" value="440" />
-    <option name="y" value="493" />
+    <option name="x" value="480" />
+    <option name="y" value="-19" />
     <option name="width" value="1936" />
     <option name="height" value="1056" />
   </component>
@@ -216,6 +199,7 @@
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
+      <pane id="Scope" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -226,7 +210,22 @@
             <path>
               <item name="fred" type="b2602c69:ProjectViewProjectNode" />
               <item name="fred" type="462c0819:PsiDirectoryNode" />
+              <item name="kinematics" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="fred" type="b2602c69:ProjectViewProjectNode" />
+              <item name="fred" type="462c0819:PsiDirectoryNode" />
               <item name="templates" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="fred" type="b2602c69:ProjectViewProjectNode" />
+              <item name="fred" type="462c0819:PsiDirectoryNode" />
+              <item name="utils" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="fred" type="b2602c69:ProjectViewProjectNode" />
+              <item name="fred" type="462c0819:PsiDirectoryNode" />
+              <item name="xbox_controller" type="462c0819:PsiDirectoryNode" />
             </path>
             <path>
               <item name="fred" type="b2602c69:ProjectViewProjectNode" />
@@ -236,7 +235,6 @@
           <select />
         </subPane>
       </pane>
-      <pane id="Scope" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -449,6 +447,7 @@
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
       <changelist id="1c0859ce-ee43-4ca0-92e6-464a857bd51f" name="Default Changelist" comment="" />
+      <changelist id="e5057a1a-1c31-4af0-b1c2-92c215ae24f4" name="status button for the frontend (and some more experiments)" comment="" />
       <created>1545574761349</created>
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
@@ -457,6 +456,10 @@
       <workItem from="1551038211795" duration="1184000" />
       <workItem from="1551211319213" duration="1178000" />
       <workItem from="1551215369843" duration="1313000" />
+      <workItem from="1551216695846" duration="132000" />
+      <workItem from="1551545818059" duration="2873000" />
+      <workItem from="1552138406074" duration="249000" />
+      <workItem from="1552424819617" duration="783000" />
     </task>
     <task id="LOCAL-00001" summary="enable setting PID and some code cleanup">
       <created>1548712408049</created>
@@ -710,7 +713,21 @@
       <option name="project" value="LOCAL" />
       <updated>1550697461045</updated>
     </task>
-    <option name="localTasksCounter" value="37" />
+    <task id="LOCAL-00037" summary="status button for the frontend (and some more experiments)">
+      <created>1551216772492</created>
+      <option name="number" value="00037" />
+      <option name="presentableId" value="LOCAL-00037" />
+      <option name="project" value="LOCAL" />
+      <updated>1551216772492</updated>
+    </task>
+    <task id="LOCAL-00038" summary="status button for the frontend (and some more experiments)">
+      <created>1551216807921</created>
+      <option name="number" value="00038" />
+      <option name="presentableId" value="LOCAL-00038" />
+      <option name="project" value="LOCAL" />
+      <updated>1551216807921</updated>
+    </task>
+    <option name="localTasksCounter" value="39" />
     <servers />
   </component>
   <component name="TestHistory">
@@ -746,7 +763,7 @@
     </history-entry>
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="10050000" />
+    <option name="totallyTimeSpent" value="14087000" />
   </component>
   <component name="TodoView">
     <todo-panel id="selected-file">
@@ -759,18 +776,19 @@
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-8" width="2576" height="1416" extended-state="6" />
+    <editor active="true" />
     <layout>
       <window_info id="Favorites" order="0" side_tool="true" />
-      <window_info content_ui="combo" id="Project" order="1" visible="true" weight="0.09976152" />
+      <window_info content_ui="combo" id="Project" order="1" visible="true" weight="0.10294118" />
       <window_info id="Structure" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Docker" order="0" show_stripe_button="false" />
       <window_info anchor="bottom" id="Debug" order="1" weight="0.32969603" />
       <window_info anchor="bottom" id="Python Console" order="2" />
-      <window_info anchor="bottom" id="Run" order="3" weight="0.32969603" />
+      <window_info active="true" anchor="bottom" id="Run" order="3" visible="true" weight="0.32969603" />
       <window_info anchor="bottom" id="Find" order="4" />
-      <window_info anchor="bottom" id="Terminal" order="5" />
+      <window_info anchor="bottom" id="Terminal" order="5" weight="0.32969603" />
       <window_info anchor="bottom" id="Event Log" order="6" side_tool="true" weight="0.32924962" />
-      <window_info anchor="bottom" id="Version Control" order="7" />
+      <window_info anchor="bottom" id="Version Control" order="7" weight="0.32969603" />
       <window_info anchor="bottom" id="TODO" order="8" />
       <window_info anchor="bottom" id="Database Changes" order="9" />
       <window_info anchor="right" id="Database" order="0" />
@@ -791,8 +809,47 @@
       </list>
     </option>
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="RECENTLY_FILTERED_USER_GROUPS">
+                <collection />
+              </option>
+              <option name="RECENTLY_FILTERED_BRANCH_GROUPS">
+                <collection />
+              </option>
+              <option name="COLUMN_ORDER">
+                <list>
+                  <option value="0" />
+                  <option value="1" />
+                  <option value="2" />
+                  <option value="3" />
+                </list>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="RECENT_FILTERS">
+      <map>
+        <entry key="Branch">
+          <value>
+            <list />
+          </value>
+        </entry>
+        <entry key="User">
+          <value>
+            <list />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="seperate some functions to a util file" />
     <MESSAGE value="I can't help but messing with PID values" />
     <MESSAGE value="Xbox controller movment first steps, it moves!" />
     <MESSAGE value="cleanup" />
@@ -817,7 +874,8 @@
     <MESSAGE value="proper json to file dumping" />
     <MESSAGE value="basic web page" />
     <MESSAGE value="use caching for the (global) robot object&#10;Words cannot describe what kind of a genius I am..." />
-    <option name="LAST_COMMIT_MESSAGE" value="use caching for the (global) robot object&#10;Words cannot describe what kind of a genius I am..." />
+    <MESSAGE value="status button for the frontend (and some more experiments)" />
+    <option name="LAST_COMMIT_MESSAGE" value="status button for the frontend (and some more experiments)" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -826,11 +884,6 @@
           <url>file://$PROJECT_DIR$/servo_handling/main.py</url>
           <line>49</line>
           <option name="timeStamp" value="1" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/server.py</url>
-          <line>35</line>
-          <option name="timeStamp" value="4" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
@@ -968,13 +1021,6 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
     </expressions>
   </component>
   <component name="editorHistoryManager">
-    <entry file="file://$PROJECT_DIR$/servo_handling/servo_handler.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="2565">
-          <caret line="136" column="49" selection-start-line="136" selection-start-column="49" selection-end-line="136" selection-end-column="49" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/servo_handling/dynamixel_x_config.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="171">
@@ -1067,13 +1113,6 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/kinematics/kinematics.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="209">
-          <caret line="13" column="29" selection-start-line="13" selection-start-column="13" selection-end-line="13" selection-end-column="29" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/utils/movement_utils.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="988">
@@ -1085,13 +1124,6 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="252">
           <caret line="155" selection-start-line="155" selection-end-line="155" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/xbox_controller/pose_poller.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="171">
-          <caret line="9" column="8" selection-start-line="9" selection-start-column="8" selection-end-line="9" selection-end-column="8" />
         </state>
       </provider>
     </entry>
@@ -1113,13 +1145,6 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="-1250">
           <caret line="181" column="8" selection-start-line="181" selection-start-column="8" selection-end-line="181" selection-end-column="8" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/main.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="342">
-          <caret line="48" column="31" lean-forward="true" selection-start-line="48" selection-start-column="31" selection-end-line="48" selection-end-column="31" />
         </state>
       </provider>
     </entry>
@@ -1224,19 +1249,6 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="1881">
-          <caret line="119" column="17" selection-start-line="119" selection-start-column="17" selection-end-line="119" selection-end-column="17" />
-          <folding>
-            <element signature="e#0#31#0" expanded="true" />
-            <marker date="1550915879250" expanded="true" signature="4025:4456" ph="..." />
-            <marker date="1550915879250" expanded="true" signature="5478:5480" ph="..." />
-            <marker date="1550915879250" expanded="true" signature="5795:5797" ph="..." />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/globals.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="228">
@@ -1273,31 +1285,41 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/templates/xbox_control.html">
+    <entry file="file://$PROJECT_DIR$/kinematics/kinematics.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="152">
-          <caret line="8" column="19" lean-forward="true" selection-start-line="8" selection-start-column="19" selection-end-line="8" selection-end-column="19" />
+        <state relative-caret-position="665">
+          <caret line="37" column="17" selection-start-line="37" selection-start-column="17" selection-end-line="37" selection-end-column="17" />
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/templates/index.html">
+    <entry file="file://$PROJECT_DIR$/main.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="380">
-          <caret line="59" selection-start-line="59" selection-end-line="59" />
+        <state relative-caret-position="779">
+          <caret line="48" column="31" selection-start-line="48" selection-start-column="31" selection-end-line="48" selection-end-column="31" />
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/static/functions.js">
+    <entry file="file://$PROJECT_DIR$/xbox_controller/pose_poller.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="475">
-          <caret line="25" column="27" selection-start-line="25" selection-start-column="27" selection-end-line="25" selection-end-column="27" />
+        <state relative-caret-position="171">
+          <caret line="13" column="13" selection-start-line="13" selection-start-column="13" selection-end-line="13" selection-end-column="13" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/servo_handling/servo.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="190">
+          <caret line="10" column="137" selection-start-line="10" selection-start-column="133" selection-end-line="10" selection-end-column="137" />
+          <folding>
+            <element signature="e#0#18#0" expanded="true" />
+          </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/templates/base.html">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="285">
-          <caret line="15" column="24" lean-forward="true" selection-start-line="15" selection-start-column="24" selection-end-line="15" selection-end-column="24" />
+        <state relative-caret-position="527">
+          <caret line="49" column="22" selection-start-line="49" selection-start-column="8" selection-end-line="49" selection-end-column="22" />
           <folding>
             <element signature="n#style#0;n#div#0;n#body#0;n#html#0;n#!!top" expanded="true" />
             <element signature="e#1139#1145#0" expanded="true" />
@@ -1305,15 +1327,48 @@ current_pose.orientation.dot(np.array([0,0,1]))</expression-string>
         </state>
       </provider>
     </entry>
+    <entry file="file://$PROJECT_DIR$/templates/index.html">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="432">
+          <caret line="37" column="27" lean-forward="true" selection-start-line="37" selection-start-column="27" selection-end-line="37" selection-end-column="27" />
+        </state>
+      </provider>
+    </entry>
     <entry file="file://$PROJECT_DIR$/server.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="494">
-          <caret line="34" column="30" selection-start-line="34" selection-start-column="30" selection-end-line="34" selection-end-column="30" />
+        <state relative-caret-position="532">
+          <caret line="28" column="11" lean-forward="true" selection-start-line="28" selection-start-column="11" selection-end-line="28" selection-end-column="11" />
           <folding>
             <element signature="e#0#40#0" expanded="true" />
-            <marker date="1551216670576" expanded="true" signature="622:860" ph="..." />
-            <marker date="1551216670576" expanded="true" signature="701:860" ph="..." />
+            <marker date="1551216712336" expanded="true" signature="622:824" ph="..." />
           </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/static/functions.js">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="95">
+          <caret line="5" column="60" lean-forward="true" selection-start-line="5" selection-start-column="60" selection-end-line="5" selection-end-column="60" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/xbox_controller/xbox_control_resource.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-906">
+          <caret line="40" lean-forward="true" selection-start-line="40" selection-end-line="40" />
+          <folding>
+            <element signature="e#0#31#0" expanded="true" />
+            <marker date="1550915879250" expanded="true" signature="4025:4456" ph="..." />
+            <marker date="1550915879250" expanded="true" signature="5478:5480" ph="..." />
+            <marker date="1550915879250" expanded="true" signature="5795:5797" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/templates/xbox_control.html">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="451">
+          <caret line="45" column="50" lean-forward="true" selection-start-line="45" selection-start-column="50" selection-end-line="45" selection-end-column="50" />
         </state>
       </provider>
     </entry>

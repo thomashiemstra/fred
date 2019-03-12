@@ -4,12 +4,10 @@ function getAPI(){
         .then((data) => {
             console.log(data);
             let result = '<h2> local results are in! </h2>';
-
             result +=
             `<div>
                 <h2> result: ${data.x} </h2>
             </div>`;
-
             document.getElementById('result').innerHTML = result;
         })
 }
@@ -25,9 +23,6 @@ function getRobotStatus(){
             } else {
                 toggleOff()
             }
-
-
-
         })
 }
 
