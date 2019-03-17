@@ -9,6 +9,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import pose_to_pose
 from src.xbox_controller.pose_poller import PosePoller
+from time import sleep
 
 
 class XboxRobotController:
@@ -22,35 +23,53 @@ class XboxRobotController:
         self.done = False
         self.recorded_positions = []
         self.current_pose = None
+        self.thread = None
 
     @synchronized_with_lock("lock")
     def is_done(self):
         return self.done
 
-    @synchronized_with_lock("lock")
     def stop(self):
+        self.set_done()
+        self.thread.join()
+        with self.lock:
+            self.thread = None
+        self.reset()
+
+    @synchronized_with_lock("lock")
+    def set_done(self):
         self.done = True
 
     @synchronized_with_lock("lock")
     def reset(self):
         self.done = False
 
-    def start(self, latch):
-        with self.lock:
-            self.done = False
+    @synchronized_with_lock("lock")
+    def start(self):
+        if self.done:
+            return False
+
         self.dynamixel_servo_controller.enable_servos()
         self.current_pose = copy(self.start_pose)
-        self.dynamixel_servo_controller.from_current_angles_to_pose(self.current_pose, 2)
-        latch.count_down()  # indicate that we are ready to go
+        if self.thread is None:
+            self.thread = threading.Thread(target=self.__start_internal, args=())
+            self.thread.start()
+            return True
+        else:
+            return False
+
+    def __start_internal(self):
+        self.dynamixel_servo_controller.from_current_angles_to_pose(self.current_pose, 1)
 
         while True:
-            if self.is_done:
+            if self.is_done():
                 break
             self.current_pose = self.pose_poller.get_updated_pose_from_controller(self.current_pose)
             self.dynamixel_servo_controller.move_to_pose(self.current_pose)
 
             buttons = self.pose_poller.get_buttons()
             self.handle_buttons(buttons)
+            sleep(self.pose_poller.dt)
 
         self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
                                               self.dynamixel_servo_controller)
@@ -58,7 +77,7 @@ class XboxRobotController:
         pose_to_pose(self.current_pose, self.start_pose,
                      self.dynamixel_robot_config, self.dynamixel_servo_controller, time=3)
 
-        self.pose_poller.stop()
+        # self.pose_poller.stop()
         self.dynamixel_servo_controller.disable_servos()
 
     def handle_buttons(self, buttons):

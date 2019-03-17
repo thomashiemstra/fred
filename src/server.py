@@ -9,7 +9,6 @@ import src.globals as globals
 from flask import jsonify
 
 
-
 app = Flask(__name__)
 CORS(app)
 app.register_blueprint(xbox_api, url_prefix='/xbox')

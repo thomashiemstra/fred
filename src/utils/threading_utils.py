@@ -1,5 +1,6 @@
 import threading
 
+
 class CountDownLatch(object):
     def __init__(self, count=1):
         self.count = count
@@ -11,7 +12,7 @@ class CountDownLatch(object):
             if self.count <= 0:
                 self.lock.notifyAll()
 
-    def await(self):
+    def await_latch(self):
         with self.lock:
             while self.count > 0:
                 self.lock.wait()

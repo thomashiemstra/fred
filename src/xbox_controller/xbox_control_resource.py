@@ -10,7 +10,6 @@ from flask import jsonify
 
 from src.kinematics.kinematics_utils import Pose
 from src.utils.movement_utils import pose_to_pose, line
-from src.utils.threading_utils import CountDownLatch
 from src.xbox_controller.pose_poller import PosePoller
 from time import sleep
 import src.globals as globals
@@ -44,33 +43,32 @@ def test_post(json):
 
 @xbox_api.route('/start', methods=['POST'])
 def start():
-    global started, done, running_thread
+    global started
     with api_lock:
         if started:
             return "already started"
         else:
             started = True
-            done = False
 
-    latch = CountDownLatch(1)
-    running_thread = threading.Thread(target=run_xbox_poller, args=(latch,))
-    running_thread.start()
-
-    resp = jsonify(success=True)
+    xbox_robot_controller = globals.get_xbox_robot_controller(globals.dynamixel_robot_arm_port)
+    success = xbox_robot_controller.start()
+    if success:
+        xbox_robot_controller.dynamixel_servo_controller.change_status(True)
+    resp = jsonify(success=success)
     return resp
 
 
 @xbox_api.route('/stop', methods=['POST'])
 def stop():
-    global started, done, running_thread
+    global started
     with api_lock:
         if started:
             started = False
-            done = True
         else:
             return "already stopped"
-
-    running_thread.join()
+    xbox_robot_controller = globals.get_xbox_robot_controller(globals.dynamixel_robot_arm_port)
+    xbox_robot_controller.stop()
+    xbox_robot_controller.dynamixel_servo_controller.change_status(False)
 
     resp = jsonify(success=True)
     return resp
