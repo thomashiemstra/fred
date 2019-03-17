@@ -1,6 +1,6 @@
 from __future__ import division
-from kinematics.kinematics_utils import Pose
-from xbox_controller.xbox_poller import XboxPoller
+from src.kinematics.kinematics_utils import Pose
+from src.xbox_controller.xbox_poller import XboxPoller
 import numpy as np
 from numpy import pi
 

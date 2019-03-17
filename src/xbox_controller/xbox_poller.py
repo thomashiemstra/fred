@@ -1,8 +1,8 @@
-from xbox_controller.XboxController import XboxController
+from src.xbox_controller.XboxController import XboxController
 import threading
 import time
 import numpy as np
-from utils.decorators import synchronized_with_lock
+from src.utils.decorators import synchronized_with_lock
 
 
 class Buttons:

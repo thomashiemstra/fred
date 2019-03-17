@@ -60,11 +60,33 @@ def start():
     return resp
 
 
+@xbox_api.route('/stop', methods=['POST'])
+def stop():
+    global started, done, running_thread
+    with api_lock:
+        if started:
+            started = False
+            done = True
+        else:
+            return "already stopped"
+
+    running_thread.join()
+
+    resp = jsonify(success=True)
+    return resp
+
+
+@xbox_api.route('/runfile/<file>', methods=['POST'])
+def run_file(file):
+    file = file + '.yml'
+    return "doing " + file
+
+
 # TODO convert to class
 def run_xbox_poller(countdown_latch):
     # xbox_robot_controller = XboxRobotController(dynamixel_robot_config, dynamixel_servo_controller)
     pose_poller = PosePoller()
-    dynamixel_servo_controller = globals.get_robot('COM5')
+    dynamixel_servo_controller = globals.get_robot(globals.dynamixel_robot_arm_port)
     dynamixel_servo_controller.change_status(True)
     dynamixel_robot_config = globals.dynamixel_robot_config
     dynamixel_servo_controller.enable_servos()
@@ -110,9 +132,9 @@ def run_xbox_poller(countdown_latch):
         time.sleep(pose_poller.dt)
 
     pose_poller.stop()
-    reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
+    current_pose = reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
 
-    current_pose = pose_to_pose(current_pose, start_pose, dynamixel_robot_config, dynamixel_servo_controller, time=3)
+    pose_to_pose(current_pose, start_pose, dynamixel_robot_config, dynamixel_servo_controller, time=3)
 
     time.sleep(1)
     dynamixel_servo_controller.disable_servos()
@@ -156,23 +178,4 @@ def playback_recorded_positions(current_pose, recorded_poses, dynamixel_robot_co
     pose_to_pose(current__playback_pose, current_pose, dynamixel_robot_config, dynamixel_servo_controller, time=2)
 
 
-@xbox_api.route('/stop', methods=['POST'])
-def stop():
-    global started, done, running_thread
-    with api_lock:
-        if started:
-            started = False
-            done = True
-        else:
-            return "already stopped"
 
-    running_thread.join()
-
-    resp = jsonify(success=True)
-    return resp
-
-
-@xbox_api.route('/runfile/<file>', methods=['POST'])
-def run_file(file):
-    file = file + '.yml'
-    return "doing " + file
