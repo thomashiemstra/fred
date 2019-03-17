@@ -8,12 +8,12 @@ import numpy as np
 from flask import Blueprint
 from flask import jsonify
 
-from kinematics.kinematics_utils import Pose
-from utils.movement_utils import pose_to_pose, line
+from src.kinematics.kinematics_utils import Pose
+from src.utils.movement_utils import pose_to_pose, line
 from src.utils.threading_utils import CountDownLatch
-from xbox_controller.pose_poller import PosePoller
+from src.xbox_controller.pose_poller import PosePoller
 from time import sleep
-import globals
+import src.globals as globals
 
 from yaml import dump
 
