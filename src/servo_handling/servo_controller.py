@@ -1,10 +1,10 @@
-from servo_handling import dynamixel_x_config as cfg
-from servo_handling.dynamixel_utils import setup_dynamixel_handlers
-from servo_handling.servo import Servo
-from servo_handling.servo_handler import ServoHandler
-from kinematics.kinematics import inverse_kinematics
-from utils.movement_utils import angles_to_angles
-from utils.decorators import synchronized_with_lock
+from src.servo_handling import dynamixel_x_config as cfg
+from src.servo_handling.dynamixel_utils import setup_dynamixel_handlers
+from src.servo_handling.servo import Servo
+from src.servo_handling.servo_handler import ServoHandler
+from src.kinematics.kinematics import inverse_kinematics
+from src.utils.movement_utils import angles_to_angles
+from src.utils.decorators import synchronized_with_lock
 import threading
 
 import numpy as np

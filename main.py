@@ -1,10 +1,9 @@
 from __future__ import division
 
-from kinematics.kinematics import forward_orientation_kinematics
-from kinematics.kinematics import forward_position_kinematics
-from kinematics.kinematics_utils import Pose, RobotConfig
-from servo_handling.servo_controller import ServoController
-from utils.movement_utils import pose_to_pose, line
+from src.kinematics.kinematics import forward_orientation_kinematics
+from src.kinematics.kinematics import forward_position_kinematics
+from src.kinematics.kinematics_utils import Pose, RobotConfig
+from src.servo_handling.servo_controller import ServoController
 from yaml import load, dump
 
 try:

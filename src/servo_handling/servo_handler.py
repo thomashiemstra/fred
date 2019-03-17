@@ -1,6 +1,6 @@
 # Handler for dynamixel X servos
 import dynamixel_sdk as dynamixel
-import servo_handling.dynamixel_utils as utils
+import src.servo_handling.dynamixel_utils as utils
 
 
 class ServoHandler(object):

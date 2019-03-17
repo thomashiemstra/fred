@@ -9,14 +9,11 @@ from flask import Blueprint
 from flask import jsonify
 
 from kinematics.kinematics_utils import Pose
-from kinematics.kinematics_utils import RobotConfig
 from utils.movement_utils import pose_to_pose, line
-from servo_handling.servo_controller import ServoController
-from utils.threading_utils import CountDownLatch
+from src.utils.threading_utils import CountDownLatch
 from xbox_controller.pose_poller import PosePoller
 from time import sleep
 import globals
-from xbox_controller.xbox_robot_controller import XboxRobotController
 
 from yaml import dump
 

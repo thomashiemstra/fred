@@ -2,8 +2,8 @@ from __future__ import division
 from math import ceil
 from time import sleep
 import numpy as np
-from kinematics.kinematics import inverse_kinematics
-from kinematics.kinematics_utils import Pose
+from src.kinematics.kinematics import inverse_kinematics
+from src.kinematics.kinematics_utils import Pose
 
 
 def line(start_pose, stop_pose, robot_config, servo_controller):

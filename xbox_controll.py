@@ -2,13 +2,13 @@ from __future__ import division
 
 import time
 
-from kinematics.kinematics import forward_orientation_kinematics
-from kinematics.kinematics import forward_position_kinematics
-from kinematics.kinematics import inverse_kinematics
-from kinematics.kinematics_utils import Pose, RobotConfig
-from utils.movement_utils import pose_to_pose
-from servo_handling.servo_controller import ServoController
-from xbox_controller.xbox_poller import XboxPoller
+from src.kinematics.kinematics import forward_orientation_kinematics
+from src.kinematics.kinematics import forward_position_kinematics
+from src.kinematics.kinematics import inverse_kinematics
+from src.kinematics.kinematics_utils import Pose, RobotConfig
+from src.utils.movement_utils import pose_to_pose
+from src.servo_handling.servo_controller import ServoController
+from src.xbox_controller.xbox_poller import XboxPoller
 
 
 def input_to_delta_velocity(controller_input, velocity, maximum_velocity):

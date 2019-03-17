@@ -1,5 +1,5 @@
-from servo_handling.servo_controller import ServoController
-from kinematics.kinematics_utils import RobotConfig
+from src.servo_handling.servo_controller import ServoController
+from src.kinematics.kinematics_utils import RobotConfig
 from functools import lru_cache
 
 

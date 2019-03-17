@@ -1,7 +1,7 @@
-from servo_handling import dynamixel_x_config as cfg
-from servo_handling.dynamixel_utils import setup_dynamixel_handlers
-from servo_handling.servo import Servo
-from servo_handling.servo_handler import ServoHandler
+from src.servo_handling import dynamixel_x_config as cfg
+from src.servo_handling.dynamixel_utils import setup_dynamixel_handlers
+from src.servo_handling.servo import Servo
+from src.servo_handling.servo_handler import ServoHandler
 import time
 from numpy import pi
 import logging

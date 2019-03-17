@@ -1,11 +1,11 @@
 from flask import Flask, render_template
-from xbox_controller.xbox_control_resource import xbox_api
+from src.xbox_controller.xbox_control_resource import xbox_api
 
 from flask_cors import CORS
 from flask_cdn import CDN
 from flask_nav import Nav
 from flask_nav.elements import Navbar, View
-import globals
+import src.globals as globals
 from flask import jsonify
 
 
