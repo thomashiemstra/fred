@@ -7,7 +7,7 @@ from numpy import pi
 
 class PosePoller:
 
-    def __init__(self, maximum_speed=20.0, ramp_up_time=0.1, position_limit=35.0):
+    def __init__(self, maximum_speed=15.0, ramp_up_time=0.1, position_limit=35.0):
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
         self.steps_per_second = 15
@@ -38,7 +38,8 @@ class PosePoller:
 
     def __update_orientation_velocities(self):
         right_thumb_x, right_thumb_y = self.poller.get_right_thumb()
-        right_thumb_y *= -1  # invert this one
+        right_thumb_x *= -1
+        right_thumb_y *= -1
 
         v_alpha_max = self.maximum_speed * (right_thumb_x / 1000)
         v_gamma_max = self.maximum_speed * (right_thumb_y / 1000)
@@ -69,7 +70,7 @@ class PosePoller:
         gamma = old_pose.gamma + self.dt * self.v_gamma
 
         x = np.clip(x, -self.position_limit, self.position_limit)
-        y = np.clip(y, 5, self.position_limit)
+        y = np.clip(y, 14, self.position_limit)
         z = np.clip(z, 5, self.position_limit)
         alpha = np.clip(alpha, -pi / 2, pi / 2)
         gamma = np.clip(gamma, -pi / 2, pi / 2)
