@@ -8,7 +8,7 @@ class Servo:
     target_position = 0
     current_position = -1  # set by the servo handler
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0, p=1000, i=600, d=500):
+    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0, p=1000, i=600, d=500, offset=0):
         self.p = p
         self.i = i
         self.d = d
@@ -18,8 +18,9 @@ class Servo:
         self.max_position = max_position
         self.profile_velocity = profile_velocity
         self.profile_acceleration = profile_acceleration
+        self.offset = offset
 
-    # convert an angle to servo position
+    # updates the target position of this servo
     def set_target_position_from_angle(self, angle):
         if angle > self.max_angle:
             logging.debug("input angle is bigger than max input angle")
@@ -27,7 +28,8 @@ class Servo:
             logging.debug("input angle is lower than min input angle")
 
         self.target_position = int(np.rint(np.interp(angle, [self.min_angle, self.max_angle],
-                                                    [self.min_position, self.max_position])))
+                                                     [self.min_position, self.max_position])))
+        self.target_position += self.offset
 
     def get_angle_from_position(self, position):
         if position is None:
