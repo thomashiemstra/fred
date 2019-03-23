@@ -25,9 +25,9 @@ class ServoController:
         self.base_servo_handler = ServoHandler(base_servos, cfg, port_handler,
                                                packet_handler, group_bulk_write, group_bulk_read)
 
-        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50)
-        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50)
-        self.servo6 = Servo(0, 4095, -pi, pi, 150, 50)
+        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=1000, i=500, d=3500, offset=-10)
+        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=1000, i=500, d=3500)
+        self.servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=1000, i=500, d=3500)
         wrist_servos = {4: self.servo4, 5: self.servo5, 6: self.servo6}
 
         self. wrist_servo_handler = ServoHandler(wrist_servos, cfg, port_handler,
@@ -51,6 +51,7 @@ class ServoController:
         self.move_servos(angles)
 
     def move_servos(self, angles):
+        # First set the target_position variable of all servos
         self.base_servo_handler.set_angle(1, angles[1])
         self.base_servo_handler.set_angle(2, angles[2])
         self.base_servo_handler.set_angle(3, angles[3])
@@ -59,6 +60,7 @@ class ServoController:
         self.wrist_servo_handler.set_angle(5, angles[5])
         self.wrist_servo_handler.set_angle(6, angles[6])
 
+        # Next physically move the servos to their target_position
         self.base_servo_handler.move_to_angles()
         self.wrist_servo_handler.move_to_angles()
 
@@ -68,7 +70,7 @@ class ServoController:
 
     def set_pid(self):
         self.base_servo_handler.set_pid()
-        # self.wrist_servo_handler.set_pid()
+        self.wrist_servo_handler.set_pid()
 
     def set_servo_torque(self, servo_id, enable):
         self.wrist_servo_handler.set_servo_torque(servo_id, enable)
