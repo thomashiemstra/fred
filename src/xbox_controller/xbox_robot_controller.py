@@ -13,7 +13,7 @@ from time import sleep
 
 
 class XboxRobotController:
-    start_pose = Pose(-26, 11.0, 6)
+    start_pose = Pose(-26, 14.0, 6)
 
     def __init__(self, dynamixel_robot_config, dynamixel_servo_controller):
         self.pose_poller = PosePoller()

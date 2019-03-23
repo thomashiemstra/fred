@@ -80,63 +80,6 @@ def run_file(file):
     return "doing " + file
 
 
-# TODO convert to class
-def run_xbox_poller(countdown_latch):
-    # xbox_robot_controller = XboxRobotController(dynamixel_robot_config, dynamixel_servo_controller)
-    pose_poller = PosePoller()
-    dynamixel_servo_controller = globals.get_robot(globals.dynamixel_robot_arm_port)
-    dynamixel_servo_controller.change_status(True)
-    dynamixel_robot_config = globals.dynamixel_robot_config
-    dynamixel_servo_controller.enable_servos()
-    print(dynamixel_servo_controller)
-    start_pose = Pose(-26, 11.0, 6)
-    current_pose = copy(start_pose)
-
-    dynamixel_servo_controller.from_current_angles_to_pose(current_pose, 2)
-
-    countdown_latch.count_down()
-
-    recorded_positions = []
-
-    global done
-    while True:
-        with api_lock:
-            if done:
-                break
-        current_pose = pose_poller.get_updated_pose_from_controller(current_pose)
-        dynamixel_servo_controller.move_to_pose(current_pose)
-
-        # Button handling
-        buttons = pose_poller.get_buttons()
-        if buttons.start:
-            with open('recorded_positions.yml', 'w') as outfile:
-                dump(recorded_positions, outfile)
-        elif buttons.b:
-            current_pose = reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
-        elif buttons.a:
-            current_pose.flip = not current_pose.flip
-        elif buttons.y:
-            recorded_positions.append(current_pose)
-            print("added position!")
-        elif buttons.x:
-            playback_recorded_positions(current_pose, recorded_positions,
-                                        dynamixel_robot_config, dynamixel_servo_controller)
-
-        if buttons.rb:
-            back_it_up(current_pose, 1, dynamixel_robot_config, dynamixel_servo_controller)
-        if buttons.lb:
-            back_it_up(current_pose, -1, dynamixel_robot_config, dynamixel_servo_controller)
-
-        time.sleep(pose_poller.dt)
-
-    pose_poller.stop()
-    current_pose = reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller)
-
-    pose_to_pose(current_pose, start_pose, dynamixel_robot_config, dynamixel_servo_controller, time=3)
-
-    time.sleep(1)
-    dynamixel_servo_controller.disable_servos()
-    dynamixel_servo_controller.change_status(False)
 
 
 # this changes current_pose and d6 of robot_config as a side effect, refactor?
