@@ -2,8 +2,11 @@ from __future__ import division
 from math import ceil
 from time import sleep
 import numpy as np
+from numpy import pi
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
+from src.globals import WorkSpaceLimits
+import logging as log
 
 
 def line(start_pose, stop_pose, robot_config, servo_controller):
@@ -78,3 +81,49 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
         sleep(dt)
         servo_controller.move_servos(current_angles)
 
+
+# Given 2 poses both on the same level and with orientations only in the x-y plane
+# find the intersection of the 2 poses
+def get_centre(pose1, pose2):
+    tolerance = 0.1
+    if not np.isclose(pose1.z, pose2.z, tolerance):
+        log.warning("z's do not match")
+        return None
+
+    if pose1.gamma > tolerance or pose1.beta > tolerance:
+        log.warning("pose1 is not orientated in the x-y plane")
+        return None
+
+    if pose2.gamma > tolerance or pose2.beta > tolerance:
+        log.warning("pose2 is not orientated in the x-y plane")
+        return None
+
+    alpha1 = pose1.alpha
+    alpha2 = pose2.alpha
+
+    a1 = 1/np.tan(alpha1)
+    b1 = pose1.y - a1*pose1.x
+
+    a2 = 1/np.tan(alpha2)
+    b2 = pose2.y - a2 * pose2.x
+
+    if np.isclose(a1, a2, 0.01):
+        log.warning("The poses are parallel")
+        return None
+
+    if np.isclose(alpha1, 0, 0.01):
+        x_center = pose1.x
+        y_center = b2
+    elif np.isclose(alpha2, 0, 0.01):
+        x_center = pose2.x
+        y_center = b1
+    else:
+        x_center = (b2 - b1) / (a1 - a2)
+        y_center = a1*x_center + b1
+    z_center = pose1.z
+
+    return np.array([x_center, y_center, z_center])
+
+
+def arc(start_pose, stop_pose, center, robot_config, servo_controller):
+    pass
