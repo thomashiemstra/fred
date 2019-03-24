@@ -3,11 +3,12 @@ from src.kinematics.kinematics_utils import Pose
 from src.xbox_controller.xbox_poller import XboxPoller
 import numpy as np
 from numpy import pi
+from src.globals import WorkSpaceLimits
 
 
 class PosePoller:
 
-    def __init__(self, maximum_speed=15.0, ramp_up_time=0.1, position_limit=35.0):
+    def __init__(self, maximum_speed=15.0, ramp_up_time=0.1):
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
         self.steps_per_second = 15
@@ -16,7 +17,6 @@ class PosePoller:
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down
         self.dv = self.maximum_speed / (self.ramp_up_time * self.steps_per_second)  # v/step
         self.poller = XboxPoller()
-        self.position_limit = position_limit
 
     def input_to_delta_velocity(self, controller_input, velocity, maximum_velocity):
         new_velocity = 0
@@ -69,9 +69,9 @@ class PosePoller:
         alpha = old_pose.alpha + self.dt * self.v_alpha
         gamma = old_pose.gamma + self.dt * self.v_gamma
 
-        x = np.clip(x, -self.position_limit, self.position_limit)
-        y = np.clip(y, 14, self.position_limit)
-        z = np.clip(z, 5, self.position_limit)
+        x = np.clip(x, WorkSpaceLimits.x_min, WorkSpaceLimits.x_max)
+        y = np.clip(y, WorkSpaceLimits.y_min, WorkSpaceLimits.y_max)
+        z = np.clip(z, WorkSpaceLimits.z_min, WorkSpaceLimits.z_max)
         alpha = np.clip(alpha, -pi / 2, pi / 2)
         gamma = np.clip(gamma, -pi / 2, pi / 2)
 

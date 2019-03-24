@@ -8,6 +8,15 @@ dynamixel_robot_arm_port = 'COM5'
 dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=5.0)
 
 
+class WorkSpaceLimits:
+    x_min = -40
+    x_max = 40
+    y_min = 15
+    y_max = 40
+    z_min = 5
+    z_max = 40
+
+
 @lru_cache(maxsize=1)
 def get_robot(port):
     global dynamixel_robot_config
