@@ -5,7 +5,6 @@ import numpy as np
 from numpy import pi
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
-from src.globals import WorkSpaceLimits
 import logging as log
 
 
@@ -125,5 +124,62 @@ def get_centre(pose1, pose2):
     return np.array([x_center, y_center, z_center])
 
 
+# Move along an ellipse
 def arc(start_pose, stop_pose, center, robot_config, servo_controller):
     pass
+
+
+def find_ellipse_radii(first_point, second_point, centre):
+    """
+    :param first_point: array of (x_0, y_0)
+    :param second_point: array of (x_1, y_1)
+    :param centre: array of (x_c, y_c)
+    :return: the 2 radii a and b or None if you gave nonsense input
+    """
+    x_0, y_0 = first_point[0], first_point[1]
+    x_1, y_1 = second_point[0], second_point[1]
+    x_c, y_c = centre[0], centre[1]
+
+    if np.isclose(x_0, x_1) and np.isclose(y_1, y_1):
+        log.warning("the same point is supplied twice")
+        return 0, 0
+
+    # both points lined up in the y-direction
+    # since the centre should be in front of the robot, this make no sense
+    if np.isclose(x_0, x_1):
+        log.warning("Both points have the same x coordinate, go in a line instead")
+        return 0, 0
+
+    # subtract centres from coordinates
+    x_0_p = x_0 - x_c
+    x_1_p = x_1 - x_c
+    y_0_p = y_0 - y_c
+    y_1_p = y_1 - y_c
+
+    # both points lined up in the x direction
+    # it should be a circle
+    if np.isclose(y_0, y_1):
+        log.warning("Both points have the same y, "
+                    "assuming this should be a circle, taking the first point for the radius")
+        r = np.sqrt(np.power(x_0_p, 2) + np.power(y_0_p, 2))
+        return r, r
+
+    # Solve a_matrix.X = b_matrix where X = [A, B] with A = 1/a^2 and B = 1/b^2
+    a_matrix = np.array([[x_0_p ** 2, y_0_p ** 2],
+                        [x_1_p ** 2, y_1_p ** 2]])
+    b_matrix = np.array([1, 1])
+
+    # singular probably means we want a circle
+    if is_singular(a_matrix):
+        log.warning("singular matrix found, impossible combination supplied: ", first_point, second_point, centre)
+        return 0, 0
+
+    res = np.linalg.solve(a_matrix, b_matrix)
+    a = 1 / np.sqrt(res[0])
+    b = 1 / np.sqrt(res[1])
+
+    return a, b
+
+
+def is_singular(a):
+    return not (a.shape[0] == a.shape[1] and np.linalg.matrix_rank(a) == a.shape[0])
