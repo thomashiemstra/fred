@@ -11,35 +11,35 @@ class GetCentreTests(unittest.TestCase):
         pose1 = Pose(0, 0, 0,)
         pose2 = Pose(10, 10, 0, alpha=pi/2)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         self.assert_centre_equals([0, 10, 0], centre)
 
     def test_right_angle_lines_2(self):
         pose1 = Pose(0, 0, 0,)
         pose2 = Pose(10, 10, 0, alpha=-pi/2)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         self.assert_centre_equals([0, 10, 0], centre)
 
     def test_parallel_1(self):
         pose1 = Pose(0, 0, 0,  alpha=-pi/2)
         pose2 = Pose(10, 10, 0, alpha=-pi/2)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         self.assertIsNone(centre)
 
     def test_parallel_2(self):
         pose1 = Pose(0, 0, 0,  alpha=pi/2)
         pose2 = Pose(10, 10, 0, alpha=-pi/2)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         self.assertIsNone(centre)
 
     def test_same_y_for_points_1(self):
         pose1 = Pose(0, 0, 0, alpha=pi / 4)
         pose2 = Pose(10, 0, 0, alpha=-pi / 4)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         print(centre)
         self.assert_centre_equals([5, 5, 0], centre)
 
@@ -47,7 +47,7 @@ class GetCentreTests(unittest.TestCase):
         pose1 = Pose(0, 0, 0, alpha=-pi / 4)
         pose2 = Pose(10, 0, 0, alpha=pi / 4)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         print(centre)
         self.assert_centre_equals([5, -5, 0], centre)
 
@@ -55,7 +55,7 @@ class GetCentreTests(unittest.TestCase):
         pose1 = Pose(5, 5, 0, alpha=pi / 8)
         pose2 = Pose(10, 10, 0, alpha=-pi / 8)
 
-        centre = movement_utils.get_centre(pose1, pose2)
+        centre = movement_utils.get_center(pose1, pose2)
         print(centre)
         self.assert_centre_equals([8.53, 13.53, 0], centre)
 

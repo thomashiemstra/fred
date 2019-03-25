@@ -81,7 +81,7 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
         servo_controller.move_servos(current_angles)
 
 
-def get_centre(pose1, pose2):
+def get_center(pose1, pose2):
     """
     Use two poses both at the same z-height to determine a point in space
     Used to have the camera always look at the same point while moving
@@ -157,6 +157,18 @@ def get_line_coefficients(alpha, x, y):
 
 # Move along an ellipse
 def arc(start_pose, stop_pose, center, robot_config, servo_controller):
+    """
+    move along an arc passing through the 2 poses and has the given centre in other words:
+    x = a*cos(t) + x_c
+    y = b*sin(t) + y_c
+    z = c*sin(t) + z_c
+    :param start_pose:
+    :param stop_pose:
+    :param center:
+    :param robot_config:
+    :param servo_controller:
+    :return:
+    """
     pass
 
 
