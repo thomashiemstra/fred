@@ -81,9 +81,16 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
         servo_controller.move_servos(current_angles)
 
 
-# Given 2 poses both on the same level and with orientations only in the x-y plane
-# find the intersection of the 2 poses
 def get_centre(pose1, pose2):
+    """
+    Use two poses both at the same z-height to determine a point in space
+    Used to have the camera always look at the same point while moving
+    Both poses should point towards the positive y-axis, so -pi/2 <= alpha <= pi/2
+
+    :param pose1: the first pose
+    :param pose2: the second pose
+    :return: array of x,y,z of the centre
+    """
     tolerance = 0.1
     if not np.isclose(pose1.z, pose2.z, tolerance):
         log.warning("z's do not match")
@@ -100,13 +107,15 @@ def get_centre(pose1, pose2):
     alpha1 = pose1.alpha
     alpha2 = pose2.alpha
 
-    a1 = 1/np.tan(alpha1)
-    b1 = pose1.y - a1*pose1.x
+    a1, b1 = get_line_coefficients(alpha1, pose1.x, pose1.y)
+    a2, b2 = get_line_coefficients(alpha2, pose2.x, pose2.y)
 
-    a2 = 1/np.tan(alpha2)
-    b2 = pose2.y - a2 * pose2.x
+    if not (a1 is None or a2 is None):
+        if np.isclose(a1, a2, 0.01):
+            log.warning("The poses are parallel")
+            return None
 
-    if np.isclose(a1, a2, 0.01):
+    if a1 is None and a2 is None:
         log.warning("The poses are parallel")
         return None
 
@@ -122,6 +131,28 @@ def get_centre(pose1, pose2):
     z_center = pose1.z
 
     return np.array([x_center, y_center, z_center])
+
+
+def get_line_coefficients(alpha, x, y):
+    """
+    calculates y = a*x + b
+    find the coefficients of the line passing through x,y with gradient determined by the angle alpha
+    alpha should be between -pi/2 and pi/2 because of the constraint from get_centre()
+    :param alpha: angle of the line
+    :param x: x-coordinate
+    :param y: 7-coordinate
+    :return: a and b, returns none of the line is along the y-axis
+    """
+    temp = np.tan(alpha)
+    if alpha >= pi / 2 or alpha <= -pi / 2:
+        a = 0
+    elif temp != 0:
+        a = 1 / temp
+    else:
+        a = None  # the line points along the y axis
+    b = y - a * x if a is not None else None
+
+    return a, b
 
 
 # Move along an ellipse
