@@ -31,21 +31,41 @@ def arc(start_pose, stop_pose, center, robot_config, servo_controller):
 
 def get_rotation_matrix_params(start_pose, stop_pose, center):
     """
-    We want the coordinate system for a plane spanned by the 2 poses and the center
+    We want the coordinate system for a plane spanned by (x,y,z) of the 2 poses and the center
     x will point from start_pose to stop_pose
     y will point in the direction of center
     z will follow from the right hand rule
     :param start_pose:
     :param stop_pose:
-    :param center:
+    :param center: array of (x,y,z) of the center
     :return:
     """
+    # x is easy
     p_0 = np.array([start_pose.x, start_pose.y, start_pose.z])
     p_1 = np.array([stop_pose.x, stop_pose.y, stop_pose.z])
-    p_c = np.array(center)
 
-    x = p_0 - p_1
-    x /= np.linalg.norm(x)
+    x = p_1 - p_0
+    norm = np.linalg.norm(x)
+    x = x / norm
+
+    # next we determine y and z with some cross product magic
+    p_c = np.array(center)
+    # the line pointing to the center, with this one and x we have the xy-plane defined
+    p_0_p_c = p_c - p_0
+
+    z = np.cross(x, p_0_p_c)
+    norm = np.linalg.norm(z)
+    if np.isclose(norm, 0.0):
+        log.warning("all point are aligned, invalid input")
+        return None
+    z = z / norm
+
+    y = np.cross(z, x)
+    norm = np.linalg.norm(y)
+    y = y / norm
+
+    # and now we have an orthonormal basis from which we construct the rotation matrix
+    return np.column_stack((x, y, z))
 
 
 def get_parametric_parameter(a, b, x_c, y_c, x, y):

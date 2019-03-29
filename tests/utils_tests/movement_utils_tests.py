@@ -4,6 +4,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.utils import arc
 import numpy as np
 from numpy import pi
+import numpy.testing as test
 
 
 class GetCentreTests(unittest.TestCase):
@@ -148,3 +149,70 @@ class GetParametricParameterTests(unittest.TestCase):
 
         t = arc.get_parametric_parameter(a, b, 0, 0, x, y)
         self.assertIsNone(t)
+
+
+class GetRotationMatrixParamsTests(unittest.TestCase):
+
+    def test_no_rotation(self):
+        pose1 = Pose(0, 0, 0)
+        pose2 = Pose(1, 0, 0)
+        center = [1, 1, 0]
+
+        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        self.assertIsNotNone(r)
+
+        expected = np.eye(3)
+        test.assert_allclose(r, expected)
+
+    def test_pi_rotation(self):
+        pose1 = Pose(1, 0, 0)
+        pose2 = Pose(0, 0, 0)
+        center = [1, 1, 0]
+
+        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        self.assertIsNotNone(r)
+
+        expected = np.array([
+            [-1, 0,  0],
+            [0,  1,  0],
+            [0,  0, -1]
+        ])
+        test.assert_allclose(r, expected)
+
+    def test_center_above_xy(self):
+        pose1 = Pose(0, 0, 0)
+        pose2 = Pose(1, 0, 0)
+        center = [0, 0, 1]
+
+        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        self.assertIsNotNone(r)
+
+        expected = np.array([
+            [1, 0, 0],
+            [0, 0, -1],
+            [0, 1, 0]
+        ])
+        test.assert_allclose(r, expected)
+
+    def test_3d_points_1(self):
+        pose1 = Pose(1, 1, 1)
+        pose2 = Pose(2, 2, 2)
+        center = [-1, -1, -1]
+
+        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        self.assertIsNone(r)
+
+    def test_3d_points_2(self):
+        pose1 = Pose(1, 1, 1)
+        pose2 = Pose(1, 2, 1)
+        center = [1, 1, 2]
+
+        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        self.assertIsNotNone(r)
+
+        expected = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [0, 1, 0]
+        ])
+        test.assert_allclose(r, expected)
