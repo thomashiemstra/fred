@@ -1,7 +1,8 @@
 import unittest
 
 from src.kinematics.kinematics_utils import Pose
-from src.utils import movement_utils
+from src.utils import arc
+import numpy as np
 from numpy import pi
 
 
@@ -11,35 +12,35 @@ class GetCentreTests(unittest.TestCase):
         pose1 = Pose(0, 0, 0,)
         pose2 = Pose(10, 10, 0, alpha=pi/2)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         self.assert_centre_equals([0, 10, 0], centre)
 
     def test_right_angle_lines_2(self):
         pose1 = Pose(0, 0, 0,)
         pose2 = Pose(10, 10, 0, alpha=-pi/2)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         self.assert_centre_equals([0, 10, 0], centre)
 
     def test_parallel_1(self):
         pose1 = Pose(0, 0, 0,  alpha=-pi/2)
         pose2 = Pose(10, 10, 0, alpha=-pi/2)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         self.assertIsNone(centre)
 
     def test_parallel_2(self):
         pose1 = Pose(0, 0, 0,  alpha=pi/2)
         pose2 = Pose(10, 10, 0, alpha=-pi/2)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         self.assertIsNone(centre)
 
     def test_same_y_for_points_1(self):
         pose1 = Pose(0, 0, 0, alpha=pi / 4)
         pose2 = Pose(10, 0, 0, alpha=-pi / 4)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         print(centre)
         self.assert_centre_equals([5, 5, 0], centre)
 
@@ -47,7 +48,7 @@ class GetCentreTests(unittest.TestCase):
         pose1 = Pose(0, 0, 0, alpha=-pi / 4)
         pose2 = Pose(10, 0, 0, alpha=pi / 4)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         print(centre)
         self.assert_centre_equals([5, -5, 0], centre)
 
@@ -55,7 +56,7 @@ class GetCentreTests(unittest.TestCase):
         pose1 = Pose(5, 5, 0, alpha=pi / 8)
         pose2 = Pose(10, 10, 0, alpha=-pi / 8)
 
-        centre = movement_utils.get_center(pose1, pose2)
+        centre = arc.get_center(pose1, pose2)
         print(centre)
         self.assert_centre_equals([8.53, 13.53, 0], centre)
 
@@ -72,7 +73,7 @@ class FindEllipseRadiiTests(unittest.TestCase):
         second_point = [-1, 0]
         centre = [0, 0]
 
-        a, b = movement_utils.find_ellipse_radii(first_point, second_point, centre)
+        a, b = arc.find_ellipse_radii(first_point, second_point, centre)
         self.assertEqual(a, 1)
         self.assertEqual(a, b)
 
@@ -82,7 +83,7 @@ class FindEllipseRadiiTests(unittest.TestCase):
         second_point = [-5, 0]
         centre = [0, 0]
 
-        a, b = movement_utils.find_ellipse_radii(first_point, second_point, centre)
+        a, b = arc.find_ellipse_radii(first_point, second_point, centre)
         self.assertEqual(a, 2)
         self.assertEqual(a, b)
 
@@ -91,7 +92,7 @@ class FindEllipseRadiiTests(unittest.TestCase):
 
         centre = [0, 0]
 
-        a, b = movement_utils.find_ellipse_radii(first_point, first_point, centre)
+        a, b = arc.find_ellipse_radii(first_point, first_point, centre)
         self.assertEqual(a, 0)
         self.assertEqual(b, 0)
 
@@ -100,7 +101,7 @@ class FindEllipseRadiiTests(unittest.TestCase):
         second_point = [-5, 3]
         centre = [4, 11]
 
-        a, b = movement_utils.find_ellipse_radii(first_point, second_point, centre)
+        a, b = arc.find_ellipse_radii(first_point, second_point, centre)
         self.assertAlmostEqual(a, 14.76, 1)
         self.assertAlmostEqual(b, 10.09, 1)
 
@@ -109,8 +110,41 @@ class FindEllipseRadiiTests(unittest.TestCase):
         second_point = [-1, 1]
         centre = [0, 0]
 
-        a, b = movement_utils.find_ellipse_radii(first_point, second_point, centre)
+        a, b = arc.find_ellipse_radii(first_point, second_point, centre)
         print(a, b)
         self.assertAlmostEqual(a, 1.41, 1)
         self.assertAlmostEqual(b, 1.41, 1)
 
+
+class GetParametricParameterTests(unittest.TestCase):
+
+    def test_circle(self):
+        a = 1
+        b = 1
+        x = 1
+        y = 0
+
+        t = arc.get_parametric_parameter(a, b, 0, 0, x, y)
+        self.assertEqual(t, 0.0)
+
+    def test_ellipse(self):
+        a = 3
+        b = 9
+        expected_t = pi/4
+        x_c = 5
+        y_c = 77
+
+        x = 3*np.cos(expected_t) + x_c
+        y = 9*np.sin(expected_t) + y_c
+
+        t_actual = arc.get_parametric_parameter(a, b, x_c, y_c, x, y)
+        self.assertAlmostEqual(t_actual, expected_t)
+
+    def test_point_not_on_ellipse(self):
+        a = 1
+        b = 1
+        x = 2
+        y = 0
+
+        t = arc.get_parametric_parameter(a, b, 0, 0, x, y)
+        self.assertIsNone(t)
