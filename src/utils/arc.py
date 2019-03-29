@@ -44,9 +44,9 @@ def get_rotation_matrix_params(start_pose, stop_pose, center):
     p_0 = np.array([start_pose.x, start_pose.y, start_pose.z])
     p_1 = np.array([stop_pose.x, stop_pose.y, stop_pose.z])
 
-    x = p_1 - p_0
-    norm = np.linalg.norm(x)
-    x = x / norm
+    p_0_p_1 = p_1 - p_0
+    norm = np.linalg.norm(p_0_p_1)
+    x = p_0_p_1 / norm
 
     # next we determine y and z with some cross product magic
     p_c = np.array(center)
@@ -65,7 +65,8 @@ def get_rotation_matrix_params(start_pose, stop_pose, center):
     y = y / norm
 
     # and now we have an orthonormal basis from which we construct the rotation matrix
-    return np.column_stack((x, y, z))
+    # also return the vectors of p_0, p_1 and p_c expressed in this new coordinate frame
+    return np.column_stack((x, y, z)), [0, 0, 0], p_0_p_1, p_0_p_c
 
 
 def get_parametric_parameter(a, b, x_c, y_c, x, y):

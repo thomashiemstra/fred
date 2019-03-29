@@ -158,18 +158,21 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
         pose2 = Pose(1, 0, 0)
         center = [1, 1, 0]
 
-        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        r, p0_prime, p1_prime, pc_prime = arc.get_rotation_matrix_params(pose1, pose2, center)
         self.assertIsNotNone(r)
 
         expected = np.eye(3)
         test.assert_allclose(r, expected)
+        test.assert_allclose(p0_prime, [0, 0, 0], err_msg='x_prime mismatch')
+        test.assert_allclose(p1_prime, [1, 0, 0], err_msg='y_prime mismatch')
+        test.assert_allclose(pc_prime, [1, 1, 0], err_msg='z_prime mismatch')
 
     def test_pi_rotation(self):
         pose1 = Pose(1, 0, 0)
         pose2 = Pose(0, 0, 0)
         center = [1, 1, 0]
 
-        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        r, p0_prime, p1_prime, pc_prime = arc.get_rotation_matrix_params(pose1, pose2, center)
         self.assertIsNotNone(r)
 
         expected = np.array([
@@ -178,13 +181,16 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
             [0,  0, -1]
         ])
         test.assert_allclose(r, expected)
+        test.assert_allclose(p0_prime, [0, 0, 0], err_msg='x_prime mismatch')
+        test.assert_allclose(p1_prime, [-1, 0, 0], err_msg='y_prime mismatch')
+        test.assert_allclose(pc_prime, [0, 1, 0], err_msg='z_prime mismatch')
 
     def test_center_above_xy(self):
         pose1 = Pose(0, 0, 0)
         pose2 = Pose(1, 0, 0)
         center = [0, 0, 1]
 
-        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        r, p0_prime, p1_prime, pc_prime = arc.get_rotation_matrix_params(pose1, pose2, center)
         self.assertIsNotNone(r)
 
         expected = np.array([
@@ -193,13 +199,16 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
             [0, 1, 0]
         ])
         test.assert_allclose(r, expected)
+        test.assert_allclose(p0_prime, [0, 0, 0], err_msg='x_prime mismatch')
+        test.assert_allclose(p1_prime, [1, 0, 0], err_msg='y_prime mismatch')
+        test.assert_allclose(pc_prime, [0, 0, 1], err_msg='z_prime mismatch')
 
     def test_3d_points_1(self):
         pose1 = Pose(1, 1, 1)
         pose2 = Pose(2, 2, 2)
         center = [-1, -1, -1]
 
-        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        r, p0_prime, p1_prime, pc_prime = arc.get_rotation_matrix_params(pose1, pose2, center)
         self.assertIsNone(r)
 
     def test_3d_points_2(self):
@@ -207,7 +216,7 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
         pose2 = Pose(1, 2, 1)
         center = [1, 1, 2]
 
-        r = arc.get_rotation_matrix_params(pose1, pose2, center)
+        r, p0_prime, p1_prime, pc_prime = arc.get_rotation_matrix_params(pose1, pose2, center)
         self.assertIsNotNone(r)
 
         expected = np.array([
@@ -216,3 +225,6 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
             [0, 1, 0]
         ])
         test.assert_allclose(r, expected)
+        test.assert_allclose(p0_prime, [0, 0, 0], err_msg='x_prime mismatch')
+        test.assert_allclose(p1_prime, [0, 1, 0], err_msg='y_prime mismatch')
+        test.assert_allclose(pc_prime, [0, 0, 1], err_msg='z_prime mismatch')
