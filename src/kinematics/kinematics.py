@@ -5,20 +5,31 @@ from numpy import arctan2, sin, cos, pi, power
 
 
 def inverse_kinematics(pose, robot_config):
+    """
+    Given a target pose and link lengths of a 6 DOF robot arm, calculate the corresponding angles to reach it.
+    For a more detailed explanation, see ik_documentation.pdf.
+    :param pose: target pose, encodes both position and orientation
+    :param robot_config: link lengths
+    :return: array of angles to reach this pose, this array starts at 1.
+    """
+    # Link lengths
     d1 = robot_config.d1
     d4 = robot_config.d4
     d6 = robot_config.d6
     a2 = robot_config.a2
 
+    # Target values
     x, y, z = pose.x, pose.y, pose.z
     t = pose.get_euler_matrix()
     flip = pose.flip
 
+    # First find the position of the wrist
     xc = x - d6 * t[0, 2]
     yc = y - d6 * t[1, 2]
     zc = z - d6 * t[2, 2]
     angles = np.zeros(7, dtype=np.float64)
 
+    # The first 3 angles only depend on the position of the wrist
     angles[1] = arctan2(yc, xc)
 
     d = (power(xc, 2) + power(yc, 2) + power((zc - d1), 2) - power(a2, 2) - power(d4, 2)) / (2.0 * a2 * d4)
@@ -28,8 +39,13 @@ def inverse_kinematics(pose, robot_config):
 
     k1 = a2 + d4 * cos(angles[3])
     k2 = d4 * sin(angles[3])
+    # The positive square root is picked meaning elbow up.
     angles[2] = arctan2((zc - d1), sqrt(power(xc, 2) + power(yc, 2))) - arctan2(k2, k1)
 
+    # Because of the DH-parameters used in the forward kinematics angle3 behaves a bit weird.
+    # When the arm is stretched out angle3 should be 0 like the above calculation assumes,
+    # but instead it's shifted by pi/2. So we add that here to have a correct angle for the forward kinematics.
+    # angle3 = pi/2 means the arm is stretched out, angle3=0 means a 90 degree turn towards the base.
     angles[3] += pi / 2
 
     q1 = angles[1]
@@ -37,30 +53,36 @@ def inverse_kinematics(pose, robot_config):
     q3 = angles[3]
     q23 = q2 + q3
 
-    r11 = t[0, 0]
-    r12 = t[0, 1]
-    r13 = t[0, 2]
-    r21 = t[1, 0]
-    r22 = t[1, 1]
-    r23 = t[1, 2]
-    r31 = t[2, 0]
-    r32 = t[2, 1]
-    r33 = t[2, 2]
+    t11 = t[0, 0]
+    t12 = t[0, 1]
+    t13 = t[0, 2]
+    t21 = t[1, 0]
+    t22 = t[1, 1]
+    t23 = t[1, 2]
+    t31 = t[2, 0]
+    t32 = t[2, 1]
+    t33 = t[2, 2]
 
-    ax = r13 * cos(q1) * cos(q23) + r23 * cos(q23) * sin(q1) + r33 * sin(q23)
-    ay = -r23 * cos(q1) + r13 * sin(q1)
-    az = -r33 * cos(q23) + r13 * cos(q1) * sin(q23) + r23 * sin(q1) * sin(q23)
-    sz = -r32 * cos(q23) + r12 * cos(q1) * sin(q23) + r22 * sin(q1) * sin(q23)
-    nz = -r31 * cos(q23) + r11 * cos(q1) * sin(q23) + r21 * sin(q1) * sin(q23)
+    # For rotation: R_13.R_46 = T where R_13 is the rotation of frame 3 relative to the base, R_46 the rotation of
+    # frame 4 to 6 and T is the target rotation. We know R_13 because we have the first 3 angles, and we know T because
+    # that was the input. So we have R_46 = (R_13**T).T (inverse of rotation matrix is it's transpose).
+    # The left side is a matrix of the last 3 angles.
+    # Then it's just solving an euler matrix for which we need a few elements of (R_13**T).T:
+    r13 = t13 * cos(q1) * cos(q23) + t23 * cos(q23) * sin(q1) + t33 * sin(q23)
+    r23 = -t23 * cos(q1) + t13 * sin(q1)
+    r33 = -t33 * cos(q23) + t13 * cos(q1) * sin(q23) + t23 * sin(q1) * sin(q23)
+    r32 = -t32 * cos(q23) + t12 * cos(q1) * sin(q23) + t22 * sin(q1) * sin(q23)
+    r31 = -t31 * cos(q23) + t11 * cos(q1) * sin(q23) + t21 * sin(q1) * sin(q23)
 
+    # If you flip the last 3 angles you reach the same pose. Picking the right flip will prevent singularities.
     if flip:
-        angles[4] = arctan2(-ay, -ax)
-        angles[5] = arctan2(-sqrt(ax * ax + ay * ay), az)
-        angles[6] = arctan2(-sz, nz)
+        angles[4] = arctan2(-r23, -r13)
+        angles[5] = arctan2(-sqrt(r13 * r13 + r23 * r23), r33)
+        angles[6] = arctan2(-r32, r31)
     else:
-        angles[4] = arctan2(ay, ax)
-        angles[5] = arctan2(sqrt(ax * ax + ay * ay), az)
-        angles[6] = arctan2(sz, -nz)
+        angles[4] = arctan2(r23, r13)
+        angles[5] = arctan2(sqrt(r13 * r13 + r23 * r23), r33)
+        angles[6] = arctan2(r32, -r31)
 
     return angles
 
