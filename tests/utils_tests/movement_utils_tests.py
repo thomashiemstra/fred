@@ -78,7 +78,8 @@ class FindEllipseRadiiTests(unittest.TestCase):
         self.assertEqual(a, 1)
         self.assertEqual(a, b)
 
-    # if the 2 points have different x coordinates the first point is taken for the circle radius
+    # if the 2 points have different x coordinates and they both lie on the y-axis
+    # the first point is taken for the circle radius
     def test_same_y_2(self):
         first_point = [2, 0]
         second_point = [-5, 0]
@@ -108,7 +109,16 @@ class FindEllipseRadiiTests(unittest.TestCase):
 
     def test_centre_between_points(self):
         first_point = [1, 1]
-        second_point = [-1, 1]
+        second_point = [-1, -1]
+        centre = [0, 0]
+
+        a, b = arc.find_ellipse_radii(first_point, second_point, centre)
+        self.assertAlmostEqual(a, 1.41, 1)
+        self.assertAlmostEqual(b, 1.41, 1)
+
+    def test_p_0_at_origin(self):
+        first_point = [1, 1]
+        second_point = [-1, 2]
         centre = [0, 0]
 
         a, b = arc.find_ellipse_radii(first_point, second_point, centre)
