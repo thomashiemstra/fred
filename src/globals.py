@@ -1,5 +1,5 @@
 from src.camera.capture import CameraCapture
-from src.servo_handling.servo_controller import ServoController
+from src.dynamixel_robot.servo_controller import DynamixelRobotArm
 from src.kinematics.kinematics_utils import RobotConfig
 from functools import lru_cache
 
@@ -13,7 +13,7 @@ dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=5.0)
 @lru_cache(maxsize=1)
 def get_robot(port):
     global dynamixel_robot_config
-    return ServoController(port, dynamixel_robot_config)
+    return DynamixelRobotArm(port, dynamixel_robot_config)
 
 
 @lru_cache(maxsize=1)

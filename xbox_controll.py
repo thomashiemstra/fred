@@ -7,7 +7,7 @@ from src.kinematics.kinematics import forward_position_kinematics
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose, RobotConfig
 from src.utils.movement_utils import pose_to_pose
-from src.servo_handling.servo_controller import ServoController
+from src.dynamixel_robot.servo_controller import DynamixelRobotArm
 from src.xbox_controller.xbox_poller import XboxPoller
 
 
@@ -54,7 +54,7 @@ if __name__ == '__main__':
 
     # ________________ Dynamixel stuff ________________
     dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=2.0)
-    dynamixel_servo_controller = ServoController("COM5")
+    dynamixel_servo_controller = DynamixelRobotArm("COM5")
     dynamixel_servo_controller.enable_servos()
     dynamixel_servo_controller.set_velocity_profile()
     dynamixel_servo_controller.set_pid()

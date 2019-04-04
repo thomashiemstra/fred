@@ -1,7 +1,7 @@
-from src.servo_handling import dynamixel_x_config as cfg
-from src.servo_handling.dynamixel_utils import setup_dynamixel_handlers
-from src.servo_handling.servo import Servo
-from src.servo_handling.servo_handler import ServoHandler
+from src.dynamixel_robot import dynamixel_x_config as cfg
+from src.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
+from src.dynamixel_robot.servo import Servo
+from src.dynamixel_robot.servo_handler import ServoHandler
 from src.kinematics.kinematics import inverse_kinematics
 from src.utils.movement_utils import angles_to_angles
 from src.utils.decorators import synchronized_with_lock
@@ -11,7 +11,8 @@ import numpy as np
 from numpy import pi
 
 
-class ServoController:
+# Facade for the robot as a whole, abstracting away the servo handling
+class DynamixelRobotArm:
 
     def __init__(self, port, robot_config):
         self.robot_config = robot_config
