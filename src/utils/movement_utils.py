@@ -6,7 +6,6 @@ from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
 
 
-
 def line(start_pose, stop_pose, robot_config, servo_controller):
     """go from start to stop pose in time amount of seconds"""
     flip = stop_pose.flip
