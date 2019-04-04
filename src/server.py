@@ -5,7 +5,7 @@ from flask_cors import CORS
 from flask_cdn import CDN
 from flask_nav import Nav
 from flask_nav.elements import Navbar, View
-import src.globals as globals
+import src.global_objects as globals
 from flask import jsonify
 
 

@@ -11,7 +11,7 @@ from flask import jsonify
 from src.kinematics.kinematics_utils import Pose
 from src.utils.movement_utils import pose_to_pose, line
 from time import sleep
-import src.globals as globals
+import src.global_objects as globals
 
 
 try:
