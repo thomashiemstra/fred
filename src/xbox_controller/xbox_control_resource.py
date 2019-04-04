@@ -10,11 +10,8 @@ from flask import jsonify
 
 from src.kinematics.kinematics_utils import Pose
 from src.utils.movement_utils import pose_to_pose, line
-from src.xbox_controller.pose_poller import PosePoller
 from time import sleep
 import src.globals as globals
-
-from yaml import dump
 
 
 try:
