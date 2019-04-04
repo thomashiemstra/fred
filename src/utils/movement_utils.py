@@ -2,8 +2,12 @@ from __future__ import division
 from math import ceil
 from time import sleep
 import numpy as np
+
+from src import global_objects
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
+import logging as log
+from scipy.interpolate import splev, splrep, CubicSpline, splprep, interp1d, InterpolatedUnivariateSpline
 
 
 def line(start_pose, stop_pose, robot_config, servo_controller):
@@ -77,3 +81,68 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
 
         sleep(dt)
         servo_controller.move_servos(current_angles)
+
+
+def get_curve_val(t):
+    return 6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3)
+
+
+# todo test this function!
+def b_spline_curve(poses, time, robot_config, servo_controller, workspace_limits=None):
+    """
+    Move along a B-spline defined by the poses provided
+    :param poses: array of Pose, knot points for the B-spline
+    :param time: total time for the movement
+    :param robot_config:
+    :param servo_controller:
+    :param workspace_limits:
+    :return: final pose
+    """
+    if len(poses) < 2:
+        log.warning("not enough poses")
+        return
+
+    k_val = max(len(poses) - 1, 3)
+
+    x = [pose.x for pose in poses]
+    y = [pose.y for pose in poses]
+    z = [pose.z for pose in poses]
+
+    # noinspection PyTupleAssignmentBalance
+    tck, u = splprep([x, y, z], k=k_val, s=0)
+
+    total_steps = ceil(time * global_objects.steps_per_second)
+    dt = 1.0 / global_objects.steps_per_second
+    lin = np.linspace(0, 1, total_steps)
+    path_parameter = [get_curve_val(t) for t in lin]
+
+    x_steps, y_steps, z_steps = splev(path_parameter, tck)
+
+    start_pose = poses[0]
+    stop_pose = poses[-1]
+
+    d_alpha = stop_pose.alpha - start_pose.alpha
+    d_beta = stop_pose.beta - start_pose.beta
+    d_gamma = stop_pose.gamma - start_pose.gamma
+
+    flip = stop_pose.flip
+
+    # todo what if the curve does not exactly starts at start_pose because of fitting?
+    for i in range(total_steps):
+        x = x_steps[i]
+        y = y_steps[i]
+        z = z_steps[i]
+
+        alpha = start_pose.alpha + d_alpha * path_parameter[i]
+        beta = start_pose.beta + d_beta * path_parameter[i]
+        gamma = start_pose.gamma + d_gamma * path_parameter[i]
+
+        temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
+
+        current_angles = inverse_kinematics(temp_pose, robot_config)
+        servo_controller.move_servos(current_angles)
+
+        sleep(dt)
+
+    return stop_pose
+
