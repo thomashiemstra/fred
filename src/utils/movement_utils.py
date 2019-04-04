@@ -88,7 +88,7 @@ def get_curve_val(t):
 
 
 # todo test this function!
-def b_spline_curve(poses, time, robot_config, servo_controller, workspace_limits=None):
+def b_spline_curve(poses, time, robot_config, servo_controller, workspace_limits=None, center=None):
     """
     Move along a B-spline defined by the poses provided
     :param poses: array of Pose, knot points for the B-spline
@@ -116,11 +116,13 @@ def b_spline_curve(poses, time, robot_config, servo_controller, workspace_limits
     lin = np.linspace(0, 1, total_steps)
     path_parameter = [get_curve_val(t) for t in lin]
 
+    # todo check workspace limits if they are given
     x_steps, y_steps, z_steps = splev(path_parameter, tck)
 
     start_pose = poses[0]
     stop_pose = poses[-1]
 
+    # todo change orientation to always face the center if it's not None
     d_alpha = stop_pose.alpha - start_pose.alpha
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
