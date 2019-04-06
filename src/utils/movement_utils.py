@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def line(start_pose, stop_pose, robot_config, servo_controller):
+def line(start_pose, stop_pose, servo_controller, time):
     """go from start to stop pose in time amount of seconds"""
     flip = stop_pose.flip
     dx = stop_pose.x - start_pose.x
@@ -21,7 +21,6 @@ def line(start_pose, stop_pose, robot_config, servo_controller):
     d_alpha = stop_pose.alpha - start_pose.alpha
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
-    time = stop_pose.time
 
     steps_per_second = 10
     total_steps = ceil(time * steps_per_second)  # 50 steps per second
@@ -43,8 +42,7 @@ def line(start_pose, stop_pose, robot_config, servo_controller):
         z_adjust = r * 0.008 if i > 3 else 0
         temp_pose = Pose(x, y, z + z_adjust, flip, alpha, beta, gamma)
 
-        current_angles = inverse_kinematics(temp_pose, robot_config)
-        servo_controller.move_servos(current_angles)
+        servo_controller.move_to_pose(temp_pose)
 
         sleep(dt)
 
@@ -139,7 +137,6 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     d_gamma = stop_pose.gamma - start_pose.gamma
 
     flip = stop_pose.flip
-    robot_config = servo_controller.robot_config
 
     if plot_first:
         plot_curve(x_steps, y_steps, z_steps)
@@ -156,8 +153,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
-        current_angles = inverse_kinematics(temp_pose, robot_config)
-        servo_controller.move_servos(current_angles)
+        servo_controller.move_to_pose(temp_pose)
 
         sleep(dt)
 
