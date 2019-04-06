@@ -1,17 +1,12 @@
 from __future__ import division
 
 import threading
-import time
-from copy import copy
 
-import numpy as np
 from flask import Blueprint
 from flask import jsonify
 
 from src.kinematics.kinematics_utils import Pose
-from src.utils.movement_utils import pose_to_pose, line
-from time import sleep
-import src.global_objects as globals
+import src.global_objects as global_objects
 
 
 try:
@@ -47,7 +42,7 @@ def start():
         else:
             started = True
 
-    xbox_robot_controller = globals.get_xbox_robot_controller(globals.dynamixel_robot_arm_port)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
     success = xbox_robot_controller.start()
     if success:
         xbox_robot_controller.dynamixel_servo_controller.change_status(True)
@@ -63,7 +58,7 @@ def stop():
             started = False
         else:
             return "already stopped"
-    xbox_robot_controller = globals.get_xbox_robot_controller(globals.dynamixel_robot_arm_port)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
     xbox_robot_controller.stop()
     xbox_robot_controller.dynamixel_servo_controller.change_status(False)
 
