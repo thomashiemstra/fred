@@ -10,6 +10,7 @@ import logging as log
 from scipy.interpolate import splev, splrep, CubicSpline, splprep, interp1d, InterpolatedUnivariateSpline
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from copy import copy
 
 
 def line(start_pose, stop_pose, servo_controller, time):
@@ -101,15 +102,30 @@ def plot_curve(x, y, z, poses):
     plt.show()
 
 
+def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_steps):
+    x_start, y_start, z_start = start_pose.x, start_pose.y, start_pose.z
+
+    dx = x_steps[0] - x_start
+    dy = y_steps[0] - y_start
+    dz = z_steps[0] - z_start
+
+    actual_stop_pose = copy(stop_pose)
+    actual_stop_pose.x = x_steps[-1] - dx
+    actual_stop_pose.y = y_steps[-1] - dy
+    actual_stop_pose.z = z_steps[-1] - dz
+
+    return dx, dy, dz, actual_stop_pose
+
+
 # todo test this function!
-def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None, plot_first=False):
+def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None, plot_only=False):
     """
     Move along a B-spline defined by the poses provided
     :param poses: array of Pose, knot points for the B-spline
     :param time: total time for the movement
     :param servo_controller:
     :param workspace_limits:
-    :param plot_first:
+    :param plot_only:
     :return: final pose
     """
     if len(poses) < 2:
@@ -135,6 +151,9 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
     start_pose = poses[0]
     stop_pose = poses[-1]
+    # If the curve does not exactly go through the start and stop pose we make sure it starts at start_pose
+    # by shifting the spline and calculate where it actually ends
+    dx, dy, dz, actual_stop_pose = get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_steps)
 
     # todo change orientation to always face the center if it's not None
     d_alpha = stop_pose.alpha - start_pose.alpha
@@ -143,14 +162,15 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
     flip = stop_pose.flip
 
-    if plot_first:
+    if plot_only:
         plot_curve(x_steps, y_steps, z_steps, poses)
+        return start_pose
 
     # todo what if the curve does not exactly starts at start_pose because of fitting?
     for i in range(total_steps):
-        x = x_steps[i]
-        y = y_steps[i]
-        z = z_steps[i]
+        x = x_steps[i] - dx
+        y = y_steps[i] - dy
+        z = z_steps[i] - dz
 
         alpha = start_pose.alpha + d_alpha * path_parameter[i]
         beta = start_pose.beta + d_beta * path_parameter[i]
@@ -162,5 +182,5 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
         sleep(dt)
 
-    return stop_pose
+    return actual_stop_pose
 
