@@ -1,4 +1,4 @@
-from src.xbox_controller.XboxController import XboxController
+from src.xbox_control.xbox360controller.XboxController import XboxController
 import threading
 import time
 import numpy as np
@@ -20,6 +20,7 @@ class Buttons:
             .format(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb)
 
 
+# A wrapper class used to get the most up to date xbox360 controller state
 class XboxPoller:
 
     def __init__(self) -> None:
@@ -146,20 +147,3 @@ class XboxPoller:
         self.b = False
         self.rb = False
         self.lb = False
-
-
-if __name__ == '__main__':
-
-    poller = XboxPoller()
-
-    try:
-        while True:
-            buttons = poller.get_buttons()
-            print(buttons)
-            time.sleep(1 / 5.0)
-
-    except KeyboardInterrupt:
-        print("stopped")
-
-    finally:
-        poller.stop()

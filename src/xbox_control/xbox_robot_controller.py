@@ -8,7 +8,7 @@ from yaml import dump
 from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import pose_to_pose
-from src.xbox_controller.pose_poller import PosePoller
+from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 from time import sleep
 
 
@@ -16,7 +16,7 @@ class XboxRobotController:
     start_pose = Pose(-26, 14.0, 6)
 
     def __init__(self, dynamixel_robot_config, dynamixel_servo_controller):
-        self.pose_poller = PosePoller()
+        self.pose_poller = XboxPoseUpdater()
         self.dynamixel_robot_config = dynamixel_robot_config
         self.dynamixel_servo_controller = dynamixel_servo_controller
         self.lock = threading.RLock()

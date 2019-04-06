@@ -1,12 +1,14 @@
 from __future__ import division
 from src.kinematics.kinematics_utils import Pose
-from src.xbox_controller.xbox_poller import XboxPoller
+from src.xbox_control.xbox360controller.xbox_poller import XboxPoller
 import numpy as np
 from numpy import pi
 from src.workspace_limits import WorkSpaceLimits
 
 
-class PosePoller:
+# class used to update a pose using the inputs from the xbox360 controller
+# i.e. move the pose (and thus robot) with the xbox360 controller
+class XboxPoseUpdater:
 
     def __init__(self, maximum_speed=15.0, ramp_up_time=0.1):
         self.v_x, self.v_y, self.v_z = 0, 0, 0

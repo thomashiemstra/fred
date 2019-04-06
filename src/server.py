@@ -1,5 +1,5 @@
 from flask import Flask, render_template
-from src.xbox_controller.xbox_control_resource import xbox_api
+from src.xbox_control.xbox_control_resource import xbox_api
 
 from flask_cors import CORS
 from flask_cdn import CDN
