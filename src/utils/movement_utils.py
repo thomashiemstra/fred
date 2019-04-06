@@ -8,6 +8,8 @@ from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
 import logging as log
 from scipy.interpolate import splev, splrep, CubicSpline, splprep, interp1d, InterpolatedUnivariateSpline
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 
 def line(start_pose, stop_pose, robot_config, servo_controller):
@@ -87,22 +89,31 @@ def get_curve_val(t):
     return 6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3)
 
 
+def plot_curve(x, y, z):
+    fig2 = plt.figure(2)
+    ax3d = fig2.add_subplot(111, projection='3d')
+
+    ax3d.plot(x, y, z, 'g*')
+    fig2.show()
+    plt.show()
+
+
 # todo test this function!
-def b_spline_curve(poses, time, robot_config, servo_controller, workspace_limits=None, center=None):
+def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None, plot_first=False):
     """
     Move along a B-spline defined by the poses provided
     :param poses: array of Pose, knot points for the B-spline
     :param time: total time for the movement
-    :param robot_config:
     :param servo_controller:
     :param workspace_limits:
+    :param plot_first:
     :return: final pose
     """
     if len(poses) < 2:
         log.warning("not enough poses")
         return
 
-    k_val = max(len(poses) - 1, 3)
+    k_val = min(len(poses) - 1, 3)
 
     x = [pose.x for pose in poses]
     y = [pose.y for pose in poses]
@@ -128,6 +139,10 @@ def b_spline_curve(poses, time, robot_config, servo_controller, workspace_limits
     d_gamma = stop_pose.gamma - start_pose.gamma
 
     flip = stop_pose.flip
+    robot_config = servo_controller.robot_config
+
+    if plot_first:
+        plot_curve(x_steps, y_steps, z_steps)
 
     # todo what if the curve does not exactly starts at start_pose because of fitting?
     for i in range(total_steps):
