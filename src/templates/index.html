@@ -37,24 +37,15 @@
 
     <div class="container">
         <div class="col-sm-4">
-        </div>
-        <div class="col-sm-4">
-            <form onsubmit="myFunction()">
-              <div class="form-group">
-                <label for="email">Email address:</label>
-                <input type="email" class="form-control" id="email">
-              </div>
-              <div class="form-group">
-                <label for="pwd">Password:</label>
-                <input type="password" class="form-control" id="pwd">
-              </div>
-              <div class="checkbox">
-                <label><input type="checkbox"> Remember me</label>
-              </div>
-              <button type="submit" class="btn btn-default">Submit</button>
+            <form id="myForm" action="/action_page.php">
+                <label for="firstName">First name:
+                    <input type="text" name="fname"><br>
+                </label>
+                <label for="lastName">Last name:
+                    <input type="text" name="lname"><br><br>
+                </label>
+              <input type="button" onclick="myFunction()" value="Submit form">
             </form>
-        </div>
-        <div class="col-sm-4">
         </div>
     </div>
 
@@ -76,22 +67,15 @@
             triggered = true
         }
     }
-    //
-    // function getAPI(){
-    //     fetch('http://127.0.0.1:5000/xbox/test')
-    //         .then((res) => {return res.json()})
-    //         .then((data) => {
-    //             console.log(data)
-    //             let result = '<h2> local results are in! </h2>';
-    //
-    //             result +=
-    //             `<div>
-    //                 <h2> result: ${data.x} </h2>
-    //             </div>`;
-    //
-    //             document.getElementById('result').innerHTML = result;
-    //         })
-    // }
+
+    function myFunction() {
+      // document.getElementById("myForm").submit();
+        var myForm = document.getElementById("myForm")
+
+
+        console.log(document.getElementById("myForm").elements.namedItem("fname").value)
+    }
+
     </script>
     {{super()}}
 {% endblock %}
