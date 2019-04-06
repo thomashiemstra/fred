@@ -38,7 +38,7 @@ class XboxPoseUpdater:
         z_in = -self.poller.get_lr_trigger()
         return x_in, y_in, z_in
 
-    def __update_orientation_velocities(self):
+    def __update_orientation_velocities(self, find_center_mode):
         right_thumb_x, right_thumb_y = self.poller.get_right_thumb()
         right_thumb_x *= -1
         right_thumb_y *= -1
@@ -46,30 +46,37 @@ class XboxPoseUpdater:
         v_alpha_max = self.maximum_speed * (right_thumb_x / 1000)
         v_gamma_max = self.maximum_speed * (right_thumb_y / 1000)
 
+        # todo get rid of these global variables and just return them
         self.v_alpha = self.input_to_delta_velocity(right_thumb_x, self.v_alpha, v_alpha_max)
-        self.v_gamma = self.input_to_delta_velocity(right_thumb_y, self.v_gamma, v_gamma_max)
+        if find_center_mode:
+            self.v_gamma = 0
+        else:
+            self.v_gamma = self.input_to_delta_velocity(right_thumb_y, self.v_gamma, v_gamma_max)
 
-    def __update_position_velocities(self):
+    def __update_position_velocities(self, find_center_mode):
         x, y, z = self.get_xyz_from_poller()
 
         v_x_max = self.maximum_speed * (x / 100)
         v_y_max = self.maximum_speed * (y / 100)
         v_z_max = self.maximum_speed * (z / 100)
 
+        # todo get rid of these global variables and just return them
         self.v_x = self.input_to_delta_velocity(x, self.v_x, v_x_max)
         self.v_y = self.input_to_delta_velocity(y, self.v_y, v_y_max)
-        self.v_z = self.input_to_delta_velocity(z, self.v_z, v_z_max)
+        if find_center_mode:
+            self.v_z = 0
+        else:
+            self.v_z = self.input_to_delta_velocity(z, self.v_z, v_z_max)
 
-    def get_updated_pose_from_controller(self, old_pose):
-        self.__update_position_velocities()
-        self.__update_orientation_velocities()
+    def get_updated_pose_from_controller(self, old_pose, find_center_mode, center):
+        self.__update_position_velocities(find_center_mode)
+        self.__update_orientation_velocities(find_center_mode)
 
         x = old_pose.x + self.dt * self.v_x
         y = old_pose.y + self.dt * self.v_y
         z = old_pose.z + self.dt * self.v_z
 
-        alpha = old_pose.alpha + self.dt * self.v_alpha
-        gamma = old_pose.gamma + self.dt * self.v_gamma
+        alpha, gamma = self.get_orientation(old_pose, x, y, z, center)
 
         x = np.clip(x, WorkSpaceLimits.x_min, WorkSpaceLimits.x_max)
         y = np.clip(y, WorkSpaceLimits.y_min, WorkSpaceLimits.y_max)
@@ -78,6 +85,19 @@ class XboxPoseUpdater:
         gamma = np.clip(gamma, -pi / 2, pi / 2)
 
         return Pose(x, y, z, flip=old_pose.flip, alpha=alpha, gamma=gamma, beta=0.0)
+
+    def get_orientation(self, old_pose, x, y, z, center):
+        if center is not None:
+            dx = center[0] - x
+            dy = center[1] - y
+            dz = center[2] - z
+            alpha = -np.arctan2(dx, dy)
+            gamma = np.arctan2(dz, dy)
+        else:
+            alpha = old_pose.alpha + self.dt * self.v_alpha
+            gamma = old_pose.gamma + self.dt * self.v_gamma
+
+        return alpha, gamma
 
     def get_buttons(self):
         return self.poller.get_buttons()

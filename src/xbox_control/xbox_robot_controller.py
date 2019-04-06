@@ -7,6 +7,7 @@ from yaml import dump
 
 from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
+from src.utils.linalg_utils import get_center
 from src.utils.movement_utils import pose_to_pose
 from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 from time import sleep
@@ -24,6 +25,8 @@ class XboxRobotController:
         self.recorded_positions = []
         self.current_pose = None
         self.thread = None
+        self.find_center_mode = False
+        self.center = None
 
     @synchronized_with_lock("lock")
     def is_done(self):
@@ -43,6 +46,19 @@ class XboxRobotController:
     @synchronized_with_lock("lock")
     def reset(self):
         self.done = False
+
+    # Record 2 poses to define the center the end effector should be pointing towards
+    @synchronized_with_lock("lock")
+    def start_find_center_mode(self):
+        self.recorded_positions = []
+        self.center = None
+        self.find_center_mode = True
+        reset_orientation(self.current_pose, self.dynamixel_robot_config,
+                          self.dynamixel_servo_controller)
+
+    @synchronized_with_lock("lock")
+    def clear_center(self):
+        self.center = None
 
     @synchronized_with_lock("lock")
     def start(self):
@@ -64,7 +80,8 @@ class XboxRobotController:
         while True:
             if self.is_done():
                 break
-            self.current_pose = self.pose_poller.get_updated_pose_from_controller(self.current_pose)
+            self.current_pose = self.pose_poller.get_updated_pose_from_controller(self.current_pose,
+                                                                                  self.find_center_mode, self.center)
             self.dynamixel_servo_controller.move_to_pose(self.current_pose)
 
             buttons = self.pose_poller.get_buttons()
@@ -82,9 +99,10 @@ class XboxRobotController:
 
     def handle_buttons(self, buttons):
         if buttons.start:
-            with open('recorded_positions.yml', 'w') as outfile:
-                dump(self.recorded_positions, outfile)
-            self.recorded_positions = []
+            # with open('recorded_positions.yml', 'w') as outfile:
+            #     dump(self.recorded_positions, outfile)
+            # self.recorded_positions = []
+            pass
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
                                                   self.dynamixel_servo_controller)
@@ -92,8 +110,18 @@ class XboxRobotController:
             self.current_pose.flip = not self.current_pose.flip
         elif buttons.y:
             self.recorded_positions.append(self.current_pose)
+            with self.lock:
+                if self.find_center_mode and len(self.recorded_positions) == 2:
+                    self.center = get_center(self.recorded_positions[0], self.recorded_positions[1])
+                    print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))
+                    self.find_center_mode = False
+
             print("added position!")
         elif buttons.x:
+            pass
+        elif buttons.lb:
+            pass
+        elif buttons.rb:
             pass
 
 

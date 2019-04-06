@@ -106,7 +106,7 @@ def get_line_coefficients(alpha, x, y):
     :param y: 7-coordinate
     :return: a and b, returns none of the line is along the y-axis
     """
-    temp = np.tan(alpha)
+    temp = np.tan(-alpha)
     if alpha >= pi / 2 or alpha <= -pi / 2:
         a = 0
     elif temp != 0:
