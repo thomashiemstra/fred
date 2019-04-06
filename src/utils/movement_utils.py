@@ -87,11 +87,16 @@ def get_curve_val(t):
     return 6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3)
 
 
-def plot_curve(x, y, z):
+def plot_curve(x, y, z, poses):
     fig2 = plt.figure(2)
     ax3d = fig2.add_subplot(111, projection='3d')
 
-    ax3d.plot(x, y, z, 'g*')
+    pose_x = [pose.x for pose in poses]
+    pose_y = [pose.y for pose in poses]
+    pose_z = [pose.z for pose in poses]
+
+    ax3d.plot(pose_x, pose_y, pose_z, 'r*')
+    ax3d.plot(x, y, z, 'g')
     fig2.show()
     plt.show()
 
@@ -118,7 +123,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     z = [pose.z for pose in poses]
 
     # noinspection PyTupleAssignmentBalance
-    tck, u = splprep([x, y, z], k=k_val, s=0)
+    tck, u = splprep([x, y, z], k=k_val, s=2)
 
     total_steps = ceil(time * global_objects.steps_per_second)
     dt = 1.0 / global_objects.steps_per_second
@@ -139,7 +144,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     flip = stop_pose.flip
 
     if plot_first:
-        plot_curve(x_steps, y_steps, z_steps)
+        plot_curve(x_steps, y_steps, z_steps, poses)
 
     # todo what if the curve does not exactly starts at start_pose because of fitting?
     for i in range(total_steps):
