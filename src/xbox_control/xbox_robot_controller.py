@@ -75,7 +75,7 @@ class XboxRobotController:
                                               self.dynamixel_servo_controller)
 
         pose_to_pose(self.current_pose, self.start_pose,
-                     self.dynamixel_robot_config, self.dynamixel_servo_controller, time=3)
+                     self.dynamixel_servo_controller, time=3)
 
         # self.pose_poller.stop()
         self.dynamixel_servo_controller.disable_servos()
@@ -102,5 +102,5 @@ def reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_cont
     dynamixel_robot_config.restore_initial_values()
     new_orientation = copy(current_pose)
     new_orientation.reset_orientation()
-    pose_to_pose(current_pose, new_orientation, dynamixel_robot_config, dynamixel_servo_controller, time=1)
+    pose_to_pose(current_pose, new_orientation, dynamixel_servo_controller, time=1)
     return new_orientation

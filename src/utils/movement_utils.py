@@ -50,7 +50,8 @@ def line(start_pose, stop_pose, servo_controller, time):
     return stop_pose
 
 
-def pose_to_pose(start_pose, stop_pose, robot_config, servo_controller, time=None):
+def pose_to_pose(start_pose, stop_pose, servo_controller, time=None):
+    robot_config = servo_controller.robot_config
     start_angles = inverse_kinematics(start_pose, robot_config)
     stop_angles = inverse_kinematics(stop_pose, robot_config)
     if time is None:
@@ -118,14 +119,17 @@ def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_ste
 
 
 # todo test this function!
-def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None, plot_only=False):
+def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None,
+                   plot_only=False, calculate_only=False):
     """
     Move along a B-spline defined by the poses provided
     :param poses: array of Pose, knot points for the B-spline
     :param time: total time for the movement
     :param servo_controller:
     :param workspace_limits:
+    :param center: [x, y, z] the end effector will always be oriented towards this center point
     :param plot_only:
+    :param calculate_only:
     :return: final pose
     """
     if len(poses) < 2:
@@ -134,19 +138,18 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
     k_val = min(len(poses) - 1, 3)
 
-    x = [pose.x for pose in poses]
-    y = [pose.y for pose in poses]
-    z = [pose.z for pose in poses]
+    x_poses = [pose.x for pose in poses]
+    y_poses = [pose.y for pose in poses]
+    z_poses = [pose.z for pose in poses]
 
     # noinspection PyTupleAssignmentBalance
-    tck, u = splprep([x, y, z], k=k_val, s=2)
+    tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=2)
 
     total_steps = ceil(time * global_objects.steps_per_second)
     dt = 1.0 / global_objects.steps_per_second
     lin = np.linspace(0, 1, total_steps)
     path_parameter = [get_curve_val(t) for t in lin]
 
-    # todo check workspace limits if they are given
     x_steps, y_steps, z_steps = splev(path_parameter, tck)
 
     start_pose = poses[0]
@@ -155,10 +158,10 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     # by shifting the spline and calculate where it actually ends
     dx, dy, dz, actual_stop_pose = get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_steps)
 
-    # todo change orientation to always face the center if it's not None
-    d_alpha = stop_pose.alpha - start_pose.alpha
-    d_beta = stop_pose.beta - start_pose.beta
-    d_gamma = stop_pose.gamma - start_pose.gamma
+    if calculate_only:
+        return actual_stop_pose
+
+    d_alpha, d_beta, d_gamma = get_delta_angles(start_pose, stop_pose)
 
     flip = stop_pose.flip
 
@@ -166,15 +169,25 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
         plot_curve(x_steps, y_steps, z_steps, poses)
         return start_pose
 
-    # todo what if the curve does not exactly starts at start_pose because of fitting?
+    if workspace_limits is not None:
+        allowed = check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits)
+        if not allowed:
+            log.warning('curve goes outside of workspace limits!')
+            return start_pose
+
+    alpha, beta, gamma = start_pose.alpha, start_pose.beta, start_pose.gamma
+    if center is not None:
+        fix_start_position(alpha, beta, center, gamma, servo_controller, start_pose)
+
     for i in range(total_steps):
         x = x_steps[i] - dx
         y = y_steps[i] - dy
         z = z_steps[i] - dz
 
-        alpha = start_pose.alpha + d_alpha * path_parameter[i]
-        beta = start_pose.beta + d_beta * path_parameter[i]
-        gamma = start_pose.gamma + d_gamma * path_parameter[i]
+        if center is not None:
+            alpha, beta, gamma = get_angles_center(x, y, z, center)
+        else:
+            alpha, beta, gamma = get_angles_no_center(start_pose, d_alpha, d_beta, d_gamma, path_parameter[i])
 
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
@@ -182,5 +195,59 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
         sleep(dt)
 
+    if center is not None:
+        actual_stop_pose.alpha = alpha
+        actual_stop_pose.beta = beta
+        actual_stop_pose.gamma = gamma
+
     return actual_stop_pose
+
+
+def check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):
+    for i in range(total_steps):
+        if x_steps[i] > workspace_limits.x_max or x_steps[i] < workspace_limits.x_min:
+            return False
+        if y_steps[i] > workspace_limits.y_max or y_steps[i] < workspace_limits.y_min:
+            return False
+        if z_steps[i] > workspace_limits.z_max or z_steps[i] < workspace_limits.z_min:
+            return False
+    return True
+
+
+def get_delta_angles(start_pose, stop_pose):
+    d_alpha = stop_pose.alpha - start_pose.alpha
+    d_beta = stop_pose.beta - start_pose.beta
+    d_gamma = stop_pose.gamma - start_pose.gamma
+
+    return d_alpha, d_beta, d_gamma
+
+
+def get_angles_no_center(start_pose, d_alpha, d_beta, d_gamma, path_param):
+    alpha = start_pose.alpha + d_alpha * path_param
+    beta = start_pose.beta + d_beta * path_param
+    gamma = start_pose.gamma + d_gamma * path_param
+
+    return alpha, beta, gamma
+
+
+def get_angles_center(x, y, z, center):
+    dx = center[0] - x
+    dy = center[1] - y
+    dz = center[2] - z
+
+    alpha = -np.arctan2(dx, dy)
+    beta = 0
+    gamma = np.arctan2(dz, dy)
+
+    return alpha, beta, gamma
+
+
+def fix_start_position(alpha, beta, center, gamma, servo_controller, start_pose):
+    start_alpha, start_beta, start_gamma = get_angles_center(start_pose.x, start_pose.y, start_pose.z, center)
+    if not (np.isclose(alpha, start_alpha) and np.isclose(beta, start_beta) and np.isclose(gamma, start_gamma)):
+        adjusted_start_pose = copy(start_pose)
+        adjusted_start_pose.alpha = start_alpha
+        adjusted_start_pose.beta = start_beta
+        adjusted_start_pose.gamma = start_gamma
+        pose_to_pose(start_pose, adjusted_start_pose, servo_controller, 1)
 
