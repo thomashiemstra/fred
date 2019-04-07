@@ -18,17 +18,18 @@ class DynamixelRobotArm:
         self.robot_config = robot_config
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
-        self.servo1 = Servo(1024, 3072, 0, pi, 40, 10, p=500, i=0, d=800)
-        self.servo2 = Servo(1024, 3072, 0, pi, 40, 10, p=1500, i=0, d=800)
-        self.servo3 = Servo(1024, 3072, -pi/2, pi/2, 40, 10, p=1500, i=0, d=800)
+        # todo these PID and speed values should be in a file...
+        self.servo1 = Servo(1024, 3072, 0, pi, 40, 10, p=800, i=0, d=2500)
+        self.servo2 = Servo(1024, 3072, 0, pi, 40, 10, p=1500, i=0, d=0)
+        self.servo3 = Servo(1024, 3072, -pi/2, pi/2, 40, 10, p=1500, i=150, d=500)
         base_servos = {1: self.servo1, 2: self.servo2, 3: self.servo3}
 
         self.base_servo_handler = ServoHandler(base_servos, cfg, port_handler,
                                                packet_handler, group_bulk_write, group_bulk_read)
 
-        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=500, d=3500, offset=-10)
-        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=500, d=3500, offset=60)
-        self.servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=500, d=3500)
+        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500, offset=10)
+        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500, offset=55)
+        self.servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
         wrist_servos = {4: self.servo4, 5: self.servo5, 6: self.servo6}
 
         self. wrist_servo_handler = ServoHandler(wrist_servos, cfg, port_handler,
@@ -113,3 +114,22 @@ class DynamixelRobotArm:
     @synchronized_with_lock("lock")
     def change_status(self, new_state):
         self.status = new_state
+
+    def set_pid_single_servo(self, servo_id, p, i, d):
+        if servo_id <= 3:
+            self.base_servo_handler.set_pid_single_servo(servo_id, p, i, d)
+        else:
+            self.wrist_servo_handler.set_pid_single_servo(servo_id, p, i, d)
+
+    def set_servo_position(self, servo_id, pos):
+        if servo_id <= 3:
+            self.base_servo_handler.move_servo_to_pos(servo_id, pos)
+        else:
+            self.wrist_servo_handler.move_servo_to_pos(servo_id, pos)
+
+    def get_servo_position(self, servo_id):
+        if servo_id <= 3:
+            return self.base_servo_handler.read_current_pos_single_servo(servo_id)
+        else:
+            return self.wrist_servo_handler.read_current_pos_single_servo(servo_id)
+
