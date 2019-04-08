@@ -23,7 +23,7 @@ def line(start_pose, stop_pose, servo_controller, time):
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
 
-    steps_per_second = 10
+    steps_per_second = global_objects.steps_per_second
     total_steps = ceil(time * steps_per_second)  # 50 steps per second
     dt = 1.0 / steps_per_second
 
@@ -70,7 +70,7 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
 
     current_angles = start_angles.copy()
 
-    steps = 10
+    steps = global_objects.steps_per_second
     total_steps = ceil(time * steps)  # 50 steps per second
     dt = 1.0 / steps
 
