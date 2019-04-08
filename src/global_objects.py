@@ -6,8 +6,8 @@ from functools import lru_cache
 from src.xbox_control.xbox_robot_controller import XboxRobotController
 
 dynamixel_robot_arm_port = 'COM5'
-dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=5.0)
-steps_per_second = 10
+dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=22.0, d6=5.5)
+steps_per_second = 15
 
 
 @lru_cache(maxsize=1)
