@@ -1,4 +1,6 @@
 from __future__ import division
+
+from src import global_objects
 from src.kinematics.kinematics_utils import Pose
 from src.xbox_control.xbox360controller.xbox_poller import XboxPoller
 import numpy as np
@@ -13,7 +15,7 @@ class XboxPoseUpdater:
     def __init__(self, maximum_speed=15.0, ramp_up_time=0.1):
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
-        self.steps_per_second = 15
+        self.steps_per_second = global_objects.steps_per_second
         self.dt = 1.0 / self.steps_per_second
         self.maximum_speed = maximum_speed  # cm/sec
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down
