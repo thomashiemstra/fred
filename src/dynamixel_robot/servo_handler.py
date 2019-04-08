@@ -164,3 +164,49 @@ class ServoHandler(object):
     # debug function to set the torque of a single servo
     def set_servo_torque(self, servo_id, enable):
         utils.set_torque(self.packet_handler, self.port_handler, self.config, servo_id, enable)
+
+    def move_servo_to_pos(self, servo_id, position):
+        self.group_bulk_write.clearParam()
+
+        self.__add_to_write(self.config.ADDR_GOAL_POSITION,
+                            self.config.LEN_GOAL_POSITION, servo_id, position)
+
+        self.__write_and_clear()
+
+    def read_current_pos_single_servo(self, servo_id):
+        """update the current_position parameter of all the servo objects"""
+        self.group_bulk_read.clearParam()
+
+        res = self.group_bulk_read.addParam(servo_id, self.config.ADDR_PRESENT_POSITION,
+                                            self.config.LEN_PRESENT_POSITION)
+        if not res:
+            raise RuntimeError("[ID:%03d] groupBulkRead addparam failed" % id)
+
+        self.__send_read_packet()
+
+        position_result = self.__get_read_res(servo_id, self.config.ADDR_PRESENT_POSITION,
+                                              self.config.LEN_PRESENT_POSITION)
+        self.servo_map[servo_id].current_position = position_result
+
+        self.group_bulk_read.clearParam()
+
+        return position_result
+
+    def set_pid_single_servo(self, servo_id, p, i, d):
+        """set the velocity profile of the servos, this get's wiped after a reboot"""
+        self.group_bulk_write.clearParam()
+
+        self.__add_to_write(self.config.ADDR_P,
+                            self.config.LEN_PID, servo_id, p)
+
+        self.__write_and_clear()
+
+        self.__add_to_write(self.config.ADDR_I,
+                            self.config.LEN_PID, servo_id, i)
+
+        self.__write_and_clear()
+
+        self.__add_to_write(self.config.ADDR_D,
+                            self.config.LEN_PID, servo_id, d)
+
+        self.__write_and_clear()
