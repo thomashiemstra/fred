@@ -86,7 +86,7 @@ class DynamixelRobotArm:
             self.wrist_servo_handler.set_angle(servo_id, angle)
             self.wrist_servo_handler.move_servo_to_angle(servo_id)
 
-    def get_angles(self):
+    def get_current_angles(self):
         self.base_servo_handler.read_current_pos()
         self.wrist_servo_handler.read_current_pos()
         angles = np.zeros(7, dtype=np.float64)
@@ -101,11 +101,8 @@ class DynamixelRobotArm:
 
         return angles
 
-    def from_current_angles_to_pose(self, pose, time):
-        current_angles = self.get_angles()
-        target_angles = inverse_kinematics(pose, self.robot_config)
-
-        angles_to_angles(current_angles, target_angles, time, self)
+    def pose_to_angles(self, pose):
+        return inverse_kinematics(pose, self.robot_config)
 
     @synchronized_with_lock("lock")
     def get_status(self):

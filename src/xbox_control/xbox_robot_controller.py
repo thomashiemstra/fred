@@ -8,7 +8,7 @@ from yaml import dump
 from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
 from src.utils.linalg_utils import get_center
-from src.utils.movement_utils import pose_to_pose
+from src.utils.movement_utils import pose_to_pose, angles_to_angles, from_current_angles_to_pose
 from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 from time import sleep
 
@@ -75,7 +75,9 @@ class XboxRobotController:
             return False
 
     def __start_internal(self):
-        self.dynamixel_servo_controller.from_current_angles_to_pose(self.current_pose, 1)
+        # The robot could be anywhere, first move it from it's current position to the target pose
+        # It would be easier to get a get_current_pose(), but I'm too lazy to write that
+        from_current_angles_to_pose(self.current_pose, 1, self.dynamixel_servo_controller)
 
         while True:
             if self.is_done():
@@ -112,9 +114,7 @@ class XboxRobotController:
             self.recorded_positions.append(self.current_pose)
             with self.lock:
                 if self.find_center_mode and len(self.recorded_positions) == 2:
-                    self.center = get_center(self.recorded_positions[0], self.recorded_positions[1])
-                    print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))
-                    self.find_center_mode = False
+                    self.set_center()
 
             print("added position!")
         elif buttons.x:
@@ -123,6 +123,11 @@ class XboxRobotController:
             pass
         elif buttons.rb:
             pass
+
+    def set_center(self):
+        self.center = get_center(self.recorded_positions[0], self.recorded_positions[1])
+        print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))
+        self.find_center_mode = False
 
 
 def reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller):

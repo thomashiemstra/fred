@@ -85,6 +85,12 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
         servo_controller.move_servos(current_angles)
 
 
+def from_current_angles_to_pose(pose, servo_controller, time):
+    current_angles = servo_controller.get_current_angles()
+    target_angles = servo_controller.pose_to_angles(pose)
+    angles_to_angles(current_angles, target_angles, time, servo_controller)
+
+
 def get_curve_val(t):
     return 6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3)
 
