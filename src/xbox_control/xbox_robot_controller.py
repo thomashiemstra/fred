@@ -14,7 +14,7 @@ from time import sleep
 
 
 class XboxRobotController:
-    start_pose = Pose(-26, 14.0, 6)
+    start_pose = Pose(-26, 16.0, 6)
 
     def __init__(self, dynamixel_robot_config, dynamixel_servo_controller):
         self.pose_poller = XboxPoseUpdater()
@@ -61,6 +61,10 @@ class XboxRobotController:
         self.center = None
 
     @synchronized_with_lock("lock")
+    def clear_center(self):
+        self.center = None
+
+    @synchronized_with_lock("lock")
     def start(self):
         if self.done:
             return False
@@ -77,7 +81,7 @@ class XboxRobotController:
     def __start_internal(self):
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
-        from_current_angles_to_pose(self.current_pose, 1, self.dynamixel_servo_controller)
+        from_current_angles_to_pose(self.current_pose, self.dynamixel_servo_controller, 1)
 
         while True:
             if self.is_done():
@@ -118,7 +122,7 @@ class XboxRobotController:
 
             print("added position!")
         elif buttons.x:
-            pass
+            print(self.current_pose)
         elif buttons.lb:
             pass
         elif buttons.rb:

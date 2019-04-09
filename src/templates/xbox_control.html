@@ -12,9 +12,9 @@
     <div class="container">
       <div class="row">
         <div class="col-sm-4">
-            <h3>Instructions:</h3>
-          <p>See the buttons?</p>
-          <p>Click em!</p>
+            <h2>Instructions:</h2>
+              <p>See the buttons?</p>
+              <p>Click em!</p>
         </div>
         <div class="col-sm-4">
           <div class="container">
@@ -25,7 +25,6 @@
               </div>
           </div>
         </div>
-
         <div class="col-sm-4">
             <div class="container">
                 <h2>Camera controlls</h2>
@@ -36,6 +35,16 @@
             </div>
         </div>
       </div>
+    </div>
+
+
+    <div class="container">
+        <div class="col-sm-4">
+            <h2>Find center mode:</h2>
+            <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/findcenter')">Engage</button>
+            <h2>Clear center:</h2>
+            <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/clearcenter')">Engage</button>
+        </div>
     </div>
 
     <!--<script>-->
@@ -57,7 +66,6 @@
                 },
                 body: ""
              }
-
          )
         .then((res) => {return res.json()})
         .then((data) => {
@@ -75,7 +83,6 @@
                 },
                 body: ""
              }
-
          )
         .then((res) => {return res.json()})
         .then((data) => {

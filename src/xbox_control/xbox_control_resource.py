@@ -74,6 +74,14 @@ def define_center():
     return resp
 
 
+@xbox_api.route('/clearcenter', methods=['POST'])
+def clear_center():
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
+    xbox_robot_controller.clear_center()
+    resp = jsonify(success=True)
+    return resp
+
+
 @xbox_api.route('/runfile/<file>', methods=['POST'])
 def run_file(file):
     file = file + '.yml'

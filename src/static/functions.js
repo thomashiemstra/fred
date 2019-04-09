@@ -60,6 +60,21 @@ function turnCameraOff() {
         })
 }
 
+function emptyPostRequest(url) {
+    fetch(url, {
+                method: 'post',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Content-Type': 'application/json'
+                },
+                body: ""
+             }
+         )
+        .then((res) => {return res.json()})
+        .then((data) => {
+            console.log(data);
+        })
+}
 
 function toggleOn() {
     $('#status-button').bootstrapToggle('enable').bootstrapToggle('on').bootstrapToggle('disable')
