@@ -27,39 +27,6 @@ function getRobotStatus(){
 }
 
 
-function turnCameraOn() {
-    fetch('http://127.0.0.1:5000/startcamera', {
-                method: 'post',
-                headers: {
-                    'Accept': 'application/json, text/plain, */*',
-                    'Content-Type': 'application/json'
-                },
-                body: ""
-             }
-         )
-        .then((res) => {return res.json()})
-        .then((data) => {
-            console.log(data);
-        })
-}
-
-
-function turnCameraOff() {
-    fetch('http://127.0.0.1:5000/stopcamera', {
-                method: 'post',
-                headers: {
-                    'Accept': 'application/json, text/plain, */*',
-                    'Content-Type': 'application/json'
-                },
-                body: ""
-             }
-         )
-        .then((res) => {return res.json()})
-        .then((data) => {
-            console.log(data);
-        })
-}
-
 function emptyPostRequest(url) {
     fetch(url, {
                 method: 'post',
