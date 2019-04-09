@@ -27,8 +27,8 @@ class DynamixelRobotArm:
         self.base_servo_handler = ServoHandler(base_servos, cfg, port_handler,
                                                packet_handler, group_bulk_write, group_bulk_read)
 
-        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500, offset=10)
-        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500, offset=55)
+        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
+        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
         self.servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
         wrist_servos = {4: self.servo4, 5: self.servo5, 6: self.servo6}
 
