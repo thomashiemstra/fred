@@ -93,8 +93,9 @@ class XboxPoseUpdater:
             dx = center[0] - x
             dy = center[1] - y
             dz = center[2] - z
+            dr = np.sqrt(np.power(dx, 2) + np.power(dy,2))
             alpha = -np.arctan2(dx, dy)
-            gamma = np.arctan2(dz, dy)
+            gamma = np.arctan2(dz, dr)
         else:
             alpha = old_pose.alpha + self.dt * self.v_alpha
             gamma = old_pose.gamma + self.dt * self.v_gamma
