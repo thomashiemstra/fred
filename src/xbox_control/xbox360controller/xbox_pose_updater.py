@@ -78,7 +78,7 @@ class XboxPoseUpdater:
         y = old_pose.y + self.dt * self.v_y
         z = old_pose.z + self.dt * self.v_z
 
-        alpha, gamma = self.get_orientation(old_pose, x, y, z, center)
+        alpha, gamma = self.get_orientation(old_pose, center)
 
         x = np.clip(x, WorkSpaceLimits.x_min, WorkSpaceLimits.x_max)
         y = np.clip(y, WorkSpaceLimits.y_min, WorkSpaceLimits.y_max)
@@ -88,11 +88,11 @@ class XboxPoseUpdater:
 
         return Pose(x, y, z, flip=old_pose.flip, alpha=alpha, gamma=gamma, beta=0.0)
 
-    def get_orientation(self, old_pose, x, y, z, center):
+    def get_orientation(self, old_pose, center):
         if center is not None:
-            dx = center[0] - x
-            dy = center[1] - y
-            dz = center[2] - z
+            dx = center[0] - old_pose.x
+            dy = center[1] - old_pose.y
+            dz = center[2] - old_pose.z
             dr = np.sqrt(np.power(dx, 2) + np.power(dy,2))
             alpha = -np.arctan2(dx, dy)
             gamma = np.arctan2(dz, dr)
