@@ -1,0 +1,7 @@
+Let's document these values just in case
+servo1: 7
+servo2: 2
+servo3: -10
+servo4: -5
+servo5: -55
+servo6: 10
