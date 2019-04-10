@@ -3,21 +3,18 @@ from __future__ import division
 import threading
 from copy import copy
 
-from yaml import dump
-
 from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
 from src.utils.linalg_utils import get_center
-from src.utils.movement_utils import pose_to_pose, angles_to_angles, from_current_angles_to_pose
-from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
+from src.utils.movement_utils import pose_to_pose, from_current_angles_to_pose
 from time import sleep
 
 
 class XboxRobotController:
     start_pose = Pose(-26, 16.0, 6)
 
-    def __init__(self, dynamixel_robot_config, dynamixel_servo_controller):
-        self.pose_poller = XboxPoseUpdater()
+    def __init__(self, dynamixel_robot_config, dynamixel_servo_controller, pose_poller):
+        self.pose_poller = pose_poller
         self.dynamixel_robot_config = dynamixel_robot_config
         self.dynamixel_servo_controller = dynamixel_servo_controller
         self.lock = threading.RLock()

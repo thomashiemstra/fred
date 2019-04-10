@@ -1,18 +1,17 @@
 from flask import Flask, render_template
+
+from src import global_objects
 from src.xbox_control.xbox_control_resource import xbox_api
 
 from flask_cors import CORS
 from flask_cdn import CDN
 from flask_nav import Nav
-from flask_nav.elements import Navbar, View
-import src.global_objects as globals
 from flask import jsonify
 
 
 app = Flask(__name__)
 CORS(app)
 app.register_blueprint(xbox_api, url_prefix='/xbox')
-# app.config['CDN_DOMAIN'] = 'mycdnname.cloudfront.net'
 CDN(app)
 
 nav = Nav()
@@ -38,7 +37,7 @@ def get_status():
 
 @app.route('/test')
 def test():
-    robot = globals.get_robot('COM5')
+    robot = global_objects.get_robot('COM5')
     print(robot)
     resp = jsonify(success=True)
     return resp
@@ -46,7 +45,7 @@ def test():
 
 @app.route('/test2')
 def test2():
-    robot = globals.get_robot('COM5')
+    robot = global_objects.get_robot('COM5')
     print(robot)
     resp = jsonify(success=True)
     return resp
@@ -54,14 +53,14 @@ def test2():
 
 @app.route('/startcamera', methods=['POST'])
 def start_camera():
-    camera = globals.get_camera(0)
+    camera = global_objects.get_camera(1)
     camera.start_camera()
     return jsonify(success=True)
 
 
 @app.route('/stopcamera', methods=['POST'])
 def stop_camera():
-    camera = globals.get_camera(0)
+    camera = global_objects.get_camera(1)
     camera.stop_camera()
     return jsonify(success=True)
 
