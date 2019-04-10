@@ -1,6 +1,5 @@
 from src.xbox_control.xbox360controller.XboxController import XboxController
 import threading
-import time
 import numpy as np
 from src.utils.decorators import synchronized_with_lock
 
@@ -21,7 +20,7 @@ class Buttons:
 
 
 # A wrapper class used to get the most up to date xbox360 controller state
-class XboxPoller:
+class ControllerStateManager:
 
     def __init__(self) -> None:
         self.lock = threading.RLock()

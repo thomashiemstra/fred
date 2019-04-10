@@ -11,7 +11,7 @@ from src.workspace_limits import WorkSpaceLimits
 # i.e. move the pose (and thus robot) with the xbox360 controller
 class XboxPoseUpdater:
 
-    def __init__(self, poller, maximum_speed=15.0, ramp_up_time=0.1):
+    def __init__(self, controller_state_manager, maximum_speed=15.0, ramp_up_time=0.1):
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
         self.steps_per_second = global_objects.steps_per_second
@@ -19,7 +19,7 @@ class XboxPoseUpdater:
         self.maximum_speed = maximum_speed  # cm/sec
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down
         self.dv = self.maximum_speed / (self.ramp_up_time * self.steps_per_second)  # v/step
-        self.poller = poller
+        self.controller_state_manager = controller_state_manager
 
     def input_to_delta_velocity(self, controller_input, velocity, maximum_velocity):
         new_velocity = 0
@@ -35,12 +35,12 @@ class XboxPoseUpdater:
         return new_velocity
 
     def get_xyz_from_poller(self):
-        x_in, y_in = self.poller.get_left_thumb()
-        z_in = -self.poller.get_lr_trigger()
+        x_in, y_in = self.controller_state_manager.get_left_thumb()
+        z_in = -self.controller_state_manager.get_lr_trigger()
         return x_in, y_in, z_in
 
     def __update_orientation_velocities(self, find_center_mode):
-        right_thumb_x, right_thumb_y = self.poller.get_right_thumb()
+        right_thumb_x, right_thumb_y = self.controller_state_manager.get_right_thumb()
         right_thumb_x *= -1
         right_thumb_y *= -1
 
@@ -102,9 +102,9 @@ class XboxPoseUpdater:
         return alpha, gamma
 
     def get_buttons(self):
-        return self.poller.get_buttons()
+        return self.controller_state_manager.get_buttons()
 
     def stop(self):
-        self.poller.stop()
+        self.controller_state_manager.stop()
 
 

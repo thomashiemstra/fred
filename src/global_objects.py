@@ -3,7 +3,7 @@ from src.dynamixel_robot.servo_controller import DynamixelRobotArm
 from src.kinematics.kinematics_utils import RobotConfig
 from functools import lru_cache
 
-from src.xbox_control.xbox360controller.xbox_poller import XboxPoller
+from src.xbox_control.xbox360controller.controller_state_manager import ControllerStateManager
 from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 from src.xbox_control.xbox_robot_controller import XboxRobotController
 
@@ -22,8 +22,8 @@ def get_robot(port):
 def get_xbox_robot_controller(port):
     global dynamixel_robot_config
     dynamixel_servo_controller = get_robot(port)
-    poller = XboxPoller()
-    pose_poller = XboxPoseUpdater(poller)
+    controller_state_manager = ControllerStateManager()
+    pose_poller = XboxPoseUpdater(controller_state_manager)
 
     return XboxRobotController(dynamixel_robot_config, dynamixel_servo_controller, pose_poller)
 
