@@ -6,6 +6,8 @@ import numpy as np
 from numpy import pi
 import numpy.testing as test
 
+from src.utils.movement_utils import b_spline_curve
+
 
 class GetCentreTests(unittest.TestCase):
 
@@ -144,3 +146,54 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
         test.assert_allclose(p0_prime, [0, 0, 0], err_msg='x_prime mismatch')
         test.assert_allclose(p1_prime, [0, 1, 0], err_msg='y_prime mismatch')
         test.assert_allclose(pc_prime, [0, 0, 1], err_msg='z_prime mismatch')
+
+
+class DummyWorkspaceLimits:
+    x_min = -40
+    x_max = 40
+    y_min = 16
+    y_max = 40
+    z_min = 5
+    z_max = 40
+
+
+class BSplineCurveTests(unittest.TestCase):
+
+    def test_workspace_limits(self):
+        pose1 = Pose(0, 0, 0)
+        pose2 = Pose(100, 100, 100)
+        poses = [pose1, pose2]
+
+        current_pose = b_spline_curve(poses, 2, None, DummyWorkspaceLimits)
+        self.assertIsNotNone(current_pose)
+        self.assertEqual(pose1, current_pose)
+
+    # With these poses the b-spline should start and stop exactly as required
+    def test_spline_perfect_fit(self):
+        pose1 = Pose(0, 0, 0)
+        pose2 = Pose(0, 10, 5)
+        pose3 = Pose(0, 20, 0)
+
+        poses = [pose1, pose2, pose3]
+
+        stop_pose = b_spline_curve(poses, 2, None, DummyWorkspaceLimits, calculate_only=True)
+        self.assertIsNotNone(stop_pose)
+        self.assertEqual(pose3, stop_pose)
+
+    # With these poses the b-spline should not exactly end at the last pose
+    def test_spline_non_perfect_fit(self):
+        pose1 = Pose(0, 0, 0)
+        pose2 = Pose(0, 10, 5)
+        pose3 = Pose(0, 20, 15)
+        pose4 = Pose(0, 30, 3)
+        pose5 = Pose(1, 20, 2)
+
+        poses = [pose1, pose2, pose3, pose4, pose5]
+
+        stop_pose = b_spline_curve(poses, 2, None, DummyWorkspaceLimits, calculate_only=True)
+        self.assertIsNotNone(stop_pose)
+        self.assertNotEqual(pose5, stop_pose)
+        self.assertAlmostEqual(stop_pose.x, pose5.x, places=1)
+        self.assertAlmostEqual(stop_pose.y, pose5.y, places=1)
+        self.assertAlmostEqual(stop_pose.z, pose5.z, places=1)
+
