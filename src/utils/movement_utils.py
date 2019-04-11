@@ -4,13 +4,11 @@ from time import sleep
 import numpy as np
 
 import src.global_constants
-from src import global_objects
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
 import logging as log
-from scipy.interpolate import splev, splrep, CubicSpline, splprep, interp1d, InterpolatedUnivariateSpline
+from scipy.interpolate import splev, splprep
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from copy import copy
 
 
