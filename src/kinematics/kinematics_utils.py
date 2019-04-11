@@ -1,33 +1,19 @@
 import numpy as np
 from numpy import sin, cos
-import yaml
-from copy import copy
 import json
 
 
-class Pose(yaml.YAMLObject):
-    yaml_tag = '!Pose'
-
-    @classmethod
-    def to_yaml(cls, dumper, data):
-
-        to_save_pose = copy(data)
-        for attr, value in data.__dict__.items():
-            if attr != 'orientation' and attr != 'flip':
-                setattr(to_save_pose, attr, float(value))
-
-        return dumper.represent_yaml_object(cls.yaml_tag, to_save_pose, cls,
-                                            flow_style=cls.yaml_flow_style)
+class Pose:
 
     def __init__(self, x, y, z, flip=False, alpha=0.0, beta=0.0, gamma=0.0, time=2.0):
-        self.x = x
-        self.y = y
-        self.z = z
+        self.x = float(x)
+        self.y = float(y)
+        self.z = float(z)
         self.time = time
         self.flip = flip
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
+        self.alpha = float(alpha)
+        self.beta = float(beta)
+        self.gamma = float(gamma)
 
     def get_euler_matrix(self):
         """alpha is a turn around the world z-axis"""
