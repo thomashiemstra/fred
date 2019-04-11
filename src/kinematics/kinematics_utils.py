@@ -67,6 +67,10 @@ class Pose(yaml.YAMLObject):
         return 'POSE: x={} y={} z={}, a={} b={} g={} ,time={} filp={}'\
             .format(self.x, self.y, self.z, self.alpha, self.beta, self.gamma, self.time, self.flip)
 
+    def __eq__(self, other: object) -> bool:
+        return (isinstance(other, self.__class__)
+                and self.__dict__ == other.__dict__)
+
 
 class RobotConfig:
 
