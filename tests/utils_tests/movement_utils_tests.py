@@ -43,7 +43,7 @@ class GetCentreTests(unittest.TestCase):
 
         centre = linalg_utils.get_center(pose1, pose2)
         print(centre)
-        self.assert_centre_equals([5, 5, 0], centre)
+        self.assert_centre_equals([5, -5, 0], centre)
 
     def test_same_y_for_points_2(self):
         pose1 = Pose(0, 0, 0, alpha=-pi / 4)
@@ -51,7 +51,7 @@ class GetCentreTests(unittest.TestCase):
 
         centre = linalg_utils.get_center(pose1, pose2)
         print(centre)
-        self.assert_centre_equals([5, -5, 0], centre)
+        self.assert_centre_equals([5, 5, 0], centre)
 
     def test_no_points_at_origin_1(self):
         pose1 = Pose(5, 5, 0, alpha=pi / 8)
@@ -59,7 +59,7 @@ class GetCentreTests(unittest.TestCase):
 
         centre = linalg_utils.get_center(pose1, pose2)
         print(centre)
-        self.assert_centre_equals([8.53, 13.53, 0], centre)
+        self.assert_centre_equals([6.46, 1.46, 0], centre)
 
     def assert_centre_equals(self, expected_centre, actual_centre):
         self.assertAlmostEqual(expected_centre[0], actual_centre[0], places=1, msg='x does not match')
