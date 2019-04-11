@@ -10,6 +10,7 @@ import logging as log
 from scipy.interpolate import splev, splprep
 import matplotlib.pyplot as plt
 from copy import copy
+from mpl_toolkits.mplot3d import Axes3D
 
 
 def line(start_pose, stop_pose, servo_controller, time):
