@@ -182,7 +182,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
     alpha, beta, gamma = start_pose.alpha, start_pose.beta, start_pose.gamma
     if center is not None:
-        fix_start_position(alpha, beta, center, gamma, servo_controller, start_pose)
+        fix_initial_orientation(alpha, beta, center, gamma, servo_controller, start_pose)
 
     for i in range(total_steps):
         x = x_steps[i] - dx
@@ -247,12 +247,14 @@ def get_angles_center(x, y, z, center):
     return alpha, beta, gamma
 
 
-def fix_start_position(alpha, beta, center, gamma, servo_controller, start_pose):
+# If the start orientation is not the same as the orientation of the start pose
+# we first move to the correct start orientation
+def fix_initial_orientation(alpha, beta, center, gamma, servo_controller, start_pose):
     start_alpha, start_beta, start_gamma = get_angles_center(start_pose.x, start_pose.y, start_pose.z, center)
     if not (np.isclose(alpha, start_alpha) and np.isclose(beta, start_beta) and np.isclose(gamma, start_gamma)):
         adjusted_start_pose = copy(start_pose)
         adjusted_start_pose.alpha = start_alpha
         adjusted_start_pose.beta = start_beta
         adjusted_start_pose.gamma = start_gamma
-        pose_to_pose(start_pose, adjusted_start_pose, servo_controller, 1)
+        pose_to_pose(start_pose, adjusted_start_pose, servo_controller, 0.5)
 
