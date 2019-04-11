@@ -5,6 +5,7 @@ import threading
 from flask import Blueprint
 from flask import jsonify
 
+import src.global_constants
 from src.kinematics.kinematics_utils import Pose
 import src.global_objects as global_objects
 
@@ -42,7 +43,7 @@ def start():
         else:
             started = True
 
-    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     success = xbox_robot_controller.start()
     if success:
         xbox_robot_controller.dynamixel_servo_controller.change_status(True)
@@ -58,7 +59,7 @@ def stop():
             started = False
         else:
             return "already stopped"
-    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     xbox_robot_controller.stop()
     xbox_robot_controller.dynamixel_servo_controller.change_status(False)
 
@@ -68,7 +69,7 @@ def stop():
 
 @xbox_api.route('/findcenter', methods=['POST'])
 def define_center():
-    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     xbox_robot_controller.start_find_center_mode()
     resp = jsonify(success=True)
     return resp
@@ -76,7 +77,7 @@ def define_center():
 
 @xbox_api.route('/clearcenter', methods=['POST'])
 def clear_center():
-    xbox_robot_controller = global_objects.get_xbox_robot_controller(global_objects.dynamixel_robot_arm_port)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     xbox_robot_controller.clear_center()
     resp = jsonify(success=True)
     return resp

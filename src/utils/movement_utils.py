@@ -3,6 +3,7 @@ from math import ceil
 from time import sleep
 import numpy as np
 
+import src.global_constants
 from src import global_objects
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
@@ -23,7 +24,7 @@ def line(start_pose, stop_pose, servo_controller, time):
     d_beta = stop_pose.beta - start_pose.beta
     d_gamma = stop_pose.gamma - start_pose.gamma
 
-    steps_per_second = global_objects.steps_per_second
+    steps_per_second = src.global_constants.steps_per_second
     total_steps = ceil(time * steps_per_second)  # 50 steps per second
     dt = 1.0 / steps_per_second
 
@@ -70,7 +71,7 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
 
     current_angles = start_angles.copy()
 
-    steps = global_objects.steps_per_second
+    steps = src.global_constants.steps_per_second
     total_steps = ceil(time * steps)  # 50 steps per second
     dt = 1.0 / steps
 
@@ -151,8 +152,8 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     # noinspection PyTupleAssignmentBalance
     tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=2)
 
-    total_steps = ceil(time * global_objects.steps_per_second)
-    dt = 1.0 / global_objects.steps_per_second
+    total_steps = ceil(time * src.global_constants.steps_per_second)
+    dt = 1.0 / src.global_constants.steps_per_second
     lin = np.linspace(0, 1, total_steps)
     path_parameter = [get_curve_val(t) for t in lin]
 
