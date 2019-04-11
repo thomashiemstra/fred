@@ -58,6 +58,7 @@ class ControllerStateManager:
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.RB, self.__right_bumper)
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.LB, self.___left_bumper)
 
+    # todo maybe return the entire controller state in 1 lock. See if it's any faster
     @synchronized_with_lock("lock")
     def get_left_thumb(self):
         return self.l_thumb_x, self.l_thumb_y
@@ -117,8 +118,7 @@ class ControllerStateManager:
 
     @synchronized_with_lock("lock")
     def __left_thumb_x(self, x_value):
-        with self.lock:
-            self.l_thumb_x = x_value
+        self.l_thumb_x = x_value
 
     @synchronized_with_lock("lock")
     def __left_thumb_y(self, y_value):
