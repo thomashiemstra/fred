@@ -10,7 +10,9 @@ from src.workspace_limits import WorkSpaceLimits
 # i.e. move the pose (and thus robot) with the xbox360 controller
 class XboxPoseUpdater:
 
-    def __init__(self, controller_state_manager, maximum_speed=15.0, ramp_up_time=0.1):
+    def __init__(self, controller_state_manager, maximum_speed=15.0, ramp_up_time=0.1,
+                 workspace_limits=WorkSpaceLimits):
+        self.workspace_limits = workspace_limits
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
         self.steps_per_second = 20
@@ -78,11 +80,12 @@ class XboxPoseUpdater:
 
         alpha, gamma = self.get_orientation(old_pose, center)
 
-        x = np.clip(x, WorkSpaceLimits.x_min, WorkSpaceLimits.x_max)
-        y = np.clip(y, WorkSpaceLimits.y_min, WorkSpaceLimits.y_max)
-        z = np.clip(z, WorkSpaceLimits.z_min, WorkSpaceLimits.z_max)
-        alpha = np.clip(alpha, -pi / 2, pi / 2)
-        gamma = np.clip(gamma, -pi / 2, pi / 2)
+        if self.workspace_limits is not None:
+            x = np.clip(x, self.workspace_limits.x_min, self.workspace_limits.x_max)
+            y = np.clip(y, self.workspace_limits.y_min, self.workspace_limits.y_max)
+            z = np.clip(z, self.workspace_limits.z_min, self.workspace_limits.z_max)
+            alpha = np.clip(alpha, -pi / 2, pi / 2)
+            gamma = np.clip(gamma, -pi / 2, pi / 2)
 
         return Pose(x, y, z, flip=old_pose.flip, alpha=alpha, gamma=gamma, beta=0.0)
 
