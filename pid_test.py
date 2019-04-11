@@ -2,7 +2,7 @@ from time import sleep, time
 from src.global_objects import get_robot
 from src.kinematics.kinematics_utils import Pose
 from src.utils.movement_utils import line, b_spline_curve
-from src.workspace_limits import WorkSpaceLimits
+from src.global_constants import WorkSpaceLimits
 import matplotlib.pyplot as plt
 
 servo_id = 4

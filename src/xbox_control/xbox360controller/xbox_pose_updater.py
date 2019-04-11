@@ -3,7 +3,7 @@ from __future__ import division
 from src.kinematics.kinematics_utils import Pose
 import numpy as np
 from numpy import pi
-from src.workspace_limits import WorkSpaceLimits
+from src.global_constants import WorkSpaceLimits
 
 
 # class used to update a pose using the inputs from the xbox360 controller
