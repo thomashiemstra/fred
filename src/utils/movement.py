@@ -6,6 +6,10 @@ import numpy as np
 from src.utils.movement_utils import b_spline_curve, pose_to_pose
 
 
+class MovementException(Exception):
+    pass
+
+
 class Movement(ABC):
 
     def __init__(self, servo_controller, poses, time, center=None, workspace_limits=None) -> None:
@@ -19,14 +23,12 @@ class Movement(ABC):
 
     def move(self):
         if not self.is_robot_at_start_pose(self.poses[0]):
-            log.warning("robot is not at the start pose, not executing move")
-            return self.poses[0]
+            raise MovementException("robot is not at the start pose, not executing move")
         return self._move_internal(self.poses)
 
     def move_reversed(self):
         if not self.is_robot_at_start_pose(self.poses[-1]):
-            log.warning("robot is not at the start pose, not executing move")
-            return self.poses[-1]
+            raise MovementException("robot is not at the start pose, not executing move")
         return self._move_internal(self.poses[::-1])
 
     @abstractmethod
