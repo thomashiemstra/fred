@@ -1,0 +1,2 @@
+class MovementException(Exception):
+    pass

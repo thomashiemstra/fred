@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from copy import copy
 from mpl_toolkits.mplot3d import Axes3D
 
+from src.utils.movement_exception import MovementException
+
 
 def line(start_pose, stop_pose, servo_controller, time):
     """go from start to stop pose in time amount of seconds"""
@@ -178,8 +180,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     if workspace_limits is not None:
         allowed = check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits)
         if not allowed:
-            log.warning('curve goes outside of workspace limits!')
-            return start_pose
+            raise MovementException('curve goes outside of workspace limits!')
 
     alpha, beta, gamma = start_pose.alpha, start_pose.beta, start_pose.gamma
     if center is not None:

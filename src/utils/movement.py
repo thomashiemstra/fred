@@ -3,11 +3,8 @@ from abc import ABC, abstractmethod
 import logging as log
 import numpy as np
 
+from src.utils.movement_exception import MovementException
 from src.utils.movement_utils import b_spline_curve, pose_to_pose
-
-
-class MovementException(Exception):
-    pass
 
 
 class Movement(ABC):
