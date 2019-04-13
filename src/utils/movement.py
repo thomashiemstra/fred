@@ -4,7 +4,7 @@ import logging as log
 import numpy as np
 
 from src.utils.movement_exception import MovementException
-from src.utils.movement_utils import b_spline_curve, pose_to_pose
+from src.utils.movement_utils import b_spline_curve, pose_to_pose, from_current_angles_to_pose
 
 
 class Movement(ABC):
@@ -17,6 +17,12 @@ class Movement(ABC):
         self.time = time
         self.center = center
         self.workspace_limits = workspace_limits
+
+    def go_to_start_of_move(self, time=None):
+        if time is None:
+            time = 4
+        print(self.poses[0])
+        from_current_angles_to_pose(self.poses[0], self.servo_controller, time)
 
     def move(self):
         if not self.is_robot_at_start_pose(self.poses[0]):

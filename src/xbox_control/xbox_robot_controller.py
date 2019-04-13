@@ -2,12 +2,17 @@ from __future__ import division
 
 import threading
 from copy import copy
+import numpy as np
 
+from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
 from src.utils.linalg_utils import get_center
+from src.utils.movement import PoseToPoseMovement, SplineMovement
+from src.utils.movement_exception import MovementException
 from src.utils.movement_utils import pose_to_pose, from_current_angles_to_pose
 from time import sleep
+import logging as log
 
 
 class XboxRobotController:
@@ -24,6 +29,8 @@ class XboxRobotController:
         self.thread = None
         self.find_center_mode = False
         self.center = None
+        self.move_speed = 10
+        self.recorded_moves = []
 
     @synchronized_with_lock("lock")
     def is_done(self):
@@ -79,6 +86,7 @@ class XboxRobotController:
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
         from_current_angles_to_pose(self.current_pose, self.dynamixel_servo_controller, 1)
+        self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.dynamixel_servo_controller, 2)
 
         while True:
             if self.is_done():
@@ -102,10 +110,10 @@ class XboxRobotController:
 
     def handle_buttons(self, buttons):
         if buttons.start:
-            # with open('recorded_positions.yml', 'w') as outfile:
-            #     dump(self.recorded_positions, outfile)
-            # self.recorded_positions = []
-            pass
+            if len(self.recorded_moves) < 1:
+                return
+            self.current_pose = self.playback_recorded_moves()
+
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
                                                   self.dynamixel_servo_controller)
@@ -113,22 +121,72 @@ class XboxRobotController:
             self.current_pose.flip = not self.current_pose.flip
         elif buttons.y:
             self.recorded_positions.append(self.current_pose)
-            with self.lock:
-                if self.find_center_mode and len(self.recorded_positions) == 2:
-                    self.set_center()
-
+            if self.should_set_center():
+                self.set_center()
             print("added position!")
-        elif buttons.x:
             print(self.current_pose)
+        elif buttons.x:
+            if len(self.recorded_positions) < 2:
+                print("not enough positions for a movement")
+                return
+
+            move = create_move(self.dynamixel_servo_controller, self.recorded_positions,
+                               self.move_speed, self.center, WorkSpaceLimits)
+            print('created move')
+            self.recorded_moves.append(move)
+            self.recorded_positions = [self.recorded_positions[-1]]
         elif buttons.lb:
-            pass
+            self.recorded_moves = []
+            self.recorded_positions = []
+            print('cleared recorded moves and positions!')
         elif buttons.rb:
             pass
 
+    @synchronized_with_lock("lock")
+    def should_set_center(self):
+        return self.find_center_mode and len(self.recorded_positions) == 2
+
+    @synchronized_with_lock("lock")
     def set_center(self):
         self.center = get_center(self.recorded_positions[0], self.recorded_positions[1])
         print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))
         self.find_center_mode = False
+        self.recorded_positions = []
+
+    def playback_recorded_moves(self):
+        self.recorded_moves[0].go_to_start_of_move()
+        try:
+            for move in self.recorded_moves:
+                move.move()
+        except MovementException as e:
+            log.warning(e)
+            from_current_angles_to_pose(self.start_pose, self.dynamixel_servo_controller, 4)
+            return self.start_pose
+
+        return self.recorded_moves[-1].poses[-1]
+
+
+def create_move(servo_controller, poses, speed, center, workspace_limits):
+    if len(poses) == 2 and np.allclose([poses[0].x, poses[0].y, poses[0].z], [poses[1].x, poses[1].y, poses[1].z]):
+        return PoseToPoseMovement(servo_controller, poses, 0.5, center, workspace_limits)  # orientation adjustment
+
+    time = determine_time(poses, speed)
+    return SplineMovement(servo_controller, poses, time, center, workspace_limits)
+
+
+def determine_time(poses, speed):
+    dr = 0
+    prev_x, prev_y, prev_z = poses[0].x, poses[0].y, poses[0].z
+
+    for pose in poses:
+        x, y, z = pose.x, pose.y, pose.z
+        dx = abs(x - prev_x)
+        dy = abs(y - prev_y)
+        dz = abs(z - prev_z)
+        dr += np.sqrt(np.power(dx, 2) + np.power(dy, 2) + np.power(dz, 2))
+        prev_x, prev_y, prev_z = x, y, z
+
+    return dr / speed
 
 
 def reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller):
