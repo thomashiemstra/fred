@@ -18,9 +18,9 @@ class DynamixelRobotArm:
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
         # todo these PID and speed values should be in a file...
-        self.servo1 = Servo(1024, 3072, 0, pi, 156, 55, p=800, i=0, d=2500)
-        self.servo2 = Servo(1024, 3072, 0, pi, 155, 55, p=1500, i=0, d=0)
-        self.servo3 = Servo(1024, 3072, -pi/2, pi/2, 155, 55, p=1500, i=150, d=500)
+        self.servo1 = Servo(1024, 3072, 0, pi, 80, 30, p=800, i=0, d=2500)
+        self.servo2 = Servo(1024, 3072, 0, pi, 80, 30, p=1500, i=0, d=500)
+        self.servo3 = Servo(1024, 3072, -pi/2, pi/2, 80, 30, p=1500, i=100, d=500)
         base_servos = {1: self.servo1, 2: self.servo2, 3: self.servo3}
 
         self.base_servo_handler = ServoHandler(base_servos, cfg, port_handler,
