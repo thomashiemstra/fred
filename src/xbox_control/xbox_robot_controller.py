@@ -99,13 +99,10 @@ class XboxRobotController:
             self.handle_buttons(buttons)
             sleep(self.pose_poller.dt)
 
-        self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
-                                              self.dynamixel_servo_controller)
+        self.stop_robot()
 
-        pose_to_pose(self.current_pose, self.start_pose,
-                     self.dynamixel_servo_controller, time=3)
-
-        # self.pose_poller.stop()
+    def stop_robot(self):
+        from_current_angles_to_pose(self.start_pose, self.dynamixel_servo_controller, 4)
         self.dynamixel_servo_controller.disable_servos()
 
     def handle_buttons(self, buttons):
