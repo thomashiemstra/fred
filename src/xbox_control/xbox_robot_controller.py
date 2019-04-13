@@ -126,21 +126,33 @@ class XboxRobotController:
             print("added position!")
             print(self.current_pose)
         elif buttons.x:
-            if len(self.recorded_positions) < 2:
+            if self.has_enough_recorded_positions():
+                move = create_move(self.dynamixel_servo_controller, self.recorded_positions,
+                                   self.move_speed, self.center, WorkSpaceLimits)
+                self.store_move_or_go_back(move)
+            else:
                 print("not enough positions for a movement")
-                return
-
-            move = create_move(self.dynamixel_servo_controller, self.recorded_positions,
-                               self.move_speed, self.center, WorkSpaceLimits)
-            print('created move')
-            self.recorded_moves.append(move)
-            self.recorded_positions = [self.recorded_positions[-1]]
         elif buttons.lb:
+            # todo convert this to a website button (endpoint)
             self.recorded_moves = []
             self.recorded_positions = []
             print('cleared recorded moves and positions!')
         elif buttons.rb:
             pass
+
+    def has_enough_recorded_positions(self):
+        return len(self.recorded_positions) < 2
+
+    def store_move_or_go_back(self, move):
+        if move is None:
+            print('move outside workspace limits, not adding this move!')
+            self.recorded_positions = [self.recorded_positions[0]]
+            from_current_angles_to_pose(self.recorded_positions[0], self.dynamixel_servo_controller, 4)
+            self.current_pose = self.recorded_positions[0]
+        else:
+            print('created move')
+            self.recorded_moves.append(move)
+            self.recorded_positions = [self.recorded_positions[-1]]
 
     @synchronized_with_lock("lock")
     def should_set_center(self):
@@ -171,7 +183,9 @@ def create_move(servo_controller, poses, speed, center, workspace_limits):
         return PoseToPoseMovement(servo_controller, poses, 0.5, center, workspace_limits)  # orientation adjustment
 
     time = determine_time(poses, speed)
-    return SplineMovement(servo_controller, poses, time, center, workspace_limits)
+    move = SplineMovement(servo_controller, poses, time, center, workspace_limits)
+    is_ok = move.check_workspace_limits()
+    return move if is_ok else None
 
 
 def determine_time(poses, speed):

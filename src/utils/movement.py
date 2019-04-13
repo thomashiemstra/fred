@@ -38,6 +38,10 @@ class Movement(ABC):
     def _move_internal(self, poses):
         pass
 
+    @abstractmethod
+    def check_workspace_limits(self):
+        pass
+
     def to_json(self):
         json_poses = [pose.to_json() for pose in self.poses]
         dump_dict = {'poses': json_poses}
@@ -55,6 +59,13 @@ class SplineMovement(Movement):
         return b_spline_curve(poses, self.time, self.servo_controller,
                               workspace_limits=self.workspace_limits, center=self.center)
 
+    def check_workspace_limits(self):
+        try:
+            b_spline_curve(self.poses, self.time, self.servo_controller, workspace_limits=self.workspace_limits, center=self.center, calculate_only=True)
+        except MovementException:
+            return False
+        return True
+
 
 class PoseToPoseMovement(Movement):
 
@@ -66,3 +77,6 @@ class PoseToPoseMovement(Movement):
 
     def _move_internal(self, poses):
         return pose_to_pose(poses[0], poses[-1], self.servo_controller, time=self.time)
+
+    def check_workspace_limits(self):
+        return True

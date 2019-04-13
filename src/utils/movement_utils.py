@@ -166,9 +166,6 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     # by shifting the spline and calculate where it actually ends
     dx, dy, dz, actual_stop_pose = get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_steps)
 
-    if calculate_only:
-        return actual_stop_pose
-
     d_alpha, d_beta, d_gamma = get_delta_angles(start_pose, stop_pose)
 
     flip = stop_pose.flip
@@ -181,6 +178,9 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
         allowed = check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits)
         if not allowed:
             raise MovementException('curve goes outside of workspace limits!')
+
+    if calculate_only:
+        return actual_stop_pose
 
     alpha, beta, gamma = start_pose.alpha, start_pose.beta, start_pose.gamma
     if center is not None:
