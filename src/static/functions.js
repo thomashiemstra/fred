@@ -61,7 +61,12 @@ function postRequest(url, payload) {
 
 
 function postRequestForm(url, formElement) {
-    var formData = JSON.stringify($(formElement).serializeArray());
+    let payload = {};
+    $.each($(formElement).serializeArray(), function() {
+            payload[this.name] = this.value;
+        }
+    );
+    let formData = JSON.stringify(payload);
 
     fetch(url, {
                 method: 'post',
