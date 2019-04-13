@@ -241,12 +241,10 @@ def get_angles_center(x, y, z, center):
     dx = center[0] - x
     dy = center[1] - y
     dz = center[2] - z
-
+    dr = np.sqrt(np.power(dx, 2) + np.power(dy, 2))
     alpha = -np.arctan2(dx, dy)
-    beta = 0
-    gamma = np.arctan2(dz, dy)
-
-    return alpha, beta, gamma
+    gamma = np.arctan2(dz, dr)
+    return alpha, 0, gamma
 
 
 # If the start orientation is not the same as the orientation of the start pose

@@ -8,6 +8,9 @@ from src.global_constants import WorkSpaceLimits
 
 # class used to update a pose using the inputs from the xbox360 controller
 # i.e. move the pose (and thus robot) with the xbox360 controller
+from src.utils.movement_utils import get_angles_center
+
+
 class XboxPoseUpdater:
 
     def __init__(self, controller_state_manager, maximum_speed=15.0, ramp_up_time=0.1,
@@ -91,12 +94,7 @@ class XboxPoseUpdater:
 
     def get_orientation(self, old_pose, center):
         if center is not None:
-            dx = center[0] - old_pose.x
-            dy = center[1] - old_pose.y
-            dz = center[2] - old_pose.z
-            dr = np.sqrt(np.power(dx, 2) + np.power(dy,2))
-            alpha = -np.arctan2(dx, dy)
-            gamma = np.arctan2(dz, dr)
+            alpha, _, gamma = get_angles_center(old_pose.x, old_pose.y, old_pose.z, center)
         else:
             alpha = old_pose.alpha + self.dt * self.v_alpha
             gamma = old_pose.gamma + self.dt * self.v_gamma
