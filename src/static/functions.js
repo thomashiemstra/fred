@@ -59,6 +59,26 @@ function postRequest(url, payload) {
         })
 }
 
+
+function postRequestForm(url, formElement) {
+    var formData = JSON.stringify($(formElement).serializeArray());
+
+    fetch(url, {
+                method: 'post',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Content-Type': 'application/json'
+                },
+                body: formData
+             }
+         )
+        .then((res) => {return res.json()})
+        .then((data) => {
+            console.log(data);
+        })
+}
+
+
 function toggleOn() {
     $('#status-button').bootstrapToggle('enable').bootstrapToggle('on').bootstrapToggle('disable')
 }

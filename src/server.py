@@ -38,7 +38,6 @@ def get_status():
 @app.route('/test', methods=['POST'])
 def test():
     print(request.get_json())
-    print(request.get_json()['filename'])
     resp = jsonify(success=True)
     return resp
 

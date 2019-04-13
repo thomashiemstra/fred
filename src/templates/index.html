@@ -37,16 +37,16 @@
 
     <div class="container">
         <div class="col-sm-4">
-            <form id="myForm" action="/action_page.php">
+            <form id="myForm" action=#>
                 <label for="firstName">First name:
                     <input type="text" name="fname"><br>
                 </label>
                 <label for="lastName">Last name:
                     <input type="text" name="lname"><br><br>
                 </label>
-              <input type="button" onclick="myFunction()" value="Submit form">
+
+              <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/test', '#myForm')" value="Submit form">
             </form>
-            <button type="button" class="btn btn-danger" onclick="postRequest('http://127.0.0.1:5000/test', {'filename':'test'})">Engage</button>
         </div>
 
         <div>
