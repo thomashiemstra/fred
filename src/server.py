@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 
 from src import global_objects
 from src.xbox_control.xbox_control_resource import xbox_api
@@ -35,10 +35,10 @@ def get_status():
     # return jsonify(status=dynamixel_servo_controller.get_status())
 
 
-@app.route('/test')
+@app.route('/test', methods=['POST'])
 def test():
-    robot = global_objects.get_robot('COM5')
-    print(robot)
+    print(request.get_json())
+    print(request.get_json()['filename'])
     resp = jsonify(success=True)
     return resp
 

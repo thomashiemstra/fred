@@ -46,6 +46,11 @@
                 </label>
               <input type="button" onclick="myFunction()" value="Submit form">
             </form>
+            <button type="button" class="btn btn-danger" onclick="postRequest('http://127.0.0.1:5000/test', {'filename':'test'})">Engage</button>
+        </div>
+
+        <div>
+            <button type="button" class="btn btn-danger" onclick="postRequest('http://127.0.0.1:5000/test', {'filename':'test'})">doIt</button>
         </div>
     </div>
 
@@ -53,8 +58,9 @@
 
 
 {% block scripts %}
+    {{super()}}
     <script>
-    var triggered = false
+    var triggered = false;
     document.getElementById('changeTitle').addEventListener('click', changeTitle);
 
 
@@ -77,5 +83,4 @@
     }
 
     </script>
-    {{super()}}
 {% endblock %}
