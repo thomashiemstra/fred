@@ -14,6 +14,7 @@ class CameraCapture:
     marker_x_right = int(half_width + marker_size)
     marker_y_low = int(half__height - 20)
     marker_y_high = int(half__height + 20)
+    fps = 30
 
     def __init__(self, camera):
         self.camera = camera
@@ -27,7 +28,17 @@ class CameraCapture:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
 
-        thread = threading.Thread(target=self.__capture_camera, args=())
+        thread = threading.Thread(target=self.__capture_camera, args=(False, ))
+        self.running = False
+        thread.start()
+
+    @synchronized_with_lock("lock")
+    def start_camera_recording(self):
+        self.cap = cv2.VideoCapture(self.camera)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
+
+        thread = threading.Thread(target=self.__capture_camera, args=(True, ))
         self.running = False
         thread.start()
 
@@ -35,10 +46,16 @@ class CameraCapture:
     def stop_camera(self):
         self.running = True
 
-    def __capture_camera(self):
+    def __capture_camera(self, record):
+        out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'),
+                              self.fps, (self.screen_width, self.screen_height))
+
         while True:
             # Capture frame-by-frame
             ret, frame = self.cap.read()
+
+            if record:
+                out.write(frame)
 
             cv2.line(frame, (self.marker_x_left, self.half__height), (self.marker_x_right, self.half__height), (0, 255, 0))
             cv2.line(frame, (self.half_width, self.marker_y_low), (self.half_width, self.marker_y_high), (0, 255, 0))
@@ -49,5 +66,7 @@ class CameraCapture:
             with self.lock:
                 if self.running:
                     break
+
         self.cap.release()
+        out.release()
         cv2.destroyAllWindows()
