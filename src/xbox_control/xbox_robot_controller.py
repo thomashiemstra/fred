@@ -1,7 +1,10 @@
 from __future__ import division
 
+import json
 import threading
 from copy import copy
+
+import jsonpickle
 import numpy as np
 
 from src.global_constants import WorkSpaceLimits
@@ -87,6 +90,7 @@ class XboxRobotController:
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
         from_current_angles_to_pose(self.current_pose, self.dynamixel_servo_controller, 1)
         self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.dynamixel_servo_controller, 2)
+        self.pose_poller.reset_buttons()
 
         while True:
             if self.is_done():
@@ -109,7 +113,7 @@ class XboxRobotController:
         if buttons.start:
             if len(self.recorded_moves) < 1:
                 return
-            self.current_pose = self.playback_recorded_moves()
+            self.current_pose = self.playback_recorded_moves(self.recorded_moves)
 
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
@@ -138,7 +142,7 @@ class XboxRobotController:
             pass
 
     def has_enough_recorded_positions(self):
-        return len(self.recorded_positions) < 2
+        return len(self.recorded_positions) > 1
 
     def store_move_or_go_back(self, move):
         if move is None:
@@ -149,7 +153,7 @@ class XboxRobotController:
         else:
             print('created move')
             self.recorded_moves.append(move)
-            self.recorded_positions = [self.recorded_positions[-1]]
+            self.recorded_positions = [copy(self.recorded_positions[-1])]
 
     @synchronized_with_lock("lock")
     def should_set_center(self):
@@ -162,26 +166,42 @@ class XboxRobotController:
         self.find_center_mode = False
         self.recorded_positions = []
 
-    def playback_recorded_moves(self):
-        self.recorded_moves[0].go_to_start_of_move()
+    @synchronized_with_lock("lock")
+    def save_recorded_moves_to_file(self, filename):
+        if len(self.recorded_moves) < 1:
+            return False
+        json_string = jsonpickle.encode(self.recorded_moves, make_refs=False)
+        with open(filename, 'w') as outfile:
+            json.dump(json.loads(json_string), outfile, indent=4)
+        return True
+
+    @synchronized_with_lock("lock")
+    def restore_recorded_moves_from_file(self, filename):
+        with open(filename, 'r') as infile:
+            string = infile.read()
+        moves = jsonpickle.decode(string)
+        self.recorded_moves = moves
+
+    def playback_recorded_moves(self, recorded_moves):
+        recorded_moves[0].go_to_start_of_move(self.dynamixel_servo_controller)
         try:
-            for move in self.recorded_moves:
-                move.move()
+            for move in recorded_moves:
+                move.move(self.dynamixel_servo_controller)
         except MovementException as e:
             log.warning(e)
             from_current_angles_to_pose(self.start_pose, self.dynamixel_servo_controller, 4)
             return self.start_pose
 
-        return self.recorded_moves[-1].poses[-1]
+        return recorded_moves[-1].poses[-1]
 
 
 def create_move(servo_controller, poses, speed, center, workspace_limits):
     if len(poses) == 2 and np.allclose([poses[0].x, poses[0].y, poses[0].z], [poses[1].x, poses[1].y, poses[1].z]):
-        return PoseToPoseMovement(servo_controller, poses, 0.5, center, workspace_limits)  # orientation adjustment
+        return PoseToPoseMovement(poses, 0.5, center, workspace_limits)  # orientation adjustment
 
     time = determine_time(poses, speed)
-    move = SplineMovement(servo_controller, poses, time, center, workspace_limits)
-    is_ok = move.check_workspace_limits()
+    move = SplineMovement(poses, time, center, workspace_limits)
+    is_ok = move.check_workspace_limits(servo_controller, WorkSpaceLimits)
     return move if is_ok else None
 
 

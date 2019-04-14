@@ -39,11 +39,33 @@
 
 
     <div class="container">
-        <div class="col-sm-4">
-            <h2>Find center mode:</h2>
-            <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/findcenter')">Engage</button>
-            <h2>Clear center:</h2>
-            <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/clearcenter')">Engage</button>
+        <div class="row">
+            <div class="col-sm-4">
+                <h2>Find center mode:</h2>
+                <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/findcenter')">Engage</button>
+                <br>
+                <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/clearcenter')">Clear center</button>
+            </div>
+             <div class="col-sm-4">
+                 <h2>Save moves to file:</h2>
+                 <form id="saveForm" action=#>
+                     File name:<br>
+                     <label>
+                         <input type="text" name="filename" id="toSaveFileName">
+                     </label><br>
+                  <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/xbox/saveToFile', '#saveForm'); document.getElementById('toSaveFileName').value = ''" value="Submit">
+                </form>
+                 <h2>Restore moves from file:</h2>
+                 <form id="restoreForm" action=#>
+                     File name:<br>
+                     <label>
+                         <input type="text" name="filename" id="toRestoreFileName">
+                     </label><br>
+                  <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/xbox/restoreFromFile', '#restoreForm'); document.getElementById('toRestoreFileName').value = ''" value="Submit">
+                </form>
+             </div>
+             <div class="col-sm-4">
+             </div>
         </div>
     </div>
 

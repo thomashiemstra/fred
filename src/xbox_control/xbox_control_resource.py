@@ -2,7 +2,7 @@ from __future__ import division
 
 import threading
 
-from flask import Blueprint
+from flask import Blueprint, request
 from flask import jsonify
 
 import src.global_constants
@@ -83,7 +83,31 @@ def clear_center():
     return resp
 
 
-@xbox_api.route('/runfile/<file>', methods=['POST'])
-def run_file(file):
-    file = file + '.yml'
-    return "doing " + file
+@xbox_api.route('/saveToFile', methods=['POST'])
+def save_to_file():
+    filename = get_filename()
+    if filename is None:
+        return jsonify(success=False)
+
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
+    success = xbox_robot_controller.save_recorded_moves_to_file(filename)
+    return jsonify(success=success)
+
+
+@xbox_api.route('/restoreFromFile', methods=['POST'])
+def play_from_file():
+    filename = get_filename()
+    if filename is None:
+        return jsonify(success=False)
+
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
+    xbox_robot_controller.restore_recorded_moves_from_file(filename)
+    resp = jsonify(success=True)
+    return resp
+
+
+def get_filename():
+    try:
+        return request.get_json()['filename'] + '.json'
+    except KeyError:
+        return None
