@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<robot name="kuka_lwr">
+  <link name="base_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="-0.08 -0.08 0"/>
+      <geometry>
+        <mesh filename="file:///home/thomas/tutorial_ws/urdf_tutorial/urdf/meshes_fred/base.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+  </link>
+
+  <link name="base_plate">
+    <visual>
+      <origin rpy="0 0 0" xyz="-0.06 -0.06 0"/>
+      <geometry>
+        <mesh filename="file:///home/thomas/tutorial_ws/urdf_tutorial/urdf/meshes_fred/base_plate.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+  </link>
+  <joint name="base_to_base_plate" type="continuous">
+    <parent link="base_link"/>
+    <child link="base_plate"/>
+    <origin xyz="0 0 0.0425"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <link name="arm_lower">
+    <visual>
+      <origin rpy="0 1.57 0" xyz="-0.03 -0.0243 0.036"/>
+      <geometry>
+        <mesh filename="file:///home/thomas/tutorial_ws/urdf_tutorial/urdf/meshes_fred/arm_lower.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+  </link>
+  <joint name="base_plate_to_arm_lower" type="continuous">
+    <parent link="base_plate"/>
+    <child link="arm_lower"/>
+    <origin xyz="0 0 0.036"/>
+    <axis xyz="1 0 0"/>
+  </joint>
+
+  <link name="arm_upper">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="file:///home/thomas/tutorial_ws/urdf_tutorial/urdf/meshes_fred/arm_upper.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+  </link>
+  <joint name="arm_lower_to_arm_upper" type="continuous">
+    <parent link="arm_lower"/>
+    <child link="arm_upper"/>
+    <origin xyz="0 0.158 0"/>
+    <axis xyz="1 0 0"/>
+  </joint>
+
+</robot>
