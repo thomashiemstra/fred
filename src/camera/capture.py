@@ -4,8 +4,8 @@ from src.utils.decorators import synchronized_with_lock
 
 
 class CameraCapture:
-    screen_width = 1920
-    screen_height = 1080
+    screen_width = 1280
+    screen_height = 720
     marker_size = 20
 
     half__height = int(screen_height / 2)
@@ -14,7 +14,7 @@ class CameraCapture:
     marker_x_right = int(half_width + marker_size)
     marker_y_low = int(half__height - 20)
     marker_y_high = int(half__height + 20)
-    fps = 30
+    fps = 20
 
     def __init__(self, camera):
         self.camera = camera
