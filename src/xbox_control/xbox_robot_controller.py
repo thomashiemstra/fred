@@ -201,7 +201,7 @@ def create_move(servo_controller, poses, speed, center, workspace_limits):
 
     time = determine_time(poses, speed)
     move = SplineMovement(poses, time, center, workspace_limits)
-    is_ok = move.check_workspace_limits(servo_controller, WorkSpaceLimits)
+    is_ok = move.check_workspace_limits(servo_controller, workspace_limits)
     return move if is_ok else None
 
 
