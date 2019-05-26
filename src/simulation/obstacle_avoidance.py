@@ -15,12 +15,13 @@ sphere_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])
 
 total_control_points = 3
 attractive_cutoff_distance = 2
+repulsive_cutoff_distance = 1
 angle_update = 0.005
 control_point_1_position = 11.2
 control_point_attractive_weights = np.array([1, 1, 1])
 control_point_repulsive_weights = np.array([1, 1, 1])
 
-control_point_radii = np.array([10, 10, 5])
+control_point_radii = np.array([5, 5, 2])
 control_point_base_radius = 1
 
 
@@ -73,20 +74,19 @@ def get_attractive_force_world(control_points, target_points, d, weights=None):
     return workspace_forces, total_distance
 
 
-def get_repulsive_forces_world(robot_body_id, sphere_ids, obstacle_ids,
-                               cutoff_distance, physics_client_id):
+def get_repulsive_forces_world(robot_body_id, sphere_ids, obstacle_ids, physics_client_id):
     workspace_forces = np.zeros((total_control_points, 3))
 
     for i in range(sphere_ids.size):
         for obstacle_id in obstacle_ids:
             _, _, _, _, _, _, _, normal_on_b, d, *x = p.getClosestPoints(bodyA=robot_body_id, bodyB=obstacle_id,
                                                                          linkIndexA=sphere_ids[i],
-                                                                         distance=cutoff_distance,
+                                                                         distance=repulsive_cutoff_distance,
                                                                          physicsClientId=physics_client_id)[0]
             distance = d*100 - control_point_base_radius - control_point_radii[i]
 
-            if distance < cutoff_distance:
-                constant_term = control_point_repulsive_weights[i]*(1/distance - 1/cutoff_distance)*(1/(distance*distance))
+            if distance < repulsive_cutoff_distance:
+                constant_term = control_point_repulsive_weights[i]*(1/distance - 1/repulsive_cutoff_distance)*(1/(distance*distance))
                 workspace_forces[i][0] += constant_term * normal_on_b[0]
                 workspace_forces[i][1] += constant_term * normal_on_b[1]
                 workspace_forces[i][2] += constant_term * normal_on_b[2]
@@ -103,11 +103,16 @@ simulated_robot = SimulatedRobot(simulated_robot_config, physics_client)
 robot_body_id = simulated_robot.body_id
 
 collision_box_id_1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0.2], physicsClientId=physics_client)
-box1 = p.createMultiBody(0, collision_box_id_1, -1, [0, 0.38, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
-obstacles = np.array([box1])
+floor = p.createCollisionShape(p.GEOM_BOX, halfExtents=[1, 1, 0.1], physicsClientId=physics_client)
 
-arc_1 = Pose(-25, 20, 15)
-arc_2 = Pose(25, 20, 15)
+
+box1 = p.createMultiBody(0, collision_box_id_1, -1, [0, 0.38, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
+floor_id = p.createMultiBody(0, floor, -1, [0, 0.0, -0.095], [0, 0, 0, 1], physicsClientId=physics_client)
+
+obstacles = np.array([box1, floor_id])
+
+arc_1 = Pose(-25, 20, 10)
+arc_2 = Pose(25, 20, 7.1)
 
 
 simulated_robot.reset_to_pose(arc_1)
@@ -128,7 +133,7 @@ while not done:
                                                         attractive_cutoff_distance,
                                                         weights=control_point_attractive_weights)
 
-    forces += get_repulsive_forces_world(robot_body_id, sphere_ids, obstacles, 5, physics_client)
+    forces += get_repulsive_forces_world(robot_body_id, sphere_ids, obstacles, physics_client)
 
     joint_forces = jacobian_transpose_on_f(forces, current_angles,
                                            simulated_robot.robot_config, control_point_1_position)
