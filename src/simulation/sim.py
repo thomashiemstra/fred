@@ -1,6 +1,4 @@
 import pybullet as p
-from numpy import pi
-from time import sleep
 
 from src.global_constants import simulated_robot_config
 from src.kinematics.kinematics_utils import Pose
@@ -17,7 +15,6 @@ collision_box_id_1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0
 box1 = p.createMultiBody(0, collision_box_id_1, -1, [-0.4, 0.1, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
 
 
-
 simulated_robot = SimulatedRobot(simulated_robot_config, physics_client)
 robot_body_id = simulated_robot.body_id
 
@@ -29,6 +26,8 @@ poses = [arc_1, arc_2, arc_3]
 
 move = create_move(simulated_robot, poses, 15, None, None)
 simulated_robot.reset_to_pose(arc_1)
+
+simulated_robot.move_to_pose(arc_3)
 
 _, _, _, _, pos, orientation_quaterions = p.getLinkState(robot_body_id, 7)
 

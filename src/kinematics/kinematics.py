@@ -155,3 +155,45 @@ def forward_orientation_kinematics(angles):
     res = np.column_stack((n, s, a))
 
     return res
+
+
+def jacobian_transpose_on_f(workspace_force, angles, robot_config, c1_location):
+    """
+    compute the jacobian transpose on 3 control points on the robot, this translates world forces on each joint
+    into joint forces. The join forces add up in joint space.
+    :param workspace_force: 3x3 numpy array of the workspace forces on each of the control points
+    :param angles: current angles of the robot
+    :param robot_config: robot configuration of link lengths
+    :param c1_location: distance of control point 1 from frame 3 in the direction of frame 4, should be less than d4
+    :return:
+    """
+    x_comp, y_comp, z_comp = 0, 1, 2
+    a2, d4, d6 = robot_config.a2, robot_config.d4, robot_config.d6
+    c1, c2, c3, c4, c5 = cos(angles[1]), cos(angles[2]), cos(angles[3]), cos(angles[4]), cos(angles[5])
+    c23 = cos(angles[2] + angles[3])
+    s1, s2, s3, s4, s5 = sin(angles[1]), sin(angles[2]), sin(angles[3]), sin(angles[4]), sin(angles[5])
+    s23 = sin(angles[2] + angles[3])
+    
+    joint_forces = np.zeros(7)
+
+    # first control point, somewhere between frame 3 and frame 4
+    fx, fy, fz = workspace_force[0][x_comp], workspace_force[0][y_comp], workspace_force[0][z_comp]
+    joint_forces[1] += (fy*c1 - fx*s1)*(a2*c2 + c1_location*s23)
+    joint_forces[2] += a2*fz*c2 + (fx*c2 + fy*s1)*(c1_location*c23 - a2*s2) + c1_location*fz*s23
+    joint_forces[3] += c1_location*c23*(fx*c1 + fy*s1) + c1_location*fz*s23
+
+    # second control point, origin of frame 4
+    fx, fy, fz = workspace_force[1][x_comp], workspace_force[1][y_comp], workspace_force[1][z_comp]
+    joint_forces[1] += (fy*c1 - fx*s1)*(a2*c2 + d4*s23)
+    joint_forces[2] += a2*fz*c2 + (fx*c2 + fy*s1)*(d4*c23 - a2*s2) + d4*fz*s23
+    joint_forces[3] += d4*c23*(fx*c1 + fy*s1) + d4*fz*s23
+
+    # third control point, origin of frame 6
+    fx, fy, fz = workspace_force[2][x_comp], workspace_force[2][y_comp], workspace_force[2][z_comp]
+    joint_forces[1] += (fy*c1 - fx*s1)*(a2*c2 + (d4 + d6*c5)*s23) + d6*(c23*c4*(fy*c1 - fx*s1) + (fx*c1 + fy*s1)*s4)*s5
+    joint_forces[2] += a2*fz*c2 + c23*(d4 + d6*c5)*(fx*c1 + fy*s1) + fz*(d4 + d6*c5)*s23 + d6*fz*c23*c4*s5 - (fx*c1 + fy*s1)*(a2*s2 + d6*c4*s23*s5)
+    joint_forces[3] += (d4 + d6*c5)*(c23*(fx*c1 + fy*s1) + fz*s23) + d6*c4*(fz*c23 - (fx*c1 + fy*s1)*s23)*s5
+    joint_forces[4] += -d6*(-fx*c4*s1 + (fy*c23*s1 + fz*s23)*s4 + c1*(fy*c4 + fx*c23*s4))*s5
+    joint_forces[5] += d6*c5*(c4*(c23*(fx*c1 + fy*s1) + fz*s23) + (-fy*c1 + fx*s1)*s4) + d6*(fz*c23 - (fx*c1 + fy*s1)*s23)*s5
+
+    return joint_forces
