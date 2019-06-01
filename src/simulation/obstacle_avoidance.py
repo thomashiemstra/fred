@@ -12,7 +12,7 @@ from time import sleep
 sphere_1_id = 8  # in between frame 3 and the wrist
 sphere_2_id = 7  # wrist (frame 4)
 sphere_3_id = 6  # tip of the gripper
-sphere_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])
+sphere_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])  # todo rename to control points or something
 
 total_control_points = 3
 attractive_cutoff_distance = 2
@@ -36,7 +36,7 @@ def get_target_points(pose, d6):
     z_2 = z_3 - d6 * t[2, 2]
     point_2 = np.array([x_2, y_2, z_2])
 
-    point_1 = None  # todo, kinematics
+    point_1 = None  # we only need to points for the attractive force
 
     return point_1, point_2, point_3
 
@@ -113,6 +113,34 @@ def get_repulsive_forces_world(robot_body_id, control_point_ids, obstacle_ids, p
     return workspace_forces
 
 
+def draw_debug_lines(physics_client_id, robot_id, control_point_ids, attr_forces, rep_forces, attr_lines, rep_lines):
+    number_of_control_points = control_point_ids.size
+
+    new_attr_lines = [None] * number_of_control_points
+    new_rep_lines = [None] * number_of_control_points
+
+    for i in range(number_of_control_points):
+        control_point_pos = get_control_point_pos(robot_id, control_point_ids[i])
+        attr_target = control_point_pos + 3*attr_forces[i]
+        rep_target = control_point_pos + 3*rep_forces[i]
+
+        if attr_lines is None:
+            new_attr_lines[i] = p.addUserDebugLine(control_point_pos / 100, attr_target / 100, lineColorRGB=[0, 1, 0],
+                                                   lineWidth=3, physicsClientId=physics_client_id)
+        else:
+            new_attr_lines[i] = p.addUserDebugLine(control_point_pos / 100, attr_target / 100, lineColorRGB=[0, 1, 0],
+                                                   lineWidth=3, replaceItemUniqueId=attr_lines[i],
+                                                   physicsClientId=physics_client_id)
+        if rep_lines is None:
+            new_rep_lines[i] = p.addUserDebugLine(control_point_pos / 100, rep_target / 100, lineColorRGB=[1, 0, 0],
+                                                  lineWidth=3, physicsClientId=physics_client_id)
+        else:
+            new_rep_lines[i] = p.addUserDebugLine(control_point_pos / 100, rep_target / 100, lineColorRGB=[1, 0, 0],
+                                                  lineWidth=3, replaceItemUniqueId=rep_lines[i],
+                                                  physicsClientId=physics_client_id)
+    return new_attr_lines, new_rep_lines
+
+
 physics_client = p.connect(p.GUI)
 p.setGravity(0, 0, -10)
 planeId = p.loadURDF("urdf/plane.urdf")
@@ -141,20 +169,25 @@ _, target_point_2, target_point_3 = get_target_points(arc_2, simulated_robot.rob
 current_angles = simulated_robot.pose_to_angles(arc_1)
 
 done = False
+attr_lines = None
+rep_lines = None
 while not done:
     zero = np.zeros(3)  # the first control point is not used to determine the attractive force right now,
     # mainly because getting the position of the target  point for this one is annoying
     c2_pos = get_control_point_pos(simulated_robot_body_id, sphere_2_id)
     c3_pos = get_control_point_pos(simulated_robot_body_id, sphere_3_id)
 
-    forces, total_distance = get_attractive_force_world(np.array([zero, c2_pos, c3_pos]),
+    attractive_forces, total_distance = get_attractive_force_world(np.array([zero, c2_pos, c3_pos]),
                                                         np.array([zero, target_point_2, target_point_3]),
                                                         attractive_cutoff_distance,
                                                         weights=control_point_attractive_weights)
 
-    forces += get_repulsive_forces_world(simulated_robot_body_id, sphere_ids, obstacles, physics_client)
+    repulsive_forces = get_repulsive_forces_world(simulated_robot_body_id, sphere_ids, obstacles, physics_client)
 
-    joint_forces = jacobian_transpose_on_f(forces, current_angles,
+    attr_lines, rep_lines = draw_debug_lines(physics_client, simulated_robot_body_id,
+                                             sphere_ids, attractive_forces, repulsive_forces, attr_lines, rep_lines)
+
+    joint_forces = jacobian_transpose_on_f(attractive_forces + repulsive_forces, current_angles,
                                            simulated_robot.robot_config, control_point_1_position)
 
     absolute_force = np.linalg.norm(joint_forces)
