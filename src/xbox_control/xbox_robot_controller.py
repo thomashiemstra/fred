@@ -31,6 +31,8 @@ class XboxRobotController:
         self.current_pose = None
         self.thread = None
         self.find_center_mode = False
+        # 3d position in front of the robot to keep the end effector pointed towards
+        # (i.e. make sure the camera stays focused on an object)
         self.center = None
         self.move_speed = 10
         self.recorded_moves = []
