@@ -1,6 +1,6 @@
 import src.global_constants
 from src.camera.capture import CameraCapture
-from src.dynamixel_robot.servo_controller import DynamixelRobotArm
+from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
 from functools import lru_cache
 
 from src.xbox_control.xbox360controller.controller_state_manager import ControllerStateManager
@@ -10,7 +10,7 @@ from src.xbox_control.xbox_robot_controller import XboxRobotController
 
 @lru_cache(maxsize=1)
 def get_robot(port):
-    return DynamixelRobotArm(port, src.global_constants.dynamixel_robot_config)
+    return DynamixelRobotController(port, src.global_constants.dynamixel_robot_config)
 
 
 @lru_cache(maxsize=1)

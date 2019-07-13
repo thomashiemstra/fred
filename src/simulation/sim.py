@@ -2,7 +2,7 @@ import pybullet as p
 
 from src.global_constants import simulated_robot_config
 from src.kinematics.kinematics_utils import Pose
-from src.simulation.simulated_robot import SimulatedRobot
+from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
 from src.xbox_control.xbox_robot_controller import create_move
 
 physics_client = p.connect(p.GUI)
@@ -15,7 +15,7 @@ collision_box_id_1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0
 box1 = p.createMultiBody(0, collision_box_id_1, -1, [-0.4, 0.1, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
 
 
-simulated_robot = SimulatedRobot(simulated_robot_config, physics_client)
+simulated_robot = SimulatedRobotController(simulated_robot_config, physics_client)
 robot_body_id = simulated_robot.body_id
 
 arc_1 = Pose(-25, 15, 5)

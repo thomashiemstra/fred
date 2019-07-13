@@ -2,8 +2,10 @@ from src.kinematics.kinematics import inverse_kinematics
 import pybullet as p
 import numpy as np
 
+from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 
-class SimulatedRobot:
+
+class SimulatedRobotController(AbstractRobotController):
 
     def __init__(self, robot_config, physics_client):
         self.robot_config = robot_config
