@@ -26,8 +26,7 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 
-from custom_walker import BipedalWalker2
-
+# PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
 
 def normal_projection_net(action_spec,
                           init_action_stddev=0.35,
