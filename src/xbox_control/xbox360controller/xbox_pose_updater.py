@@ -9,6 +9,7 @@ from src.global_constants import WorkSpaceLimits
 # class used to update a pose using the inputs from the xbox360 controller
 # i.e. move the pose (and thus robot) with the xbox360 controller
 from src.utils.movement_utils import get_angles_center
+from src.utils.os_utils import is_linux
 
 
 class XboxPoseUpdater:
@@ -45,7 +46,8 @@ class XboxPoseUpdater:
 
     def __update_orientation_velocities(self, find_center_mode):
         right_thumb_x, right_thumb_y = self.controller_state_manager.get_right_thumb()
-        right_thumb_x *= -1
+        if not is_linux():
+            right_thumb_x *= -1
         right_thumb_y *= -1
 
         v_alpha_max = self.maximum_speed * (right_thumb_x / 1000)

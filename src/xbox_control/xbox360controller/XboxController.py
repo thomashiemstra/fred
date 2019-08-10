@@ -3,12 +3,15 @@
 # A class for reading values from an xbox controller
 # uses xboxdrv and pygame
 # xboxdrv should already be running
+import math
 
 import pygame
 from pygame.locals import *
 import os, sys
 import threading
 import time
+
+from src.utils.os_utils import is_linux
 
 """
 NOTES - pygame events and values
@@ -55,6 +58,9 @@ class XboxController(threading.Thread):
         RTHUMBX = 2
         RTHUMBY = 3
         LRTRIGGER = 4
+        LTRIGGER = 4
+        RTRIGGER = 5
+
         A = 6
         B = 7
         X = 8
@@ -72,9 +78,15 @@ class XboxController(threading.Thread):
     class PyGameAxis():
         LTHUMBX = 0
         LTHUMBY = 1
-        RTHUMBX = 4
-        RTHUMBY = 3
+        if is_linux():
+            RTHUMBX = 3
+            RTHUMBY = 4
+        else:
+            RTHUMBX = 4
+            RTHUMBY = 3
         LRTRIGGER = 2
+        LTRIGGER = 2
+        RTRIGGER = 5
 
     # pygame constants for the buttons of the xbox controller
     class PyGameButtons():
@@ -97,7 +109,9 @@ class XboxController(threading.Thread):
                       PyGameAxis.RTHUMBY: XboxControls.RTHUMBY}
 
     # map between pygame axis (trigger) ids and xbox control ids
-    TRIGGERCONTROLMAP = {PyGameAxis.LRTRIGGER: XboxControls.LRTRIGGER}
+    TRIGGERCONTROLMAP = {PyGameAxis.RTRIGGER: XboxControls.RTRIGGER,
+                         PyGameAxis.LTRIGGER: XboxControls.LTRIGGER} if is_linux() \
+        else {PyGameAxis.LRTRIGGER: XboxControls.LRTRIGGER}
 
     # map between pygame buttons ids and xbox contorl ids
     BUTTONCONTROLMAP = {PyGameButtons.A: XboxControls.A,
@@ -134,99 +148,47 @@ class XboxController(threading.Thread):
         self.controlCallbacks = {}
 
         # setup controller properties
-        self.controlValues = {self.XboxControls.LTHUMBX: 0,
-                              self.XboxControls.LTHUMBY: 0,
-                              self.XboxControls.RTHUMBX: 0,
-                              self.XboxControls.RTHUMBY: 0,
-                              self.XboxControls.LRTRIGGER: 0,
-                              self.XboxControls.A: 0,
-                              self.XboxControls.B: 0,
-                              self.XboxControls.X: 0,
-                              self.XboxControls.Y: 0,
-                              self.XboxControls.LB: 0,
-                              self.XboxControls.RB: 0,
-                              self.XboxControls.BACK: 0,
-                              self.XboxControls.START: 0,
-                              self.XboxControls.XBOX: 0,
-                              self.XboxControls.LEFTTHUMB: 0,
-                              self.XboxControls.RIGHTTHUMB: 0,
-                              self.XboxControls.DPAD: (0, 0)}
+        if is_linux():
+            self.controlValues = {self.XboxControls.LTHUMBX: 0,
+                                  self.XboxControls.LTHUMBY: 0,
+                                  self.XboxControls.RTHUMBX: 0,
+                                  self.XboxControls.RTHUMBY: 0,
+                                  self.XboxControls.RTRIGGER: 0,
+                                  self.XboxControls.LTRIGGER: 0,
+                                  self.XboxControls.A: 0,
+                                  self.XboxControls.B: 0,
+                                  self.XboxControls.X: 0,
+                                  self.XboxControls.Y: 0,
+                                  self.XboxControls.LB: 0,
+                                  self.XboxControls.RB: 0,
+                                  self.XboxControls.BACK: 0,
+                                  self.XboxControls.START: 0,
+                                  self.XboxControls.XBOX: 0,
+                                  self.XboxControls.LEFTTHUMB: 0,
+                                  self.XboxControls.RIGHTTHUMB: 0,
+                                  self.XboxControls.DPAD: (0, 0)}
+        else:
+            self.controlValues = {self.XboxControls.LTHUMBX: 0,
+                                  self.XboxControls.LTHUMBY: 0,
+                                  self.XboxControls.RTHUMBX: 0,
+                                  self.XboxControls.RTHUMBY: 0,
+                                  self.XboxControls.LRTRIGGER: 0,
+                                  self.XboxControls.A: 0,
+                                  self.XboxControls.B: 0,
+                                  self.XboxControls.X: 0,
+                                  self.XboxControls.Y: 0,
+                                  self.XboxControls.LB: 0,
+                                  self.XboxControls.RB: 0,
+                                  self.XboxControls.BACK: 0,
+                                  self.XboxControls.START: 0,
+                                  self.XboxControls.XBOX: 0,
+                                  self.XboxControls.LEFTTHUMB: 0,
+                                  self.XboxControls.RIGHTTHUMB: 0,
+                                  self.XboxControls.DPAD: (0, 0)}
 
         # setup pygame
         self._setupPygame(joystickNo)
 
-    # Create controller properties
-    @property
-    def LTHUMBX(self):
-        return self.controlValues[self.XboxControls.LTHUMBX]
-
-    @property
-    def LTHUMBY(self):
-        return self.controlValues[self.XboxControls.LTHUMBY]
-
-    @property
-    def RTHUMBX(self):
-        return self.controlValues[self.XboxControls.RTHUMBX]
-
-    @property
-    def RTHUMBY(self):
-        return self.controlValues[self.XboxControls.RTHUMBY]
-
-    @property
-    def RTRIGGER(self):
-        return self.controlValues[self.XboxControls.RTRIGGER]
-
-    @property
-    def LTRIGGER(self):
-        return self.controlValues[self.XboxControls.LTRIGGER]
-
-    @property
-    def A(self):
-        return self.controlValues[self.XboxControls.A]
-
-    @property
-    def B(self):
-        return self.controlValues[self.XboxControls.B]
-
-    @property
-    def X(self):
-        return self.controlValues[self.XboxControls.X]
-
-    @property
-    def Y(self):
-        return self.controlValues[self.XboxControls.Y]
-
-    @property
-    def LB(self):
-        return self.controlValues[self.XboxControls.LB]
-
-    @property
-    def RB(self):
-        return self.controlValues[self.XboxControls.RB]
-
-    @property
-    def BACK(self):
-        return self.controlValues[self.XboxControls.BACK]
-
-    @property
-    def START(self):
-        return self.controlValues[self.XboxControls.START]
-
-    @property
-    def XBOX(self):
-        return self.controlValues[self.XboxControls.XBOX]
-
-    @property
-    def LEFTTHUMB(self):
-        return self.controlValues[self.XboxControls.LEFTTHUMB]
-
-    @property
-    def RIGHTTHUMB(self):
-        return self.controlValues[self.XboxControls.RIGHTTHUMB]
-
-    @property
-    def DPAD(self):
-        return self.controlValues[self.XboxControls.DPAD]
 
     # setup pygame
     def _setupPygame(self, joystickNo):
@@ -265,7 +227,7 @@ class XboxController(threading.Thread):
                     if event.axis in self.AXISCONTROLMAP:
                         # is this a y axis
                         yAxis = True if (
-                                    event.axis == self.PyGameAxis.LTHUMBY or event.axis == self.PyGameAxis.RTHUMBY) else False
+                                event.axis == self.PyGameAxis.LTHUMBY or event.axis == self.PyGameAxis.RTHUMBY) else False
                         # update the control value
                         self.updateControlValue(self.AXISCONTROLMAP[event.axis],
                                                 self._sortOutAxisValue(event.value, yAxis))
@@ -334,3 +296,52 @@ class XboxController(threading.Thread):
         # if the button is down its 1, if the button is up its 0
         value = 1 if eventType == JOYBUTTONDOWN else 0
         return value
+
+
+if __name__ == '__main__':
+
+    # generic call back
+    def controlCallBack(xboxControlId, value):
+        print("Control Id = {}, Value = {}".format(xboxControlId, value))
+
+
+    # specific callbacks for the left thumb (X & Y)
+    def leftThumbX(xValue):
+        print("RAW LTRIGGER {}".format( xValue))
+        adjusted_value = xValue/200 + 0.5
+        if math.fabs(adjusted_value) > 0.1:
+            print("LTRIGGER {}".format( (xValue/200) + 0.5 ))
+        else:
+            print("LTRIGGER 0")
+
+
+    def leftThumbY(yValue):
+        print("RTRIGGER {}".format( (yValue/200) + 0.5))
+
+
+    # setup xbox controller, set out the deadzone and scale, also invert the Y Axis (for some reason in Pygame negative is up - wierd!
+    xboxCont = XboxController(None, deadzone=30, scale=100, invertYAxis=True)
+
+    # setup the left thumb (X & Y) callbacks
+    xboxCont.setupControlCallback(xboxCont.XboxControls.LTRIGGER, leftThumbX)
+    xboxCont.setupControlCallback(xboxCont.XboxControls.RTRIGGER, leftThumbY)
+
+    try:
+        # start the controller
+        xboxCont.start()
+        print("xbox controller running")
+        while True:
+            time.sleep(1)
+
+    # Ctrl C
+    except KeyboardInterrupt:
+        print("User cancelled")
+
+    # error
+    except:
+        print("Unexpected error:", sys.exc_info()[0])
+        raise
+
+    finally:
+        # stop the controller
+        xboxCont.stop()

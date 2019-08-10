@@ -1,3 +1,4 @@
+from src.utils.os_utils import is_linux
 from src.xbox_control.xbox360controller.XboxController import XboxController
 import threading
 import numpy as np
@@ -47,8 +48,12 @@ class ControllerStateManager:
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.LTHUMBY, self.__left_thumb_y)
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.RTHUMBX, self.__right_thumb_x)
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.RTHUMBY, self.__right_thumb_y)
-        self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.LRTRIGGER,
-                                                  self.__left_right_trigger)
+        if is_linux():
+            self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.LTRIGGER, self._left_trigger)
+            self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.RTRIGGER, self._right_trigger)
+        else:
+            self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.LRTRIGGER,
+                                                      self.__left_right_trigger)
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.START, self.__start)
 
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.A, self.__a)
@@ -137,6 +142,14 @@ class ControllerStateManager:
         if np.abs(lr_trigger_value) < 0.1:
             lr_trigger_value = 0
         self.lr_trigger = lr_trigger_value
+
+    @synchronized_with_lock("lock")
+    def _left_trigger(self, left_trigger_value):
+        self.lr_trigger = (left_trigger_value / 2.0) + 50
+
+    @synchronized_with_lock("lock")
+    def _right_trigger(self, right_trigger_value):
+        self.lr_trigger = -((right_trigger_value / 2.0) + 50)
 
     def reset_buttons(self):
         self.start = False
