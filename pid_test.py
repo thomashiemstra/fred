@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 servo_id = 4
 target = 2048
 
-robot = get_robot('COM5')
+robot = get_robot('/dev/ttyUSB0')
 robot.enable_servos()
                                     #p  i  d
 robot.set_pid_single_servo(servo_id, 2500, 0, 3500)
