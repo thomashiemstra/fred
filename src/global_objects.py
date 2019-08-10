@@ -1,8 +1,9 @@
-import src.global_constants
+from src import global_constants
 from src.camera.capture import CameraCapture
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+
 from functools import lru_cache
 
+from src.simulation.simulation_utils import start_simulation
 from src.xbox_control.xbox360controller.controller_state_manager import ControllerStateManager
 from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 from src.xbox_control.xbox_robot_controller import XboxRobotController
@@ -10,7 +11,11 @@ from src.xbox_control.xbox_robot_controller import XboxRobotController
 
 @lru_cache(maxsize=1)
 def get_robot(port):
-    return DynamixelRobotController(port, src.global_constants.dynamixel_robot_config)
+    if global_constants.use_simulation:
+        return start_simulation()
+    else:
+        from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+        return DynamixelRobotController(port, src.global_constants.dynamixel_robot_config)
 
 
 @lru_cache(maxsize=1)
@@ -19,7 +24,7 @@ def get_xbox_robot_controller(port):
     controller_state_manager = ControllerStateManager()
     pose_poller = XboxPoseUpdater(controller_state_manager)
 
-    return XboxRobotController(src.global_constants.dynamixel_robot_config, dynamixel_servo_controller, pose_poller)
+    return XboxRobotController(global_constants.dynamixel_robot_config, dynamixel_servo_controller, pose_poller)
 
 
 @lru_cache(maxsize=1)

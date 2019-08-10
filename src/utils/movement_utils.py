@@ -8,9 +8,7 @@ from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
 import logging as log
 from scipy.interpolate import splev, splprep
-import matplotlib.pyplot as plt
 from copy import copy
-from mpl_toolkits.mplot3d import Axes3D
 
 from src.utils.movement_exception import MovementException
 
@@ -98,6 +96,8 @@ def get_curve_val(t):
 
 
 def plot_curve(x, y, z, poses):
+    import matplotlib.pyplot as plt
+
     fig2 = plt.figure(2)
     ax3d = fig2.add_subplot(111, projection='3d')
 

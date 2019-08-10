@@ -7,11 +7,9 @@ from src.robot_controllers.abstract_robot_controller import AbstractRobotControl
 
 class SimulatedRobotController(AbstractRobotController):
 
-    def __init__(self, robot_config, physics_client):
+    def __init__(self, robot_config, physics_client, body_id):
         self.robot_config = robot_config
-        start_pos = [0, 0, 0]
-        start_orientation = p.getQuaternionFromEuler([0, 0, 0])
-        self.body_id = p.loadURDF("urdf/fred_with_spheres.urdf", start_pos, start_orientation, physicsClientId=physics_client)
+        self.body_id = body_id
         self.motors = [i for i in range(6)]
         self.physics_client = physics_client
 
