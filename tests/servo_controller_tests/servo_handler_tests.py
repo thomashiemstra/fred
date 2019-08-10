@@ -1,8 +1,9 @@
 import unittest
-from src.robot_controllers.dynamixel_robot import ServoHandler, dynamixel_x_config
+from src.robot_controllers.dynamixel_robot import dynamixel_x_config
 from numpy import pi
 import math
-from src.robot_controllers.dynamixel_robot import Servo
+from src.robot_controllers.dynamixel_robot.servo import Servo
+from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 
 
 class TestServoHandler(unittest.TestCase):
