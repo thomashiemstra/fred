@@ -15,7 +15,7 @@ def get_robot(port):
         return start_simulation()
     else:
         from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
-        return DynamixelRobotController(port, src.global_constants.dynamixel_robot_config)
+        return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
 
 
 @lru_cache(maxsize=1)
