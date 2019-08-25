@@ -24,8 +24,10 @@ class SimulatedRobotController(AbstractRobotController):
         self.reset_servo(angles)
 
     def reset_servo(self, angles):
+        p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
+                                    targetPositions=angles[1:7], physicsClientId=self.physics_client)
         for i in range(1, 7):
-            p.resetJointState(self.body_id, i-1, angles[i], physicsClientId=self.physics_client)
+            p.resetJointState(self.body_id, i-1, angles[i], physicsClientId=self.physics_client, targetVelocity=0)
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
