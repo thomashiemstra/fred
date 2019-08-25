@@ -1,3 +1,6 @@
+import inspect
+import os
+
 import pybullet as p
 from functools import lru_cache
 
@@ -94,12 +97,12 @@ def get_repulsive_forces_world(robot_body_id, control_point_ids, obstacle_ids, p
         smallest_distance = repulsive_cutoff_distance  # anything further away should not be considered
         closest_obstacle_id = -1
 
-        for id in obstacle_ids:
-            normal, d = get_normal_and_distance(robot_body_id, id, control_point_id, physics_client_id)
+        for obstacle_id in obstacle_ids:
+            normal, d = get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id)
             distance = d - control_point_radii[i]
             if distance < smallest_distance:
                 smallest_distance = distance
-                closest_obstacle_id = id
+                closest_obstacle_id = obstacle_id
 
         if smallest_distance < repulsive_cutoff_distance:
             normal_on_b, d = get_normal_and_distance(robot_body_id, closest_obstacle_id, control_point_id, physics_client_id)
@@ -141,13 +144,31 @@ def draw_debug_lines(physics_client_id, robot_id, control_point_ids, attr_forces
     return new_attr_lines, new_rep_lines
 
 
+def create_visual_sphere(location):
+    target_sphere_1 = p.createCollisionShape(p.GEOM_SPHERE, radius=0.01, physicsClientId=physics_client)
+    target_sphere_1_id = p.createMultiBody(0, target_sphere_1, -1, location/100, [0, 0, 0, 1], physicsClientId=physics_client)
+
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 2, -1, 0)
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 3, -1, 0)
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 4, -1, 0)
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 5, -1, 0)
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 6, -1, 0)
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 7, -1, 0)
+    p.setCollisionFilterPair(body_id, target_sphere_1_id, 8, -1, 0)
+
+
 physics_client = p.connect(p.GUI)
 p.setGravity(0, 0, -10)
 planeId = p.loadURDF("urdf/plane.urdf")
 p.setRealTimeSimulation(1)
 
-simulated_robot = SimulatedRobotController(simulated_robot_config, physics_client)
-simulated_robot_body_id = simulated_robot.body_id
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+start_pos = [0, 0, 0]
+start_orientation = p.getQuaternionFromEuler([0, 0, 0])
+body_id = p.loadURDF(current_dir + "/urdf/fred_with_spheres.urdf", start_pos, start_orientation,
+                     physicsClientId=physics_client)
+
+simulated_robot = SimulatedRobotController(simulated_robot_config, physics_client, body_id)
 
 collision_box_id_1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0.2], physicsClientId=physics_client)
 floor = p.createCollisionShape(p.GEOM_BOX, halfExtents=[1, 1, 0.1], physicsClientId=physics_client)
@@ -166,6 +187,10 @@ simulated_robot.reset_to_pose(arc_1)
 
 _, target_point_2, target_point_3 = get_target_points(arc_2, simulated_robot.robot_config.d6)
 
+create_visual_sphere(target_point_2)
+create_visual_sphere(target_point_3)
+
+
 current_angles = simulated_robot.pose_to_angles(arc_1)
 
 done = False
@@ -174,17 +199,17 @@ rep_lines = None
 while not done:
     zero = np.zeros(3)  # the first control point is not used to determine the attractive force right now,
     # mainly because getting the position of the target  point for this one is annoying
-    c2_pos = get_control_point_pos(simulated_robot_body_id, sphere_2_id)
-    c3_pos = get_control_point_pos(simulated_robot_body_id, sphere_3_id)
+    c2_pos = get_control_point_pos(body_id, sphere_2_id)
+    c3_pos = get_control_point_pos(body_id, sphere_3_id)
 
     attractive_forces, total_distance = get_attractive_force_world(np.array([zero, c2_pos, c3_pos]),
                                                         np.array([zero, target_point_2, target_point_3]),
                                                         attractive_cutoff_distance,
                                                         weights=control_point_attractive_weights)
 
-    repulsive_forces = get_repulsive_forces_world(simulated_robot_body_id, sphere_ids, obstacles, physics_client)
+    repulsive_forces = get_repulsive_forces_world(body_id, sphere_ids, obstacles, physics_client)
 
-    attr_lines, rep_lines = draw_debug_lines(physics_client, simulated_robot_body_id,
+    attr_lines, rep_lines = draw_debug_lines(physics_client, body_id,
                                              sphere_ids, attractive_forces, repulsive_forces, attr_lines, rep_lines)
 
     joint_forces = jacobian_transpose_on_f(attractive_forces + repulsive_forces, current_angles,
