@@ -1,3 +1,6 @@
+import inspect
+import os
+
 import pybullet as p
 
 from src.global_constants import simulated_robot_config
@@ -14,8 +17,14 @@ p.setRealTimeSimulation(1)
 collision_box_id_1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0.2], physicsClientId=physics_client)
 box1 = p.createMultiBody(0, collision_box_id_1, -1, [-0.4, 0.1, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
 
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+start_pos = [0, 0, 0]
+start_orientation = p.getQuaternionFromEuler([0, 0, 0])
 
-simulated_robot = SimulatedRobotController(simulated_robot_config, physics_client)
+body_id = p.loadURDF(current_dir + "/urdf/fred_with_spheres.urdf", start_pos, start_orientation,
+                         physicsClientId=physics_client)
+
+simulated_robot = SimulatedRobotController(simulated_robot_config, physics_client, body_id)
 robot_body_id = simulated_robot.body_id
 
 arc_1 = Pose(-25, 15, 5)
