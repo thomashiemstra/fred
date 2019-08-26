@@ -9,7 +9,7 @@ import numpy as np
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points
-from src.simulation.simulation_utils import start_simulated_robot, reload_urdf
+from src.simulation.simulation_utils import start_simulated_robot
 from tf_agents.environments import utils
 
 
