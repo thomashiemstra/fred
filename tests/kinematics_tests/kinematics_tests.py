@@ -18,7 +18,7 @@ class InverseKinematicsTests(unittest.TestCase):
 
         angles = inverse_kinematics(pose, test_config)
 
-        expected = [0, pi/2, pi/2, 0.0, 0.0, 0.0, 0.0]
+        expected = [0, pi/2, pi/2, 0.0, 0.0, 0.0, 1.0]
         self.assertIsNotNone(angles)
         self.assert_angles(angles, expected)
 
