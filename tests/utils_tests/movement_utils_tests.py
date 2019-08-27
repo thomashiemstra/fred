@@ -6,6 +6,7 @@ import numpy as np
 from numpy import pi
 import numpy.testing as test
 
+from src.utils.movement_exception import MovementException
 from src.utils.movement_utils import b_spline_curve
 
 
@@ -126,8 +127,8 @@ class GetRotationMatrixParamsTests(unittest.TestCase):
         pose2 = Pose(2, 2, 2)
         center = [-1, -1, -1]
 
-        r, p0_prime, p1_prime, pc_prime = linalg_utils.get_rotation_matrix_params(pose1, pose2, center)
-        self.assertIsNone(r)
+        res = linalg_utils.get_rotation_matrix_params(pose1, pose2, center)
+        self.assertIsNone(res)
 
     def test_3d_points_2(self):
         pose1 = Pose(1, 1, 1)
@@ -159,20 +160,18 @@ class DummyWorkspaceLimits:
 
 class BSplineCurveTests(unittest.TestCase):
 
-    def test_workspace_limits(self):
+    def test_outside_workspace_limits(self):
         pose1 = Pose(0, 0, 0)
         pose2 = Pose(100, 100, 100)
         poses = [pose1, pose2]
 
-        current_pose = b_spline_curve(poses, 2, None, DummyWorkspaceLimits)
-        self.assertIsNotNone(current_pose)
-        self.assertEqual(pose1, current_pose)
+        self.assertRaises(MovementException, lambda: b_spline_curve(poses, 2, None, DummyWorkspaceLimits))
 
     # With these poses the b-spline should start and stop exactly as required
     def test_spline_perfect_fit(self):
-        pose1 = Pose(0, 0, 0)
-        pose2 = Pose(0, 10, 5)
-        pose3 = Pose(0, 20, 0)
+        pose1 = Pose(-20, 20, 5)
+        pose2 = Pose(0, 30, 10)
+        pose3 = Pose(20, 20, 5)
 
         poses = [pose1, pose2, pose3]
 
@@ -182,11 +181,11 @@ class BSplineCurveTests(unittest.TestCase):
 
     # With these poses the b-spline should not exactly end at the last pose
     def test_spline_non_perfect_fit(self):
-        pose1 = Pose(0, 0, 0)
-        pose2 = Pose(0, 10, 5)
-        pose3 = Pose(0, 20, 15)
-        pose4 = Pose(0, 30, 3)
-        pose5 = Pose(1, 20, 2)
+        pose1 = Pose(-20, 20, 5)
+        pose2 = Pose(-10, 30, 10)
+        pose3 = Pose(0, 20, 10)
+        pose4 = Pose(10, 30, 10)
+        pose5 = Pose(20, 20, 5)
 
         poses = [pose1, pose2, pose3, pose4, pose5]
 

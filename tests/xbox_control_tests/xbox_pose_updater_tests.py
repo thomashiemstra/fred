@@ -1,6 +1,7 @@
 import unittest
 
 from src.kinematics.kinematics_utils import Pose
+from src.utils.os_utils import is_linux
 from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 
 
@@ -106,7 +107,10 @@ class XboxPoseUpdaterTests(unittest.TestCase):
         new_pose = pose_updater.get_updated_pose_from_controller(old_pose, False, None)
 
         self.assertIsNotNone(new_pose)
-        self.assertTrue(new_pose.alpha > old_pose.alpha)
+        if is_linux():
+            self.assertTrue(new_pose.alpha < old_pose.alpha)
+        else:
+            self.assertTrue(new_pose.alpha > old_pose.alpha)
 
     def test_move_negative_alpha(self):
         state_mock = ControllerStateMock(r_thumb_x=1)
@@ -116,7 +120,10 @@ class XboxPoseUpdaterTests(unittest.TestCase):
         new_pose = pose_updater.get_updated_pose_from_controller(old_pose, False, None)
 
         self.assertIsNotNone(new_pose)
-        self.assertTrue(new_pose.alpha < old_pose.alpha)
+        if is_linux():
+            self.assertTrue(new_pose.alpha > old_pose.alpha)
+        else:
+            self.assertTrue(new_pose.alpha < old_pose.alpha)
 
     def test_move_positive_gamma(self):
         state_mock = ControllerStateMock(r_thumb_y=-1)
