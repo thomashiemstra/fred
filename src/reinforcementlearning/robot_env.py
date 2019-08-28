@@ -5,6 +5,7 @@ from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 import pybullet as p
 import numpy as np
+from numpy import pi
 
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
@@ -68,6 +69,8 @@ class RobotEnv(py_environment.PyEnvironment):
 
         converted_action = np.append([0], action)  # angles are not 0 indexed
         self._state = self._state + self._update_step_size * converted_action
+        self._clip_state()
+
         self._robot_controller.move_servos(self._state)
         self._advance_simulation()
 
@@ -84,13 +87,16 @@ class RobotEnv(py_environment.PyEnvironment):
         else:
             return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
 
-    def get_control_point_positions(self):
-        c2_pos = get_control_point_pos(self._robot_body_id, sphere_2_id)
-        c3_pos = get_control_point_pos(self._robot_body_id, sphere_3_id)
-        return c2_pos, c3_pos
+    def _clip_state(self):
+        np.clip(self._state[1], 0, pi)
+        np.clip(self._state[2], 0, pi)
+        np.clip(self._state[3], -pi/3, 2*pi/3)
+        np.clip(self._state[4], 0, pi)
+        np.clip(self._state[5], -3*pi/4, 3*pi/4)
+        np.clip(self._state[6], 0, pi)
 
     def _get_observations(self):
-        c2_pos, c3_pos = self.get_control_point_positions()
+        c2_pos, c3_pos = self._get_control_point_positions()
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._gripper_length)
 
         attractive_forces, total_distance = get_attractive_force_world(np.array([c2_pos, c3_pos]),
@@ -101,6 +107,11 @@ class RobotEnv(py_environment.PyEnvironment):
         normalized_attr_vec_2 = attractive_forces[1] / np.linalg.norm(attractive_forces[1])
 
         return np.append(normalized_attr_vec_1, normalized_attr_vec_2), total_distance
+
+    def _get_control_point_positions(self):
+        c2_pos = get_control_point_pos(self._robot_body_id, sphere_2_id)
+        c3_pos = get_control_point_pos(self._robot_body_id, sphere_3_id)
+        return c2_pos, c3_pos
 
     def _advance_simulation(self):
         if self._use_gui:
