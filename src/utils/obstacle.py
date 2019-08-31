@@ -24,12 +24,12 @@ class BoxObstacle(Obstacle):
             base_center_position: array of the x,y,z coordinates of the center of the base of the obstacle
         """
         super().__init__(physics_client)
-        collision_box_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[i/2 for i in dimensions],
+        collision_box_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[i/200 for i in dimensions],
                                                   physicsClientId=physics_client)
 
         base_center_position[2] += dimensions[2]/2
 
-        self.obstacle_id = p.createMultiBody(0, collision_box_id, -1, basePosition=base_center_position,
+        self.obstacle_id = p.createMultiBody(0, collision_box_id, -1, basePosition=[i/100 for i in base_center_position],
                                              baseOrientation=[0, 0, 0, 1],
                                              physicsClientId=physics_client)
 
