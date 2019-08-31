@@ -1,10 +1,18 @@
+import inspect
+import os
 import unittest
 
+from src.global_constants import simulated_robot_config
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.robot_env import RobotEnv
 import numpy as np
+import pybullet as p
 
-from src.reinforcementlearning.robot_env_utils import get_attractive_force_world, get_target_points
+from src.reinforcementlearning.robot_env_utils import get_attractive_force_world, get_target_points, \
+    get_normal_and_distance, get_repulsive_forces_world, sphere_ids
+from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
+from src.simulation.simulation_utils import start_simulated_robot
+from src.utils.obstacle import BoxObstacle
 
 
 class TestRobotEnvUtils(unittest.TestCase):
@@ -69,3 +77,49 @@ class TestRobotEnvUtils(unittest.TestCase):
             self.assertAlmostEqual(actual_vector[i], expected_vector[i], places=2,
                                    msg="vector index {} does not match, actual:{}, expected:{}"
                                    .format(i, actual_vector[i], expected_vector[i]))
+
+
+class ObstacleIntegrationTests(unittest.TestCase):
+
+    def setUp(self):
+        self.simulated_robot = start_simulated_robot(use_gui=False)
+        self.physics_client = self.simulated_robot.physics_client
+
+    def tearDown(self):
+        p.disconnect()
+
+    def test_repulsive_vectors(self):
+        obstacle = BoxObstacle(self.physics_client, [10, 100, 50], [-31, 0, 0])
+
+        self.simulated_robot.reset_to_pose(Pose(-20, 15, 10))
+        p.stepSimulation(self.physics_client)
+
+        obstacles = np.array([obstacle.obstacle_id])
+        rep_forces = get_repulsive_forces_world(self.simulated_robot.body_id, sphere_ids, obstacles, self.physics_client)
+
+        control_point_1_vec = rep_forces[0]
+        control_point_2_vec = rep_forces[1]
+        control_point_3_vec = rep_forces[2]
+
+        # control point 1 is too far away from the obstacle to have a repulsive vector
+        self.assertAlmostEqual(control_point_1_vec[0], 0, places=2, msg="control point 1 should have a null vector")
+        self.assertAlmostEqual(control_point_1_vec[1], 0, places=2, msg="control point 1 should have a null vector")
+        self.assertAlmostEqual(control_point_1_vec[2], 0, places=2, msg="control point 1 should have a null vector")
+
+        # control point 2 and 3 are close enough to the obstacle to have a repulsive vector
+        self.assertTrue(control_point_2_vec[0] > 0,
+                        "control point 2 should have a repulsive vector pointing in the x-direction")
+        self.assertTrue(control_point_3_vec[0] > 0,
+                        "control point 3 should have a repulsive vector pointing in the x-direction")
+
+        self.assertAlmostEqual(control_point_2_vec[1], 0, places=2,
+                               msg="control point 2 should only point in the x direction, not also in the y direction")
+        self.assertAlmostEqual(control_point_2_vec[2], 0, places=2,
+                               msg="control point 2 should only point in the x direction, not also in the z direction")
+        self.assertAlmostEqual(control_point_3_vec[1], 0, places=2,
+                               msg="control point 2 should only point in the x direction, not also in the y direction")
+        self.assertAlmostEqual(control_point_3_vec[2], 0, places=2,
+                               msg="control point 2 should only point in the x direction, not also in the z direction")
+
+
+        print(obstacle)

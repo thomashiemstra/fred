@@ -6,6 +6,12 @@ sphere_1_id = 8  # in between frame 3 and the wrist
 sphere_2_id = 7  # wrist (frame 4)
 sphere_3_id = 6  # tip of the gripper
 sphere_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])
+control_point_radii = {6: 5,
+                       7: 5,
+                       8: 3}
+# control_point_repulsive_weights = np.array([1, 1, 1])
+control_point_base_radius = 1
+repulsive_cutoff_distance = 2
 
 
 def get_target_points(target_pose, d6):
@@ -68,9 +74,12 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
         if distance == 0:
             pass
         elif distance > attractive_cutoff_distance:
-            workspace_forces[control_point_id][0] = -attractive_cutoff_distance * weights[control_point_id] * vector[0] / distance
-            workspace_forces[control_point_id][1] = -attractive_cutoff_distance * weights[control_point_id] * vector[1] / distance
-            workspace_forces[control_point_id][2] = -attractive_cutoff_distance * weights[control_point_id] * vector[2] / distance
+            workspace_forces[control_point_id][0] = -attractive_cutoff_distance * weights[control_point_id] * vector[
+                0] / distance
+            workspace_forces[control_point_id][1] = -attractive_cutoff_distance * weights[control_point_id] * vector[
+                1] / distance
+            workspace_forces[control_point_id][2] = -attractive_cutoff_distance * weights[control_point_id] * vector[
+                2] / distance
         elif distance <= attractive_cutoff_distance:
             workspace_forces[control_point_id][0] = -weights[control_point_id] * vector[0]
             workspace_forces[control_point_id][1] = -weights[control_point_id] * vector[1]
@@ -78,6 +87,45 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
         total_distance += distance
 
     return workspace_forces, total_distance
+
+
+def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id):
+    _, _, _, _, _, _, _, normal_on_b, d, *x = p.getClosestPoints(bodyA=robot_body_id, bodyB=obstacle_id,
+                                                                 linkIndexA=control_point_id,
+                                                                 distance=repulsive_cutoff_distance,
+                                                                 physicsClientId=physics_client_id)[0]
+    return normal_on_b, d * 100 + control_point_base_radius
+
+
+def get_repulsive_forces_world(robot_body_id, control_point_ids, obstacle_ids, physics_client_id, weights=None):
+    workspace_forces = np.zeros((3, 3))
+
+    if weights is None:
+        weights = np.ones(3)
+
+    for i in range(control_point_ids.size):
+        control_point_id = control_point_ids[i]
+        smallest_distance = repulsive_cutoff_distance  # anything further away should not be considered
+        closest_obstacle_id = -1
+
+        for obstacle_id in obstacle_ids:
+            normal, d = get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id)
+            distance = d - control_point_radii[control_point_id]
+            if distance < smallest_distance:
+                smallest_distance = distance
+                closest_obstacle_id = obstacle_id
+
+        if smallest_distance < repulsive_cutoff_distance:
+            normal_on_b, d = get_normal_and_distance(robot_body_id, closest_obstacle_id, control_point_id,
+                                                     physics_client_id)
+            distance = d - control_point_radii[control_point_id]
+            constant_term = weights[i] * (1 / distance - 1 / repulsive_cutoff_distance) * (1 / (distance * distance))
+
+            workspace_forces[i][0] += constant_term * normal_on_b[0]
+            workspace_forces[i][1] += constant_term * normal_on_b[1]
+            workspace_forces[i][2] += constant_term * normal_on_b[2]
+
+    return workspace_forces
 
 
 def get_control_point_pos(robot_body_id, point_id):
