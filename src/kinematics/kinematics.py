@@ -164,7 +164,8 @@ def jacobian_transpose_on_f(workspace_force, angles, robot_config, c1_location):
     :param workspace_force: 3x3 numpy array of the workspace forces on each of the control points
     :param angles: current angles of the robot
     :param robot_config: robot configuration of link lengths
-    :param c1_location: distance of control point 1 from frame 3 in the direction of frame 4, should be less than d4
+    :param c1_location: distance of control point 1 located between frame 3 and 4 of the robot,
+                        should be less than d4 (the total distance between frame 3 and 4)
     :return:
     """
     x_comp, y_comp, z_comp = 0, 1, 2
