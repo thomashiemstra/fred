@@ -5,7 +5,7 @@ import pybullet as p
 
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.robot_env_utils import get_attractive_force_world, get_target_points, \
-    get_repulsive_forces_world, control_point_ids
+    get_repulsive_forces_world, sphere_ids
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle
 
@@ -90,7 +90,7 @@ class ObstacleIntegrationTests(unittest.TestCase):
         p.stepSimulation(self.physics_client)
 
         obstacles = np.array([obstacle.obstacle_id])
-        rep_forces = get_repulsive_forces_world(self.simulated_robot.body_id, control_point_ids, obstacles, self.physics_client)
+        rep_forces = get_repulsive_forces_world(self.simulated_robot.body_id, sphere_ids, obstacles, self.physics_client)
 
         control_point_1_vec = rep_forces[0]
         control_point_2_vec = rep_forces[1]
