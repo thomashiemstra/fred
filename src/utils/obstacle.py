@@ -29,7 +29,24 @@ class BoxObstacle(Obstacle):
 
         base_center_position[2] += dimensions[2]/2
 
-        self.obstacle_id = p.createMultiBody(0, collision_box_id, -1, basePosition=[i/100 for i in base_center_position],
+        self.obstacle_id = p.createMultiBody(0, collision_box_id, -1,
+                                             basePosition=[i/100 for i in base_center_position],
+                                             baseOrientation=[0, 0, 0, 1],
+                                             physicsClientId=physics_client)
+
+        if color is not None:
+            p.changeVisualShape(self.obstacle_id, -1, rgbaColor=color, physicsClientId=physics_client)
+
+
+class SphereObstacle(Obstacle):
+
+    def __init__(self, physics_client, radius, center_position, color=None):
+        super().__init__(physics_client)
+
+        collision_spere_id = p.createCollisionShape(p.GEOM_SPHERE, radius=radius/100, physicsClientId=physics_client)
+
+        self.obstacle_id = p.createMultiBody(0, collision_spere_id, -1,
+                                             basePosition=[i / 100 for i in center_position],
                                              baseOrientation=[0, 0, 0, 1],
                                              physicsClientId=physics_client)
 
@@ -43,5 +60,7 @@ if __name__ == '__main__':
     # planeId = p.loadURDF("urdf/plane.urdf")
     p.setRealTimeSimulation(1)
 
-    BoxObstacle(physics_client, [10, 100, 50], [-31, 0, 0], color=[1, 1, 1, 1])
+    BoxObstacle(physics_client, [1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 1])
+    BoxObstacle(physics_client, [10, 10, 20], [0, 35, 0])
+    SphereObstacle(physics_client, 10, [0, 40, 10], color=[0, 0, 1, 1])
     print("hoi")
