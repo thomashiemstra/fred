@@ -73,12 +73,9 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
         if distance == 0:
             pass
         elif distance > attractive_cutoff_distance:
-            workspace_forces[control_point_id][0] = -attractive_cutoff_distance * weights[control_point_id] * vector[
-                0] / distance
-            workspace_forces[control_point_id][1] = -attractive_cutoff_distance * weights[control_point_id] * vector[
-                1] / distance
-            workspace_forces[control_point_id][2] = -attractive_cutoff_distance * weights[control_point_id] * vector[
-                2] / distance
+            workspace_forces[control_point_id][0] = -attractive_cutoff_distance * weights[control_point_id] * vector[0] / distance
+            workspace_forces[control_point_id][1] = -attractive_cutoff_distance * weights[control_point_id] * vector[1] / distance
+            workspace_forces[control_point_id][2] = -attractive_cutoff_distance * weights[control_point_id] * vector[2] / distance
         elif distance <= attractive_cutoff_distance:
             workspace_forces[control_point_id][0] = -weights[control_point_id] * vector[0]
             workspace_forces[control_point_id][1] = -weights[control_point_id] * vector[1]
