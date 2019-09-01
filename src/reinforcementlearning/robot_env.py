@@ -24,7 +24,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+            shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
         self._update_step_size = 0.05
         self._simulation_steps_per_step = 5
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
@@ -146,12 +146,25 @@ class RobotEnv(py_environment.PyEnvironment):
                                                                  attractive_forces, repulsive_forces,
                                                                  self._attr_lines, self._rep_lines)
 
-        return self._make_obs_from_vectors(attractive_forces, repulsive_forces, total_distance)
+        total_observation = []
 
-    def _make_obs_from_vectors(self, attractive_forces, repulsive_forces, total_distance):
-        normalized_attr_vec_1 = attractive_forces[1] / np.linalg.norm(attractive_forces[1])
-        normalized_attr_vec_2 = attractive_forces[2] / np.linalg.norm(attractive_forces[2])
-        return np.append(normalized_attr_vec_1, normalized_attr_vec_2), total_distance
+        # attractive forces[0] is for a control point which is not considered for the attractive forces
+        total_observation += self._get_normalized_vector_as_list(attractive_forces[1])
+        total_observation += self._get_normalized_vector_as_list(attractive_forces[2])
+
+        total_observation += self._get_normalized_vector_as_list(repulsive_forces[0])
+        total_observation += self._get_normalized_vector_as_list(repulsive_forces[1])
+        total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
+
+        return np.array(total_observation), total_distance
+
+    @staticmethod
+    def _get_normalized_vector_as_list(vec):
+        norm = np.linalg.norm(vec)
+        if norm == 0:
+            return vec.tolist()
+        normalized_vec = vec / np.linalg.norm(vec)
+        return normalized_vec.tolist()
 
     def _get_control_point_positions(self):
         c2_pos = get_control_point_pos(self._robot_body_id, sphere_2_id)
