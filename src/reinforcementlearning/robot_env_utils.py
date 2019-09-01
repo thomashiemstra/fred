@@ -5,7 +5,7 @@ import pybullet as p
 sphere_1_id = 8  # in between frame 3 and the wrist
 sphere_2_id = 7  # wrist (frame 4)
 sphere_3_id = 6  # tip of the gripper
-control_point_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])
+control_point_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])  # todo convert control points to class
 control_point_radii = {6: 5,
                        7: 5,
                        8: 3}
@@ -96,7 +96,7 @@ def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physic
     return normal_on_b, d * 100 + control_point_base_radius
 
 
-def get_repulsive_forces_world(robot_body_id, control_point_ids, obstacle_ids, physics_client_id, weights=None):
+def get_repulsive_forces_world(robot_body_id, obstacle_ids, physics_client_id, weights=None):
     workspace_forces = np.zeros((3, 3))
 
     if weights is None:
@@ -137,3 +137,31 @@ def get_control_point_pos(robot_body_id, point_id):
     """
     _, _, _, _, pos, _ = p.getLinkState(robot_body_id, point_id)
     return np.array(pos) * 100  # convert from meters to centimeters
+
+
+def draw_debug_lines(physics_client_id, robot_id, attr_forces, rep_forces, attr_lines, rep_lines, line_size=4):
+    number_of_control_points = control_point_ids.size
+
+    new_attr_lines = [None] * number_of_control_points
+    new_rep_lines = [None] * number_of_control_points
+
+    for i in range(number_of_control_points):
+        control_point_pos = get_control_point_pos(robot_id, control_point_ids[i])
+        attr_target = control_point_pos + line_size*attr_forces[i]
+        rep_target = control_point_pos + line_size*rep_forces[i]
+
+        if attr_lines is None:
+            new_attr_lines[i] = p.addUserDebugLine(control_point_pos / 100, attr_target / 100, lineColorRGB=[0, 1, 0],
+                                                   lineWidth=3, physicsClientId=physics_client_id)
+        else:
+            new_attr_lines[i] = p.addUserDebugLine(control_point_pos / 100, attr_target / 100, lineColorRGB=[0, 1, 0],
+                                                   lineWidth=3, replaceItemUniqueId=attr_lines[i],
+                                                   physicsClientId=physics_client_id)
+        if rep_lines is None:
+            new_rep_lines[i] = p.addUserDebugLine(control_point_pos / 100, rep_target / 100, lineColorRGB=[1, 0, 0],
+                                                  lineWidth=3, physicsClientId=physics_client_id)
+        else:
+            new_rep_lines[i] = p.addUserDebugLine(control_point_pos / 100, rep_target / 100, lineColorRGB=[1, 0, 0],
+                                                  lineWidth=3, replaceItemUniqueId=rep_lines[i],
+                                                  physicsClientId=physics_client_id)
+    return new_attr_lines, new_rep_lines

@@ -91,7 +91,7 @@ class ObstacleIntegrationTests(unittest.TestCase):
 
         obstacles = np.array([obstacle.obstacle_id])
         rep_forces = get_repulsive_forces_world(self.simulated_robot.body_id,
-                                                control_point_ids, obstacles, self.physics_client)
+                                                obstacles, self.physics_client)
 
         control_point_1_vec = rep_forces[0]
         control_point_2_vec = rep_forces[1]

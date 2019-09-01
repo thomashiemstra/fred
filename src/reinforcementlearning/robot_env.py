@@ -9,9 +9,11 @@ from numpy import pi
 
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
-    get_attractive_force_world, get_target_points
+    get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
 from src.simulation.simulation_utils import start_simulated_robot
 from tf_agents.environments import utils
+
+from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 
 class RobotEnv(py_environment.PyEnvironment):
@@ -28,14 +30,43 @@ class RobotEnv(py_environment.PyEnvironment):
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
         self._robot_controller = start_simulated_robot(use_gui)
-        self._gripper_length = self._robot_controller.robot_config.d6
         self._physics_client = self._robot_controller.physics_client
         self.start_pose = Pose(-25, 20, 10)
         self._previous_distance_to_target = 0
         self._robot_body_id = self._robot_controller.body_id
-        self._target_pose = Pose(25, 20, 20)
+        self._target_pose = None
         self._steps_taken = 0
         self._state = None
+        self._floor = BoxObstacle(self._physics_client, [1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 1])
+        self._obstacles = None
+        self._target_spheres = None
+        self._attr_lines = None
+        self._rep_lines = None
+
+    def _generate_obstacles_and_target_pose(self):
+        obstacle = BoxObstacle(self._physics_client, [20, 20, 40], [0, 35, 0], color=[1, 0, 0, 1])
+        target_pose = Pose(25, 20, 20)
+        return np.array([obstacle]), target_pose
+
+    def _create_visual_target_spheres(self, target_pose):
+        if not self._use_gui:
+            return
+
+        if self._target_spheres is not None:
+            for target_sphere in self._target_spheres:
+                p.removeBody(target_sphere.obstacle_id)
+
+        _, target_point_2, target_point_3 = get_target_points(target_pose, self._robot_controller.robot_config.d6)
+
+        target_sphere_2 = SphereObstacle(self._physics_client, 1, target_point_2.tolist(), color=[1, 1, 0, 1])
+        target_sphere_3 = SphereObstacle(self._physics_client, 1, target_point_3.tolist(), color=[1, 1, 0, 1])
+        self._target_spheres = [target_sphere_2, target_sphere_3]
+
+    def _remove_obstacles(self):
+        if self._obstacles is None:
+            return
+        for obstacle in self._obstacles:
+            p.removeBody(obstacle.obstacle_id)
 
     def action_spec(self):
         return self._action_spec
@@ -45,6 +76,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
     def _reset(self):
         start_pos = [0, 0, 0]
+        self._remove_obstacles()
         start_orientation = p.getQuaternionFromEuler([0, 0, 0])
         p.resetBasePositionAndOrientation(self._robot_body_id, start_pos, start_orientation,
                                           physicsClientId=self._physics_client)
@@ -53,6 +85,10 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._robot_controller.reset_to_pose(self.start_pose)
         self._advance_simulation()
+
+        self._obstacles, self._target_pose = self._generate_obstacles_and_target_pose()
+        self._create_visual_target_spheres(self._target_pose)
+
         self._state = self._robot_controller.get_current_angles()
         observation, self._previous_distance_to_target = self._get_observations()
         self._episode_ended = False
@@ -96,14 +132,25 @@ class RobotEnv(py_environment.PyEnvironment):
 
     def _get_observations(self):
         c2_pos, c3_pos = self._get_control_point_positions()
-        _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._gripper_length)
+        _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
 
-        attractive_forces, total_distance = get_attractive_force_world(np.array([c2_pos, c3_pos]),
-                                                                       np.array([target_point_2, target_point_3]))
+        attractive_forces, total_distance = get_attractive_force_world(np.array([np.zeros(3), c2_pos, c3_pos]),
+                                                                       np.array([np.zeros(3), target_point_2, target_point_3]))
 
-        normalized_attr_vec_1 = attractive_forces[0] / np.linalg.norm(attractive_forces[0])
-        normalized_attr_vec_2 = attractive_forces[1] / np.linalg.norm(attractive_forces[1])
+        obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
+        repulsive_forces = get_repulsive_forces_world(self._robot_body_id, obstacle_ids, self._physics_client)
+
+        if self._use_gui:
+            self._attr_lines, self._rep_lines = draw_debug_lines(self._physics_client, self._robot_body_id,
+                                                                 attractive_forces, repulsive_forces,
+                                                                 self._attr_lines, self._rep_lines)
+
+        return self._make_obs_from_vectors(attractive_forces, repulsive_forces, total_distance)
+
+    def _make_obs_from_vectors(self, attractive_forces, repulsive_forces, total_distance):
+        normalized_attr_vec_1 = attractive_forces[1] / np.linalg.norm(attractive_forces[1])
+        normalized_attr_vec_2 = attractive_forces[2] / np.linalg.norm(attractive_forces[2])
         return np.append(normalized_attr_vec_1, normalized_attr_vec_2), total_distance
 
     def _get_control_point_positions(self):
@@ -121,20 +168,21 @@ class RobotEnv(py_environment.PyEnvironment):
 
 if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
-    state = env.reset()
+    state = env.observation_spec()
     print(state)
-    for _ in range(50):
-        simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
-        res = env.step(simple_action)
-        print(res.reward)
-
-    print('hoi')
-    env.reset()
-    for _ in range(50):
-        simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
-        res = env.step(simple_action)
-        print(res.reward)
-    print('hoi')
+    obs = env.reset()
+    # for _ in range(50):
+    #     simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
+    #     res = env.step(simple_action)
+    #     print(res.reward)
+    #
+    # print('hoi')
+    # env.reset()
+    # for _ in range(50):
+    #     simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
+    #     res = env.step(simple_action)
+    #     print(res.reward)
+    # print('hoi')
 
 
 
