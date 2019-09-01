@@ -124,8 +124,8 @@ def draw_debug_lines(physics_client_id, robot_id, control_point_ids, attr_forces
 
     for i in range(number_of_control_points):
         control_point_pos = get_control_point_pos(robot_id, control_point_ids[i])
-        attr_target = control_point_pos + 3*attr_forces[i]
-        rep_target = control_point_pos + 3*rep_forces[i]
+        attr_target = control_point_pos + 4*attr_forces[i]
+        rep_target = control_point_pos + 4*rep_forces[i]
 
         if attr_lines is None:
             new_attr_lines[i] = p.addUserDebugLine(control_point_pos / 100, attr_target / 100, lineColorRGB=[0, 1, 0],
@@ -144,9 +144,10 @@ def draw_debug_lines(physics_client_id, robot_id, control_point_ids, attr_forces
     return new_attr_lines, new_rep_lines
 
 
-def create_visual_sphere(location):
+def create_visual_sphere(body_id, location, physics_client):
     target_sphere_1 = p.createCollisionShape(p.GEOM_SPHERE, radius=0.01, physicsClientId=physics_client)
     target_sphere_1_id = p.createMultiBody(0, target_sphere_1, -1, location/100, [0, 0, 0, 1], physicsClientId=physics_client)
+    p.changeVisualShape(target_sphere_1_id, -1, rgbaColor=[1, 1, 0, 1], physicsClientId=physics_client)
 
     p.setCollisionFilterPair(body_id, target_sphere_1_id, 2, -1, 0)
     p.setCollisionFilterPair(body_id, target_sphere_1_id, 3, -1, 0)
@@ -159,7 +160,7 @@ def create_visual_sphere(location):
 
 physics_client = p.connect(p.GUI)
 p.setGravity(0, 0, -10)
-planeId = p.loadURDF("urdf/plane.urdf")
+# planeId = p.loadURDF("urdf/plane.urdf")
 p.setRealTimeSimulation(1)
 
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -175,7 +176,10 @@ floor = p.createCollisionShape(p.GEOM_BOX, halfExtents=[1, 1, 0.1], physicsClien
 
 
 box1 = p.createMultiBody(0, collision_box_id_1, -1, [0, 0.35, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
-floor_id = p.createMultiBody(0, floor, -1, [0, 0.0, -0.095], [0, 0, 0, 1], physicsClientId=physics_client)
+floor_id = p.createMultiBody(0, floor, -1, [0, 0.0, -0.1], [0, 0, 0, 1], physicsClientId=physics_client)
+
+p.changeVisualShape(box1, -1, rgbaColor=[0, 1, 0, 1], physicsClientId=physics_client)
+p.changeVisualShape(floor_id, -1, rgbaColor=[1, 1, 1, 1], physicsClientId=physics_client)
 
 obstacles = np.array([box1, floor_id])
 
@@ -187,8 +191,8 @@ simulated_robot.reset_to_pose(arc_1)
 
 _, target_point_2, target_point_3 = get_target_points(arc_2, simulated_robot.robot_config.d6)
 
-create_visual_sphere(target_point_2)
-create_visual_sphere(target_point_3)
+create_visual_sphere(target_point_2, physics_client)
+create_visual_sphere(target_point_3, physics_client)
 
 
 current_angles = simulated_robot.pose_to_angles(arc_1)
