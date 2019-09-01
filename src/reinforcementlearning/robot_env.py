@@ -34,7 +34,6 @@ class RobotEnv(py_environment.PyEnvironment):
         self._previous_distance_to_target = 0
         self._robot_body_id = self._robot_controller.body_id
         self._target_pose = Pose(25, 20, 20)
-        self._attractive_cutoff_distance = 1
         self._steps_taken = 0
         self._state = None
 
@@ -100,8 +99,7 @@ class RobotEnv(py_environment.PyEnvironment):
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._gripper_length)
 
         attractive_forces, total_distance = get_attractive_force_world(np.array([c2_pos, c3_pos]),
-                                                                       np.array([target_point_2, target_point_3]),
-                                                                       self._attractive_cutoff_distance)
+                                                                       np.array([target_point_2, target_point_3]))
 
         normalized_attr_vec_1 = attractive_forces[0] / np.linalg.norm(attractive_forces[0])
         normalized_attr_vec_2 = attractive_forces[1] / np.linalg.norm(attractive_forces[1])
