@@ -5,11 +5,10 @@ import pybullet as p
 sphere_1_id = 8  # in between frame 3 and the wrist
 sphere_2_id = 7  # wrist (frame 4)
 sphere_3_id = 6  # tip of the gripper
-sphere_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])
+control_point_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])
 control_point_radii = {6: 5,
                        7: 5,
                        8: 3}
-# control_point_repulsive_weights = np.array([1, 1, 1])
 control_point_base_radius = 1
 repulsive_cutoff_distance = 2
 
