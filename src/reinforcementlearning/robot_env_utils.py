@@ -105,24 +105,25 @@ def get_repulsive_forces_world(robot_body_id, obstacle_ids, physics_client_id, w
     for i in range(control_point_ids.size):
         control_point_id = control_point_ids[i]
         smallest_distance = repulsive_cutoff_distance  # anything further away should not be considered
-        closest_obstacle_id = -1
+
+        closest_obstacle_normal = None
+        closest_obstacle_distance = None
 
         for obstacle_id in obstacle_ids:
             normal, d = get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id)
             distance = d - control_point_radii[control_point_id]
             if distance < smallest_distance:
+                closest_obstacle_normal = normal
+                closest_obstacle_distance = d
                 smallest_distance = distance
-                closest_obstacle_id = obstacle_id
 
         if smallest_distance < repulsive_cutoff_distance:
-            normal_on_b, d = get_normal_and_distance(robot_body_id, closest_obstacle_id, control_point_id,
-                                                     physics_client_id)
-            distance = d - control_point_radii[control_point_id]
+            distance = closest_obstacle_distance - control_point_radii[control_point_id]
             constant_term = weights[i] * (1 / distance - 1 / repulsive_cutoff_distance) * (1 / (distance * distance))
 
-            workspace_forces[i][0] += constant_term * normal_on_b[0]
-            workspace_forces[i][1] += constant_term * normal_on_b[1]
-            workspace_forces[i][2] += constant_term * normal_on_b[2]
+            workspace_forces[i][0] += constant_term * closest_obstacle_normal[0]
+            workspace_forces[i][1] += constant_term * closest_obstacle_normal[1]
+            workspace_forces[i][2] += constant_term * closest_obstacle_normal[2]
 
     return workspace_forces
 
