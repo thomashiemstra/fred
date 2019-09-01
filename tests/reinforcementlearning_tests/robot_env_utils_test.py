@@ -1,16 +1,11 @@
-import inspect
-import os
 import unittest
 
-from src.global_constants import simulated_robot_config
-from src.kinematics.kinematics_utils import Pose
-from src.reinforcementlearning.robot_env import RobotEnv
 import numpy as np
 import pybullet as p
 
+from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.robot_env_utils import get_attractive_force_world, get_target_points, \
-    get_normal_and_distance, get_repulsive_forces_world, sphere_ids
-from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
+    get_repulsive_forces_world, sphere_ids
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle
 
