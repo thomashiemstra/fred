@@ -15,7 +15,7 @@ class BoxObstacle(Obstacle):
     The obstacle will be placed with it's base at the given z height
     """
 
-    def __init__(self, physics_client, dimensions, base_center_position):
+    def __init__(self, physics_client, dimensions, base_center_position, color=None):
         """
 
         Args:
@@ -33,6 +33,9 @@ class BoxObstacle(Obstacle):
                                              baseOrientation=[0, 0, 0, 1],
                                              physicsClientId=physics_client)
 
+        if color is not None:
+            p.changeVisualShape(self.obstacle_id, -1, rgbaColor=color, physicsClientId=physics_client)
+
 
 if __name__ == '__main__':
     physics_client = p.connect(p.GUI)
@@ -40,5 +43,5 @@ if __name__ == '__main__':
     # planeId = p.loadURDF("urdf/plane.urdf")
     p.setRealTimeSimulation(1)
 
-    BoxObstacle(physics_client, [0.1, 0.1, 0.1], [0, 0, 0])
+    BoxObstacle(physics_client, [10, 100, 50], [-31, 0, 0], color=[1, 1, 1, 1])
     print("hoi")
