@@ -7,10 +7,11 @@ from src.robot_controllers.abstract_robot_controller import AbstractRobotControl
 
 class ControlPoint:
 
-    def __init__(self, point_id, body_id, radius):
+    def __init__(self, point_id, body_id, radius, physics_client):
         self.point_id = point_id
         self.body_id = body_id
         self.radius = radius
+        self._physics_client = physics_client
         self._position = None
 
     @property
@@ -23,14 +24,14 @@ class ControlPoint:
         Function used to sync the position of the control point with the robot,
         needs to be called before getting the position of the control point
         """
-        _, _, _, _, pos, _ = p.getLinkState(self.body_id, self.point_id)
+        _, _, _, _, pos, _ = p.getLinkState(self.body_id, self.point_id, physicsClientId=self._physics_client)
         self._position = np.array(pos) * 100  # convert from meters to centimeters
 
 
-def generate_control_points(body_id):
-    c1 = ControlPoint(8, 3, body_id)  # in between frame 3 and the wrist
-    c2 = ControlPoint(7, 5, body_id)  # wrist (frame 4)
-    c3 = ControlPoint(6, 5, body_id)  # tip of the gripper
+def generate_control_points(body_id, physics_client):
+    c1 = ControlPoint(8, 3, body_id, physics_client)  # in between frame 3 and the wrist
+    c2 = ControlPoint(7, 5, body_id, physics_client)  # wrist (frame 4)
+    c3 = ControlPoint(6, 5, body_id, physics_client)  # tip of the gripper
     return c1, c2, c3
 
 
@@ -41,7 +42,7 @@ class SimulatedRobotController(AbstractRobotController):
         self.body_id = body_id
         self.motors = [i for i in range(6)]
         self.physics_client = physics_client
-        self.control_points = generate_control_points(self.body_id)
+        self.control_points = generate_control_points(self.body_id, self.physics_client)
 
     def enable_servos(self):
         pass
