@@ -1,8 +1,39 @@
+import copy
+
 from src.kinematics.kinematics import inverse_kinematics
 import pybullet as p
 import numpy as np
 
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
+
+
+class ControlPoint:
+
+    def __init__(self, point_id, body_id, radius):
+        self.point_id = point_id
+        self.body_id = body_id
+        self.radius = radius
+        self._position = None
+
+    @property
+    def position(self):
+        self.update_position()
+        return self._position
+
+    def update_position(self):
+        """
+        Function used to sync the position of the control point with the robot,
+        needs to be called before getting the position of the control point
+        """
+        _, _, _, _, pos, _ = p.getLinkState(self.body_id, self.point_id)
+        self._position = np.array(pos) * 100  # convert from meters to centimeters
+
+
+def generate_control_points(body_id):
+    c1 = ControlPoint(8, 3, body_id)  # in between frame 3 and the wrist
+    c2 = ControlPoint(7, 5, body_id)  # wrist (frame 4)
+    c3 = ControlPoint(6, 5, body_id)  # tip of the gripper
+    return c1, c2, c3
 
 
 class SimulatedRobotController(AbstractRobotController):
@@ -12,6 +43,7 @@ class SimulatedRobotController(AbstractRobotController):
         self.body_id = body_id
         self.motors = [i for i in range(6)]
         self.physics_client = physics_client
+        self.control_points = generate_control_points(self.body_id)
 
     def enable_servos(self):
         pass
@@ -21,9 +53,9 @@ class SimulatedRobotController(AbstractRobotController):
 
     def reset_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
-        self.reset_servo(angles)
+        self.reset_servos(angles)
 
-    def reset_servo(self, angles):
+    def reset_servos(self, angles):
         p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)
         for i in range(1, 7):
