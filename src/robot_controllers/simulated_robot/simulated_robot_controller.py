@@ -1,5 +1,3 @@
-import copy
-
 from src.kinematics.kinematics import inverse_kinematics
 import pybullet as p
 import numpy as np
