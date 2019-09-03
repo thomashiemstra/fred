@@ -55,9 +55,9 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
         total_distance: the sum of distances between the control points and their targets,
                         can be used to determine if the robot has reached the target position
     """
-    number_of_control_points = control_points.size
+    number_of_control_points = control_points.shape[0]
 
-    if number_of_control_points != target_points.size:
+    if number_of_control_points != target_points.shape[0]:
         raise Exception("control points and target points should have the same dimension!")
     number_of_control_points = control_points.shape[0]
 
@@ -68,6 +68,8 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
     total_distance = 0
 
     for control_point_id in range(number_of_control_points):
+        if control_points[control_point_id] is None or target_points[control_point_id] is None:
+            continue
         vector = control_points[control_point_id] - target_points[control_point_id]
         distance = np.linalg.norm(vector)
         if distance == 0:

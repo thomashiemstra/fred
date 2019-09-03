@@ -131,11 +131,13 @@ class RobotEnv(py_environment.PyEnvironment):
         np.clip(self._state[6], 0, pi)
 
     def _get_observations(self):
-        c2_pos, c3_pos = self._get_control_point_positions()
+        c1, c2, c3 = self._robot_controller.control_points
+
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
 
-        attractive_forces, total_distance = get_attractive_force_world(np.array([np.zeros(3), c2_pos, c3_pos]),
-                                                                       np.array([np.zeros(3), target_point_2, target_point_3]))
+        # Control point 1 is not used for the attractive forces
+        attractive_forces, total_distance = get_attractive_force_world(np.array([c1.position, c2.position, c3.position]),
+                                                                       np.array([None, target_point_2, target_point_3]))
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 

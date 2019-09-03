@@ -7,7 +7,7 @@ from src.robot_controllers.abstract_robot_controller import AbstractRobotControl
 
 class ControlPoint:
 
-    def __init__(self, point_id, body_id, radius, physics_client):
+    def __init__(self, point_id, radius, body_id, physics_client):
         self.point_id = point_id
         self.body_id = body_id
         self.radius = radius
