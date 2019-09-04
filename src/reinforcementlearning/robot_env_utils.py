@@ -136,14 +136,14 @@ def get_control_point_pos(robot_body_id, point_id):
     return np.array(pos) * 100  # convert from meters to centimeters
 
 
-def draw_debug_lines(physics_client_id, robot_id, attr_forces, rep_forces, attr_lines, rep_lines, line_size=4):
-    number_of_control_points = control_point_ids.size
+def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces, attr_lines, rep_lines, line_size=4):
+    number_of_control_points = control_points.shape[0]
 
     new_attr_lines = [None] * number_of_control_points
     new_rep_lines = [None] * number_of_control_points
 
     for i in range(number_of_control_points):
-        control_point_pos = get_control_point_pos(robot_id, control_point_ids[i])
+        control_point_pos = control_points[i].position
         attr_target = control_point_pos + line_size*attr_forces[i]
         rep_target = control_point_pos + line_size*rep_forces[i]
 
