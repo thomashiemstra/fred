@@ -126,7 +126,6 @@ def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_ste
     return dx, dy, dz, actual_stop_pose
 
 
-# todo test this function!
 def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None,
                    plot_only=False, calculate_only=False):
     """
