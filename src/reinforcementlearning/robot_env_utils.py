@@ -6,9 +6,7 @@ sphere_1_id = 8  # in between frame 3 and the wrist
 sphere_2_id = 7  # wrist (frame 4)
 sphere_3_id = 6  # tip of the gripper
 control_point_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])  # todo convert control points to class
-control_point_radii = {6: 5,
-                       7: 5,
-                       8: 3}
+
 control_point_base_radius = 1
 repulsive_cutoff_distance = 2
 
@@ -92,17 +90,16 @@ def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physic
                                                                  linkIndexA=control_point_id,
                                                                  distance=repulsive_cutoff_distance,
                                                                  physicsClientId=physics_client_id)[0]
-    return normal_on_b, d * 100 + control_point_base_radius
+    return normal_on_b, d * 100
 
 
-def get_repulsive_forces_world(robot_body_id, obstacle_ids, physics_client_id, weights=None):
-    workspace_forces = np.zeros((3, 3))
+def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids, physics_client_id):
+    nr_of_control_points = control_points.shape[0]
+    workspace_forces = np.zeros((3, nr_of_control_points))
 
-    if weights is None:
-        weights = np.ones(3)
-
-    for i in range(control_point_ids.size):
-        control_point_id = control_point_ids[i]
+    for i in range(nr_of_control_points):
+        control_point = control_points[i]
+        control_point_id = control_point.point_id
         smallest_distance = repulsive_cutoff_distance  # anything further away should not be considered
 
         closest_obstacle_normal = None
@@ -110,15 +107,15 @@ def get_repulsive_forces_world(robot_body_id, obstacle_ids, physics_client_id, w
 
         for obstacle_id in obstacle_ids:
             normal, d = get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id)
-            distance = d - control_point_radii[control_point_id]
+            distance = d - control_point.radius  # todo handle zero or negative distance
             if distance < smallest_distance:
                 closest_obstacle_normal = normal
                 closest_obstacle_distance = d
                 smallest_distance = distance
 
         if smallest_distance < repulsive_cutoff_distance:
-            distance = closest_obstacle_distance - control_point_radii[control_point_id]
-            constant_term = weights[i] * (1 / distance - 1 / repulsive_cutoff_distance) * (1 / (distance * distance))
+            distance = closest_obstacle_distance - control_point.radius
+            constant_term = control_point.weight * (1 / distance - 1 / repulsive_cutoff_distance) * (1 / (distance * distance))
 
             workspace_forces[i][0] += constant_term * closest_obstacle_normal[0]
             workspace_forces[i][1] += constant_term * closest_obstacle_normal[1]

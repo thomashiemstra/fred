@@ -141,7 +141,8 @@ class RobotEnv(py_environment.PyEnvironment):
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
-        repulsive_forces = get_repulsive_forces_world(self._robot_body_id, obstacle_ids, self._physics_client)
+        repulsive_forces = get_repulsive_forces_world(self._robot_body_id, np.array([c1, c2, c3]),
+                                                      obstacle_ids, self._physics_client)
 
         if self._use_gui:
             self._attr_lines, self._rep_lines = draw_debug_lines(self._physics_client, self._robot_body_id,
