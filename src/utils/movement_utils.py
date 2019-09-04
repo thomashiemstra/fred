@@ -12,44 +12,6 @@ from copy import copy
 
 from src.utils.movement_exception import MovementException
 
-
-def line(start_pose, stop_pose, servo_controller, time):
-    """go from start to stop pose in time amount of seconds"""
-    flip = stop_pose.flip
-    dx = stop_pose.x - start_pose.x
-    dy = stop_pose.y - start_pose.y
-    dz = stop_pose.z - start_pose.z
-    d_alpha = stop_pose.alpha - start_pose.alpha
-    d_beta = stop_pose.beta - start_pose.beta
-    d_gamma = stop_pose.gamma - start_pose.gamma
-
-    steps_per_second = src.global_constants.steps_per_second
-    total_steps = ceil(time * steps_per_second)  # 50 steps per second
-    dt = 1.0 / steps_per_second
-
-    for i in range(total_steps):
-        t = i / total_steps
-
-        curve_value = (6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3))
-        x = start_pose.x + dx * curve_value
-        y = start_pose.y + dy * curve_value
-        z = start_pose.z + dz * curve_value
-        r = np.sqrt(np.power(x, 2) + np.power(y, 2))
-
-        alpha = start_pose.alpha + d_alpha * curve_value
-        beta = start_pose.beta + d_beta * curve_value
-        gamma = start_pose.gamma + d_gamma * curve_value
-
-        z_adjust = r * 0.008 if i > 3 else 0
-        temp_pose = Pose(x, y, z + z_adjust, flip, alpha, beta, gamma)
-
-        servo_controller.move_to_pose(temp_pose)
-
-        sleep(dt)
-
-    return stop_pose
-
-
 def pose_to_pose(start_pose, stop_pose, servo_controller, time=None):
     robot_config = servo_controller.robot_config
     start_angles = inverse_kinematics(start_pose, robot_config)
