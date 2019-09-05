@@ -17,7 +17,8 @@ recommended_max_servo_speed = 0.001  # rads/sec
 def get_recommended_wait_time(current_angles, new_angles):
     recommended_time = 0
     for current_angle, new_angle in zip(current_angles, new_angles):
-        delta_angle = np.abs(current_angle, new_angle)
+        delta_angle = current_angle - new_angle
+        delta_angle = np.abs(delta_angle)
         time = delta_angle / recommended_max_servo_speed
         recommended_time = np.max(time, recommended_time)
 
