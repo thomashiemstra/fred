@@ -3,6 +3,7 @@ import pybullet as p
 import numpy as np
 
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
+from src.utils.robot_controller_utils import get_recommended_wait_time
 
 
 class ControlPoint:
@@ -44,6 +45,7 @@ class SimulatedRobotController(AbstractRobotController):
         self.motors = [i for i in range(6)]
         self.physics_client = physics_client
         self.control_points = generate_control_points(self.body_id, self.physics_client)
+        self._current_angles = self.get_current_angles()
 
     def enable_servos(self):
         pass
@@ -56,6 +58,7 @@ class SimulatedRobotController(AbstractRobotController):
         self.reset_servos(angles)
 
     def reset_servos(self, angles):
+        self._current_angles = angles
         p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)
         for i in range(1, 7):
@@ -63,9 +66,12 @@ class SimulatedRobotController(AbstractRobotController):
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
+        recommended_time = get_recommended_wait_time(self._current_angles, angles)
         self.move_servos(angles)
+        return recommended_time
 
     def move_servos(self, angles):
+        self._current_angles = angles
         # First set the target_position variable of all servos
         p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)

@@ -5,6 +5,7 @@ dynamixel_robot_arm_port = '/dev/ttyUSB0' if is_linux() else 'COM5'
 dynamixel_robot_config = RobotConfig(d1=9.05, a2=15.8, d4=21.9, d6=5.5)
 simulated_robot_config = RobotConfig(d1=9.05, a2=15.8, d4=21.9, d6=10.0)
 steps_per_second = 15
+recommended_max_servo_speed = 4  # rads/sec
 use_simulation = False
 root_dir = None
 

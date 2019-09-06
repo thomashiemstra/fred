@@ -159,9 +159,11 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
-        servo_controller.move_to_pose(temp_pose)
+        rec_Time = servo_controller.move_to_pose(temp_pose)
 
-        sleep(dt)
+        print("rec time: {}, dt: {}".format(rec_Time, dt))
+        sleep_time = np.maximum(dt, rec_Time)
+        sleep(sleep_time)
 
     if center is not None:
         actual_stop_pose.alpha = alpha

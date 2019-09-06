@@ -10,22 +10,10 @@ import threading
 import numpy as np
 from numpy import pi
 
-# todo make global and check it, it's too late now....
-recommended_max_servo_speed = 0.001  # rads/sec
-
-
-def get_recommended_wait_time(current_angles, new_angles):
-    recommended_time = 0
-    for current_angle, new_angle in zip(current_angles, new_angles):
-        delta_angle = current_angle - new_angle
-        delta_angle = np.abs(delta_angle)
-        time = delta_angle / recommended_max_servo_speed
-        recommended_time = np.max(time, recommended_time)
-
-    return recommended_time
-
-
 # Facade for the robot as a whole, abstracting away the servo handling
+from src.utils.robot_controller_utils import get_recommended_wait_time
+
+
 class DynamixelRobotController(AbstractRobotController):
 
     def __init__(self, port, robot_config):
@@ -64,13 +52,13 @@ class DynamixelRobotController(AbstractRobotController):
         self.wrist_servo_handler.set_torque(enable=False)
 
     def move_to_pose(self, pose):
-        new_angles = inverse_kinematics(pose, self.robot_config)
-        self.move_servos(new_angles)
-        recommended_time = get_recommended_wait_time(self._current_angles, new_angles)
-        self._current_angles = new_angles
+        angles = inverse_kinematics(pose, self.robot_config)
+        recommended_time = get_recommended_wait_time(self._current_angles, angles)
+        self.move_servos(angles)
         return recommended_time
 
     def move_servos(self, angles):
+        self._current_angles = angles
         # First set the target_position variable of all servos
         self.base_servo_handler.set_angle(1, angles[1])
         self.base_servo_handler.set_angle(2, angles[2])

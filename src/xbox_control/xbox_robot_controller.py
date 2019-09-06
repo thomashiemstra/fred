@@ -99,11 +99,13 @@ class XboxRobotController:
                 break
             self.current_pose = self.pose_poller.get_updated_pose_from_controller(self.current_pose,
                                                                                   self.find_center_mode, self.center)
-            self.dynamixel_servo_controller.move_to_pose(self.current_pose)
+            recommended_time = self.dynamixel_servo_controller.move_to_pose(self.current_pose)
 
             buttons = self.pose_poller.get_buttons()
             self.handle_buttons(buttons)
-            sleep(self.pose_poller.dt)
+            time_to_sleep = np.maximum(recommended_time, self.pose_poller.dt)
+
+            sleep(time_to_sleep)
 
         self.stop_robot()
 
