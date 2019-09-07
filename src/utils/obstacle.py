@@ -27,10 +27,13 @@ class BoxObstacle(Obstacle):
         """
         super().__init__(physics_client)
         self.alpha = alpha
+        self.dimensions = dimensions
+        self.base_center_position = base_center_position
+
         collision_box_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[i/200 for i in dimensions],
                                                   physicsClientId=physics_client)
 
-        base_center_position[2] += dimensions[2]/2
+        self.base_center_position[2] += dimensions[2]/2
 
         baseOrientation = [0, 0, np.sin(self.alpha/2), np.cos(self.alpha/2)]
 
