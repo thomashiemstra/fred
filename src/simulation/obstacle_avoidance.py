@@ -7,6 +7,7 @@ from functools import lru_cache
 from src.global_constants import simulated_robot_config
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.kinematics.kinematics_utils import Pose
+from src.reinforcementlearning.robot_env import RobotEnv
 from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
 import numpy as np
 from time import sleep
@@ -191,8 +192,8 @@ simulated_robot.reset_to_pose(arc_1)
 
 _, target_point_2, target_point_3 = get_target_points(arc_2, simulated_robot.robot_config.d6)
 
-create_visual_sphere(target_point_2, physics_client)
-create_visual_sphere(target_point_3, physics_client)
+create_visual_sphere(body_id, target_point_2, physics_client)
+create_visual_sphere(body_id, target_point_3, physics_client)
 
 
 current_angles = simulated_robot.pose_to_angles(arc_1)

@@ -38,7 +38,7 @@ def get_target_points(target_pose, d6):
     return point_1, point_2, point_3
 
 
-def get_attractive_force_world(control_points, target_points, attractive_cutoff_distance=1, weights=None):
+def get_attractive_force_world(control_points, target_points, attractive_cutoff_distance=2, weights=None):
     """Calculates the vectors pointing from the control points on the robot to the target points
     The vectors will have a norm of max attractive_cutoff_distance
 

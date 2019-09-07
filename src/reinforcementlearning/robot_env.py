@@ -18,14 +18,15 @@ from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 class RobotEnv(py_environment.PyEnvironment):
 
-    def __init__(self, use_gui=False):
+    def __init__(self, use_gui=False, raw_obs=False):
         super().__init__()
         self._use_gui = use_gui
+        self._raw_obs = raw_obs
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
             shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.05
+        self._update_step_size = 0.03
         self._simulation_steps_per_step = 5
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -36,16 +37,24 @@ class RobotEnv(py_environment.PyEnvironment):
         self._robot_body_id = self._robot_controller.body_id
         self._target_pose = None
         self._steps_taken = 0
-        self._state = None
+        self._current_angles = None
         self._floor = BoxObstacle(self._physics_client, [1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 1])
         self._obstacles = None
         self._target_spheres = None
         self._attr_lines = None
         self._rep_lines = None
 
+    @property
+    def current_angles(self):
+        return self._current_angles
+
+    @property
+    def robot_controller(self):
+        return self._robot_controller
+
     def _generate_obstacles_and_target_pose(self):
-        obstacle = BoxObstacle(self._physics_client, [20, 20, 40], [0, 35, 0], color=[1, 0, 0, 1])
-        target_pose = Pose(25, 20, 20)
+        obstacle = BoxObstacle(self._physics_client, [20, 20, 40], [0, 40, 0], color=[1, 0, 0, 1])
+        target_pose = Pose(25, 20, 8)
         return np.array([obstacle]), target_pose
 
     def _create_visual_target_spheres(self, target_pose):
@@ -60,6 +69,16 @@ class RobotEnv(py_environment.PyEnvironment):
 
         target_sphere_2 = SphereObstacle(self._physics_client, 1, target_point_2.tolist(), color=[1, 1, 0, 1])
         target_sphere_3 = SphereObstacle(self._physics_client, 1, target_point_3.tolist(), color=[1, 1, 0, 1])
+
+        for sphere_id in [target_sphere_2.obstacle_id, target_sphere_3.obstacle_id]:
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 2, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 3, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 4, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 5, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 6, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 7, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 8, -1, 0)
+
         self._target_spheres = [target_sphere_2, target_sphere_3]
 
     def _remove_obstacles(self):
@@ -89,7 +108,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._obstacles, self._target_pose = self._generate_obstacles_and_target_pose()
         self._create_visual_target_spheres(self._target_pose)
 
-        self._state = self._robot_controller.get_current_angles()
+        self._current_angles = self._robot_controller.get_current_angles()
         observation, self._previous_distance_to_target = self._get_observations()
         self._episode_ended = False
         self._steps_taken = 0
@@ -99,14 +118,14 @@ class RobotEnv(py_environment.PyEnvironment):
         if not action.shape == (6,):
             raise ValueError("Action should be of shape (6,)")
 
-        if self._state is None:
+        if self._current_angles is None:
             raise ValueError("Please reset the environment before taking steps!")
 
         converted_action = np.append([0], action)  # angles are not 0 indexed
-        self._state = self._state + self._update_step_size * converted_action
+        self._current_angles = self._current_angles + self._update_step_size * converted_action
         self._clip_state()
 
-        self._robot_controller.move_servos(self._state)
+        self._robot_controller.move_servos(self._current_angles)
         self._advance_simulation()
 
         observation, total_distance = self._get_observations()
@@ -123,12 +142,12 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
 
     def _clip_state(self):
-        np.clip(self._state[1], 0, pi)
-        np.clip(self._state[2], 0, pi)
-        np.clip(self._state[3], -pi/3, 2*pi/3)
-        np.clip(self._state[4], 0, pi)
-        np.clip(self._state[5], -3*pi/4, 3*pi/4)
-        np.clip(self._state[6], 0, pi)
+        np.clip(self._current_angles[1], 0, pi)
+        np.clip(self._current_angles[2], 0, pi)
+        np.clip(self._current_angles[3], -pi / 3, 2 * pi / 3)
+        np.clip(self._current_angles[4], 0, pi)
+        np.clip(self._current_angles[5], -3 * pi / 4, 3 * pi / 4)
+        np.clip(self._current_angles[6], 0, pi)
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points
@@ -161,8 +180,9 @@ class RobotEnv(py_environment.PyEnvironment):
 
         return np.array(total_observation), total_distance
 
-    @staticmethod
-    def _get_normalized_vector_as_list(vec):
+    def _get_normalized_vector_as_list(self, vec):
+        if self._raw_obs:
+            return vec.tolist()
         norm = np.linalg.norm(vec)
         if norm == 0:
             return vec.tolist()
