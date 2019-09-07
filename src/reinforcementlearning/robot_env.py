@@ -26,7 +26,7 @@ class RobotEnv(py_environment.PyEnvironment):
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
             shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.03
+        self._update_step_size = 0.02
         self._simulation_steps_per_step = 5
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -127,6 +127,9 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._robot_controller.move_servos(self._current_angles)
         self._advance_simulation()
+
+        collision = p.getContactPoints(bodyA=self._robot_body_id)
+        print("collision: {}".format(collision != ()))
 
         observation, total_distance = self._get_observations()
         delta_distance = self._previous_distance_to_target - total_distance
