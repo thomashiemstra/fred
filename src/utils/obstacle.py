@@ -26,12 +26,13 @@ class BoxObstacle(Obstacle):
             alpha: angle by which to rotate the body around the z-axis
         """
         super().__init__(physics_client)
+        self.alpha = alpha
         collision_box_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[i/200 for i in dimensions],
                                                   physicsClientId=physics_client)
 
         base_center_position[2] += dimensions[2]/2
 
-        baseOrientation = [0, 0, np.sin(alpha/2), np.cos(alpha/2)]
+        baseOrientation = [0, 0, np.sin(self.alpha/2), np.cos(self.alpha/2)]
 
         self.obstacle_id = p.createMultiBody(0, collision_box_id, -1,
                                              basePosition=[i/100 for i in base_center_position],
