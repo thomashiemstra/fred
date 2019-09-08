@@ -28,6 +28,7 @@ class BoxObstacle(Obstacle):
         super().__init__(physics_client)
         self.alpha = alpha
         self.dimensions = dimensions
+        self.half_extends = [i/2 for i in dimensions]  # Half extends in centimeters
         self.base_center_position = base_center_position
 
         collision_box_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[i/200 for i in dimensions],
