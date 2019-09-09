@@ -27,17 +27,14 @@ body_id = p.loadURDF(current_dir + "/urdf/fred_with_spheres.urdf", start_pos, st
 simulated_robot = SimulatedRobotController(simulated_robot_config, physics_client, body_id)
 robot_body_id = simulated_robot.body_id
 
-arc_1 = Pose(-25, 15, 5)
-arc_2 = Pose(0, 40, 15)
-arc_3 = Pose(25, 15, 5)
+arc_1 = Pose(-25, 30, 25)
+arc_2 = Pose(0, 30, 25)
+arc_3 = Pose(25, 30, 25)
 
 poses = [arc_1, arc_2, arc_3]
 
 move = create_move(simulated_robot, poses, 15, None, None)
 simulated_robot.reset_to_pose(arc_1)
-
-simulated_robot.move_to_pose(arc_3)
-
 _, _, _, _, pos, orientation_quaterions = p.getLinkState(robot_body_id, 7)
 
 print(pos)
