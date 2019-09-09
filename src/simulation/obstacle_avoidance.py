@@ -7,7 +7,6 @@ from functools import lru_cache
 from src.global_constants import simulated_robot_config
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.kinematics.kinematics_utils import Pose
-from src.reinforcementlearning.robot_env import RobotEnv
 from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
 import numpy as np
 from time import sleep

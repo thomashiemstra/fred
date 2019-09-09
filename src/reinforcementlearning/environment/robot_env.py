@@ -8,10 +8,9 @@ import numpy as np
 from numpy import pi
 
 from src.kinematics.kinematics_utils import Pose
-from src.reinforcementlearning.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
+from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
 from src.simulation.simulation_utils import start_simulated_robot
-from tf_agents.environments import utils
 
 from src.utils.obstacle import BoxObstacle, SphereObstacle
 
@@ -32,7 +31,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._episode_ended = False
         self._robot_controller = start_simulated_robot(use_gui)
         self._physics_client = self._robot_controller.physics_client
-        self.start_pose = Pose(-25, 20, 10)
+        self._start_pose = None
         self._previous_distance_to_target = 0
         self._robot_body_id = self._robot_controller.body_id
         self._target_pose = None
@@ -55,7 +54,8 @@ class RobotEnv(py_environment.PyEnvironment):
     def _generate_obstacles_and_target_pose(self):
         obstacle = BoxObstacle(self._physics_client, [20, 20, 40], [0, 40, 0], color=[1, 0, 0, 1])
         target_pose = Pose(25, 20, 8)
-        return np.array([obstacle]), target_pose
+        start_pose = Pose(-25, 20, 10)
+        return np.array([obstacle]), target_pose, start_pose
 
     def _create_visual_target_spheres(self, target_pose):
         if not self._use_gui:
@@ -102,11 +102,11 @@ class RobotEnv(py_environment.PyEnvironment):
         p.resetBaseVelocity(self._robot_body_id, [0, 0, 0], [0, 0, 0],
                             physicsClientId=self._physics_client)
 
-        self._robot_controller.reset_to_pose(self.start_pose)
-        self._advance_simulation()
-
-        self._obstacles, self._target_pose = self._generate_obstacles_and_target_pose()
+        self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
         self._create_visual_target_spheres(self._target_pose)
+
+        self._robot_controller.reset_to_pose(self._start_pose)
+        self._advance_simulation()
 
         self._current_angles = self._robot_controller.get_current_angles()
         observation, self._previous_distance_to_target = self._get_observations()

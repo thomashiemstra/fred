@@ -4,9 +4,8 @@ import numpy as np
 import pybullet as p
 
 from src.kinematics.kinematics_utils import Pose
-from src.reinforcementlearning.robot_env_utils import get_attractive_force_world, get_target_points, \
-    get_repulsive_forces_world, control_point_ids
-from src.robot_controllers.simulated_robot.simulated_robot_controller import ControlPoint
+from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
+    get_repulsive_forces_world
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle
 

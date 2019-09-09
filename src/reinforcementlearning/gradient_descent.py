@@ -1,5 +1,5 @@
 from src.kinematics.kinematics import jacobian_transpose_on_f
-from src.reinforcementlearning.robot_env import RobotEnv
+from src.reinforcementlearning.environment.robot_env import RobotEnv
 import numpy as np
 
 control_point_1_position = 11.2

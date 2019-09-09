@@ -1,6 +1,6 @@
 import unittest
 
-from src.reinforcementlearning.robot_env import RobotEnv
+from src.reinforcementlearning.environment.robot_env import RobotEnv
 from tf_agents.environments import utils
 import numpy as np
 
