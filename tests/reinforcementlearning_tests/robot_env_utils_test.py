@@ -121,7 +121,8 @@ class ObstacleIntegrationTests(unittest.TestCase):
         p.disconnect()
 
     def test_repulsive_vectors(self):
-        obstacle = BoxObstacle(self.physics_client, [10, 100, 50], [-32, 0, 0])
+        obstacle = BoxObstacle([10, 100, 50], [-32, 0, 0])
+        obstacle.build(self.physics_client)
 
         self.simulated_robot.reset_to_pose(Pose(-20, 15, 10))
         p.stepSimulation(self.physics_client)

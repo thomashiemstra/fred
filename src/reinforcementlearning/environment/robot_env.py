@@ -37,7 +37,8 @@ class RobotEnv(py_environment.PyEnvironment):
         self._target_pose = None
         self._steps_taken = 0
         self._current_angles = None
-        self._floor = BoxObstacle(self._physics_client, [1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 1])
+        self._floor = BoxObstacle([1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 1])
+        self._floor.build(self._physics_client)
         self._obstacles = None
         self._target_spheres = None
         self._attr_lines = None
@@ -52,7 +53,8 @@ class RobotEnv(py_environment.PyEnvironment):
         return self._robot_controller
 
     def _generate_obstacles_and_target_pose(self):
-        obstacle = BoxObstacle(self._physics_client, [20, 20, 40], [0, 40, 0], color=[1, 0, 0, 1])
+        obstacle = BoxObstacle([20, 20, 40], [0, 40, 0], color=[1, 0, 0, 1])
+        obstacle.build(self._physics_client)
         target_pose = Pose(25, 20, 8)
         start_pose = Pose(-25, 20, 10)
         return np.array([obstacle]), target_pose, start_pose
@@ -67,8 +69,10 @@ class RobotEnv(py_environment.PyEnvironment):
 
         _, target_point_2, target_point_3 = get_target_points(target_pose, self._robot_controller.robot_config.d6)
 
-        target_sphere_2 = SphereObstacle(self._physics_client, 1, target_point_2.tolist(), color=[1, 1, 0, 1])
-        target_sphere_3 = SphereObstacle(self._physics_client, 1, target_point_3.tolist(), color=[1, 1, 0, 1])
+        target_sphere_2 = SphereObstacle(1, target_point_2.tolist(), color=[1, 1, 0, 1])
+        target_sphere_2.build(self._physics_client)
+        target_sphere_3 = SphereObstacle(1, target_point_3.tolist(), color=[1, 1, 0, 1])
+        target_sphere_3.build(self._physics_client)
 
         for sphere_id in [target_sphere_2.obstacle_id, target_sphere_3.obstacle_id]:
             p.setCollisionFilterPair(self._robot_body_id, sphere_id, 2, -1, 0)

@@ -97,10 +97,13 @@ if __name__ == '__main__':
 
     physics_client = p.connect(p.DIRECT)
 
-    floor = BoxObstacle(physics_client, np.array([60, 40, 1]), np.array([0, 20, -1]))
+    floor = BoxObstacle(np.array([60, 40, 1]), np.array([0, 20, -1]))
+    floor.build(physics_client)
 
-    obs_1 = BoxObstacle(physics_client, np.array([5, 10, 10]), np.array([10, 20, 0]), alpha=np.pi/4)
-    obs_2 = BoxObstacle(physics_client, np.array([10, 20, 10]), np.array([-10, 20, 0]), alpha=-np.pi / 4)
+    obs_1 = BoxObstacle(np.array([5, 10, 10]), np.array([10, 20, 0]), alpha=np.pi/4)
+    obs_1.build(physics_client)
+    obs_2 = BoxObstacle(np.array([10, 20, 10]), np.array([-10, 20, 0]), alpha=-np.pi / 4)
+    obs_2.build(physics_client)
 
     grid = create_grid_from_obstacles(np.array([obs_1, obs_2]))
 
