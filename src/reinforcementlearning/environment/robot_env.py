@@ -1,3 +1,4 @@
+import random
 from time import sleep
 
 from tf_agents.environments import py_environment
@@ -10,6 +11,7 @@ from numpy import pi
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
+from src.reinforcementlearning.environment.scenarios import Scenario
 from src.simulation.simulation_utils import start_simulated_robot
 
 from src.utils.obstacle import BoxObstacle, SphereObstacle
@@ -43,6 +45,8 @@ class RobotEnv(py_environment.PyEnvironment):
         self._target_spheres = None
         self._attr_lines = None
         self._rep_lines = None
+        self._current_scenario = None
+        self.scenario_id = None
 
     @property
     def current_angles(self):
@@ -53,11 +57,17 @@ class RobotEnv(py_environment.PyEnvironment):
         return self._robot_controller
 
     def _generate_obstacles_and_target_pose(self):
-        obstacle = BoxObstacle([20, 20, 40], [0, 40, 0], color=[1, 0, 0, 1])
-        obstacle.build(self._physics_client)
-        target_pose = Pose(25, 20, 8)
-        start_pose = Pose(-25, 20, 10)
-        return np.array([obstacle]), target_pose, start_pose
+        if self._current_scenario is not None:
+            self._current_scenario.destroy_scenario()
+
+        if self.scenario_id is not None:
+            self._current_scenario = scenarios[self.scenario_id]
+        else:
+            scenario_id = random.randint(0, len(scenarios))
+            self._current_scenario = scenarios[scenario_id]
+
+        self._current_scenario.build_scenario(self._physics_client)
+        return self._current_scenario.obstacles, self._current_scenario.target_pose, self._current_scenario.start_pose
 
     def _create_visual_target_spheres(self, target_pose):
         if not self._use_gui:
@@ -85,12 +95,6 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._target_spheres = [target_sphere_2, target_sphere_3]
 
-    def _remove_obstacles(self):
-        if self._obstacles is None:
-            return
-        for obstacle in self._obstacles:
-            p.removeBody(obstacle.obstacle_id)
-
     def action_spec(self):
         return self._action_spec
 
@@ -99,7 +103,6 @@ class RobotEnv(py_environment.PyEnvironment):
 
     def _reset(self):
         start_pos = [0, 0, 0]
-        self._remove_obstacles()
         start_orientation = p.getQuaternionFromEuler([0, 0, 0])
         p.resetBasePositionAndOrientation(self._robot_body_id, start_pos, start_orientation,
                                           physicsClientId=self._physics_client)
@@ -162,8 +165,9 @@ class RobotEnv(py_environment.PyEnvironment):
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
 
         # Control point 1 is not used for the attractive forces
-        attractive_forces, total_distance = get_attractive_force_world(np.array([c1.position, c2.position, c3.position]),
-                                                                       np.array([None, target_point_2, target_point_3]))
+        attractive_forces, total_distance = get_attractive_force_world(
+            np.array([c1.position, c2.position, c3.position]),
+            np.array([None, target_point_2, target_point_3]))
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
@@ -209,6 +213,14 @@ class RobotEnv(py_environment.PyEnvironment):
                 p.stepSimulation(self._physics_client)
 
 
+scenarios = [Scenario([BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4),
+                       BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
+                      Pose(-20, 15, 10), Pose(20, 15, 10)),
+             Scenario([BoxObstacle([20, 20, 20], [0, 35, 0], alpha=np.pi / 4),
+                       BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
+                      Pose(-20, 15, 10), Pose(20, 15, 10))
+             ]
+
 if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
     state = env.observation_spec()
@@ -226,7 +238,3 @@ if __name__ == '__main__':
     #     res = env.step(simple_action)
     #     print(res.reward)
     # print('hoi')
-
-
-
-
