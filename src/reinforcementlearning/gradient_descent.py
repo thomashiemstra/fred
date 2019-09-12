@@ -5,6 +5,7 @@ import numpy as np
 control_point_1_position = 11.2
 
 env = RobotEnv(use_gui=True, raw_obs=True)
+env.scenario_id = 0
 state = env.reset()
 
 steps_taken = 0
@@ -23,7 +24,7 @@ while True:
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
 
-    forces = attractive_forces # + repulsive_forces
+    forces = attractive_forces + repulsive_forces
 
     current_angles = env.current_angles
 

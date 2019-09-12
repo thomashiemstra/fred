@@ -215,10 +215,10 @@ class RobotEnv(py_environment.PyEnvironment):
 
 scenarios = [Scenario([BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4),
                        BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-20, 15, 10), Pose(20, 15, 10)),
+                      Pose(-20, 25, 10), Pose(20, 25, 10)),
              Scenario([BoxObstacle([20, 20, 20], [0, 35, 0], alpha=np.pi / 4),
                        BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-20, 15, 10), Pose(20, 15, 10))
+                      Pose(-20, 25, 10), Pose(20, 25, 10))
              ]
 
 if __name__ == '__main__':
