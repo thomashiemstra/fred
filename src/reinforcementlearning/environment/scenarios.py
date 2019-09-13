@@ -8,7 +8,7 @@ red = [1, 0, 0, 1]
 
 class Scenario:
 
-    def __init__(self, obstacles, target_pose, start_pose):
+    def __init__(self, obstacles, start_pose, target_pose):
         self.obstacles = obstacles
         self.target_pose = target_pose
         self.start_pose = start_pose

@@ -213,12 +213,14 @@ class RobotEnv(py_environment.PyEnvironment):
                 p.stepSimulation(self._physics_client)
 
 
-scenarios = [Scenario([BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4),
-                       BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-20, 25, 10), Pose(20, 25, 10)),
-             Scenario([BoxObstacle([20, 20, 20], [0, 35, 0], alpha=np.pi / 4),
-                       BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-20, 25, 10), Pose(20, 25, 10))
+scenarios = [Scenario([BoxObstacle([20, 20, 20], [0, 35, 0], alpha=np.pi / 4)],
+                      Pose(-25, 25, 10), Pose(25, 25, 10)),
+             Scenario([BoxObstacle([10, 10, 30], [0, 35, 0], alpha=0),
+                       BoxObstacle([10, 20, 20], [10, 35, 0], alpha=np.pi / 4)],
+                      Pose(-25, 20, 10), Pose(25, 20, 10)),
+             Scenario([BoxObstacle([10, 20, 20], [-10, 35, 0], alpha=-np.pi / 4),
+                       BoxObstacle([10, 20, 20], [10, 35, 0], alpha=np.pi / 4)],
+                      Pose(-25, 20, 10), Pose(25, 20, 10))
              ]
 
 if __name__ == '__main__':
