@@ -213,14 +213,37 @@ class RobotEnv(py_environment.PyEnvironment):
                 p.stepSimulation(self._physics_client)
 
 
-scenarios = [Scenario([BoxObstacle([20, 20, 20], [0, 35, 0], alpha=np.pi / 4)],
+scenarios = [Scenario([],
+                      Pose(-25, 35, 10), Pose(25, 35, 10)),
+             Scenario([],
+                      Pose(-30, 20, 10), Pose(20, 40, 20)),
+             Scenario([],
+                      Pose(-35, 15, 10), Pose(25, 30, 30)),
+             Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 25, 10), Pose(25, 25, 10)),
              Scenario([BoxObstacle([10, 10, 30], [0, 35, 0], alpha=0),
                        BoxObstacle([10, 20, 20], [10, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 20, 10), Pose(25, 20, 10)),
+                      Pose(-25, 20, 10), Pose(30, 30, 10)),
              Scenario([BoxObstacle([10, 20, 20], [-10, 35, 0], alpha=-np.pi / 4),
                        BoxObstacle([10, 20, 20], [10, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 20, 10), Pose(25, 20, 10))
+                      Pose(-25, 20, 10), Pose(25, 20, 10)),
+             Scenario([BoxObstacle([10, 40, 25], [0, 35, 0], alpha=0)],
+                      Pose(-25, 30, 10), Pose(25, 30, 10)),
+             Scenario([BoxObstacle([10, 30, 20], [0, 30, 0], alpha=np.pi / 8),
+                       BoxObstacle([10, 10, 30], [10, 35, 0], alpha=0)],
+                      Pose(-25, 30, 10), Pose(25, 30, 10)),
+             Scenario([BoxObstacle([10, 30, 20], [0, 35, 0], alpha=np.pi / 2),
+                       BoxObstacle([10, 10, 35], [0, 25, 0], alpha=0)],
+                      Pose(-25, 30, 10), Pose(25, 30, 10)),
+             Scenario([BoxObstacle([20, 20, 20], [-20, 40, 0], alpha=np.pi / 2),
+                       BoxObstacle([10, 10, 35], [0, 25, 0], alpha=0)],
+                      Pose(-25, 20, 10), Pose(20, 40, 10)),
+             Scenario([BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 8),
+                       BoxObstacle([10, 10, 35], [-5, 38, 0], alpha=0)],
+                      Pose(-25, 40, 10), Pose(20, 20, 10)),
+             Scenario([BoxObstacle([10, 10, 40], [5, 30, 0], alpha=0),
+                       BoxObstacle([30, 30, 20], [-5, 40, 0], alpha=0)],
+                      Pose(-35, 15, 10), Pose(25, 30, 30)),
              ]
 
 if __name__ == '__main__':
