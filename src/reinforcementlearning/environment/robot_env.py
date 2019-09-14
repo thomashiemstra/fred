@@ -12,6 +12,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
 from src.reinforcementlearning.environment.scenarios import Scenario
+from src.reinforcementlearning.occupancy_grid_util import create_grid_from_obstacles
 from src.simulation.simulation_utils import start_simulated_robot
 
 from src.utils.obstacle import BoxObstacle, SphereObstacle
@@ -224,6 +225,15 @@ class RobotEnv(py_environment.PyEnvironment):
             for _ in range(self._simulation_steps_per_step):
                 p.stepSimulation(self._physics_client)
 
+    def show_occupancy_grid(self):
+        if self._obstacles is None:
+            return
+        grid = create_grid_from_obstacles(self._obstacles, grid_len_x=40, grid_len_y=30, grid_size=1)
+        import matplotlib.pyplot as plt
+        plt.set_cmap('hot')
+        plt.imshow(grid)
+        plt.show()
+
 
 scenarios = [Scenario([],
                       Pose(-25, 35, 10), Pose(25, 35, 10)),
@@ -264,15 +274,7 @@ if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
     state = env.observation_spec()
     print(state)
+    env.scenario_id = 10
     obs = env.reset()
-    # for _ in range(50):
-    #     simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
-    #     res = env.step(simple_action)
-    #     print(res.reward)
-    #
-    # print('hoi')
-    # env.reset()
-    # for _ in range(50):
-    #     simple_action
-    #     )
-    # print('hoi')
+    env.show_occupancy_grid()
+    print("hoi")
