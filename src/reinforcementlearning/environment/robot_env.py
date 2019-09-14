@@ -23,6 +23,7 @@ class RobotEnv(py_environment.PyEnvironment):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
+        self._no_obstacles = no_obstacles
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         if no_obstacles:
@@ -68,8 +69,8 @@ class RobotEnv(py_environment.PyEnvironment):
         if self.scenario_id is not None:
             self._current_scenario = scenarios[self.scenario_id]
         else:
-            if self.no_obstacles:
-                scenario_id = random.randint(0, 3)
+            if self._no_obstacles:
+                scenario_id = random.randint(0, 4)
             else:
                 scenario_id = random.randint(0, len(scenarios))
             self._current_scenario = scenarios[scenario_id]
@@ -230,6 +231,8 @@ scenarios = [Scenario([],
                       Pose(-30, 20, 10), Pose(20, 40, 20)),
              Scenario([],
                       Pose(-35, 15, 10), Pose(25, 30, 30)),
+             Scenario([],
+                      Pose(0, 20, 10), Pose(0, 30, 40)),
              Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 25, 10), Pose(25, 25, 10)),
              Scenario([BoxObstacle([10, 10, 30], [0, 35, 0], alpha=0),
@@ -270,7 +273,6 @@ if __name__ == '__main__':
     # print('hoi')
     # env.reset()
     # for _ in range(50):
-    #     simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
-    #     res = env.step(simple_action)
-    #     print(res.reward)
+    #     simple_action
+    #     )
     # print('hoi')
