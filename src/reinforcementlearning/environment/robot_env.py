@@ -12,7 +12,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
 from src.reinforcementlearning.environment.scenarios import Scenario
-from src.reinforcementlearning.occupancy_grid_util import create_grid_from_obstacles
+
 from src.simulation.simulation_utils import start_simulated_robot
 
 from src.utils.obstacle import BoxObstacle, SphereObstacle
@@ -225,13 +225,31 @@ class RobotEnv(py_environment.PyEnvironment):
             for _ in range(self._simulation_steps_per_step):
                 p.stepSimulation(self._physics_client)
 
-    def show_occupancy_grid(self):
+    def show_occupancy_grid_and_curve(self):
         if self._obstacles is None:
             return
-        grid = create_grid_from_obstacles(self._obstacles, grid_len_x=40, grid_len_y=30, grid_size=1)
+        from src.reinforcementlearning.occupancy_grid_util import create_grid_from_obstacles
+        from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
+
+        len_x = 40
+        len_y = 40
+        curve_iteration = 3
+
+        grid = create_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=1)
+        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, iteration=curve_iteration)
+
         import matplotlib.pyplot as plt
+
         plt.set_cmap('hot')
-        plt.imshow(grid)
+
+        fig = plt.figure()
+        ax1 = fig.add_subplot(2, 2, 1)
+
+        reshape = 2 ** curve_iteration
+        ax1.imshow(curve.reshape(reshape, reshape))
+        ax2 = fig.add_subplot(2, 2, 2)
+        ax2.imshow(grid)
+
         plt.show()
 
 
@@ -274,7 +292,7 @@ if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
     state = env.observation_spec()
     print(state)
-    env.scenario_id = 10
+    env.scenario_id = 8
     obs = env.reset()
-    env.show_occupancy_grid()
+    env.show_occupancy_grid_and_curve()
     print("hoi")
