@@ -12,6 +12,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
 from src.reinforcementlearning.environment.scenarios import Scenario
+from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
 
 from src.simulation.simulation_utils import start_simulated_robot
 
@@ -25,6 +26,9 @@ class RobotEnv(py_environment.PyEnvironment):
         self._use_gui = use_gui
         self._raw_obs = raw_obs
         self._no_obstacles = no_obstacles
+        self._hilbert_curve_iteration = 3
+        self._grid_len_x = 40
+        self._grid_len_y = 40
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         if no_obstacles:
@@ -32,7 +36,8 @@ class RobotEnv(py_environment.PyEnvironment):
                 shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
         else:
             self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')  # todo add obstacles to obs
+                shape=(15 + 2**self._hilbert_curve_iteration,),
+                dtype=np.float32, minimum=-1, maximum=1, name='observation')
         self._update_step_size = 0.01
         self._simulation_steps_per_step = 5
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
@@ -202,6 +207,12 @@ class RobotEnv(py_environment.PyEnvironment):
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[1])
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
 
+        if not self._no_obstacles:
+            curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                        grid_len_y=self._grid_len_Y,
+                                                        iteration=self._curve_iteration)
+            total_observation += curve.tolist()
+
         return np.array(total_observation), total_distance
 
     def _get_normalized_vector_as_list(self, vec):
@@ -229,7 +240,6 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._obstacles is None:
             return
         from src.reinforcementlearning.occupancy_grid_util import create_grid_from_obstacles
-        from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
 
         len_x = 40
         len_y = 40
