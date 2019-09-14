@@ -19,15 +19,19 @@ from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 class RobotEnv(py_environment.PyEnvironment):
 
-    def __init__(self, use_gui=False, raw_obs=False):
+    def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
-        self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.02
+        if no_obstacles:
+            self._observation_spec = array_spec.BoundedArraySpec(
+                shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+        else:
+            self._observation_spec = array_spec.BoundedArraySpec(
+                shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')  # todo add obstacles to obs
+        self._update_step_size = 0.01
         self._simulation_steps_per_step = 5
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -47,6 +51,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._rep_lines = None
         self._current_scenario = None
         self.scenario_id = None
+        self.reverse_scenario = False
 
     @property
     def current_angles(self):
@@ -63,7 +68,10 @@ class RobotEnv(py_environment.PyEnvironment):
         if self.scenario_id is not None:
             self._current_scenario = scenarios[self.scenario_id]
         else:
-            scenario_id = random.randint(0, len(scenarios))
+            if self.no_obstacles:
+                scenario_id = random.randint(0, 3)
+            else:
+                scenario_id = random.randint(0, len(scenarios))
             self._current_scenario = scenarios[scenario_id]
 
         self._current_scenario.build_scenario(self._physics_client)
@@ -110,6 +118,9 @@ class RobotEnv(py_environment.PyEnvironment):
                             physicsClientId=self._physics_client)
 
         self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
+        if self.reverse_scenario:
+            self._target_pose, self._start_pose = self._start_pose, self._target_pose
+
         self._create_visual_target_spheres(self._target_pose)
 
         self._robot_controller.reset_to_pose(self._start_pose)
