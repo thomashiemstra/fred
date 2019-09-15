@@ -5,7 +5,8 @@ import numpy as np
 control_point_1_position = 11.2
 
 env = RobotEnv(use_gui=True, raw_obs=True)
-env.scenario_id = 0
+env.scenario_id = 12
+env.reverse_scenario = False
 state = env.reset()
 
 steps_taken = 0
@@ -14,8 +15,8 @@ while True:
     observation = state.observation
 
     c1_attr = np.zeros(3)
-    c2_attr = observation[0:3]
-    c3_attr = observation[3:6]
+    c2_attr = observation[0:3] #+ [0, 0, 0.5]
+    c3_attr = observation[3:6] #+ [0, 0, 0.5]
 
     c1_rep = observation[6:9]
     c2_rep = observation[9:12]
@@ -39,4 +40,8 @@ while True:
 
     state = env.step(action[1:7])
 
+    if state.step_type == 2:
+        print("goal reached!")
+        print("steps taken: ", env._steps_taken)
+        break
 
