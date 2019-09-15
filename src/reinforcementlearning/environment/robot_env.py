@@ -78,7 +78,7 @@ class RobotEnv(py_environment.PyEnvironment):
             if self._no_obstacles:
                 scenario_id = random.randint(0, 4)
             else:
-                scenario_id = random.randint(0, len(scenarios))
+                scenario_id = random.randint(0, len(scenarios) - 1)
             self._current_scenario = scenarios[scenario_id]
 
         self._current_scenario.build_scenario(self._physics_client)
@@ -162,7 +162,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._steps_taken += 1
 
-        if self._steps_taken > 100:
+        if self._steps_taken > 100 or collision:
             return ts.termination(np.array(observation, dtype=np.float32), reward=0)
         elif total_distance < 10:  # target reached
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
