@@ -153,8 +153,9 @@ class RobotEnv(py_environment.PyEnvironment):
         self._robot_controller.move_servos(self._current_angles)
         self._advance_simulation()
 
-        collision = p.getContactPoints(bodyA=self._robot_body_id)
-        print("collision: {}".format(collision != ()))
+        contact_points = p.getContactPoints(bodyA=self._robot_body_id, physicsClientId=self._physics_client)
+        collision = contact_points != ()
+        # print("collision: {}".format(collision))
 
         observation, total_distance = self._get_observations()
         delta_distance = self._previous_distance_to_target - total_distance
