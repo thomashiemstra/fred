@@ -7,8 +7,14 @@ import numpy as np
 
 class TestRobotEnv(unittest.TestCase):
 
-    def test_env(self):
+    def test_env_no_obs(self):
         env = RobotEnv(use_gui=False)
+        env.scenario_id = 0
+        utils.validate_py_environment(env, episodes=5)
+
+    def test_env_obs(self):
+        env = RobotEnv(use_gui=False, no_obstacles=False)
+        env.scenario_id = 0
         utils.validate_py_environment(env, episodes=5)
 
     def test_initial_observasions_normalized(self):
