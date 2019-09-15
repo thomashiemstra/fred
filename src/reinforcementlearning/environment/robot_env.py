@@ -39,7 +39,7 @@ class RobotEnv(py_environment.PyEnvironment):
                 shape=(15 + 2**(2*self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
         self._update_step_size = 0.01
-        self._simulation_steps_per_step = 5
+        self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
         self._robot_controller = start_simulated_robot(use_gui)
@@ -162,9 +162,9 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._steps_taken += 1
 
-        if self._steps_taken > 100 or collision:
+        if self._steps_taken > 1000 or collision:
             return ts.termination(np.array(observation, dtype=np.float32), reward=0)
-        elif total_distance < 10:  # target reached
+        elif total_distance < 5:  # target reached
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:
             return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
