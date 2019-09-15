@@ -36,7 +36,7 @@ class RobotEnv(py_environment.PyEnvironment):
                 shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
         else:
             self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(15 + 2**self._hilbert_curve_iteration,),
+                shape=(15 + 2**(2*self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
         self._update_step_size = 0.01
         self._simulation_steps_per_step = 5
@@ -209,8 +209,8 @@ class RobotEnv(py_environment.PyEnvironment):
 
         if not self._no_obstacles:
             curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
-                                                        grid_len_y=self._grid_len_Y,
-                                                        iteration=self._curve_iteration)
+                                                        grid_len_y=self._grid_len_y,
+                                                        iteration=self._hilbert_curve_iteration)
             total_observation += curve.tolist()
 
         return np.array(total_observation), total_distance
