@@ -1,7 +1,6 @@
 from src.kinematics.kinematics_utils import Pose
 from src.utils.obstacle import BoxObstacle
 import numpy as np
-import pybullet as p
 
 red = [1, 0, 0, 1]
 
@@ -19,7 +18,7 @@ class Scenario:
 
     def destroy_scenario(self):
         for obstacle in self.obstacles:
-            p.removeBody(obstacle.obstacle_id)
+            obstacle.destroy()
 
 
 if __name__ == '__main__':
