@@ -1,18 +1,14 @@
-import serial
+from Arduino import Arduino  # arduino-python3 0.6
 import time
 
-arduino = serial.Serial('COM9', 9600)
-time.sleep(2)
+board = Arduino()  # plugged in via USB, serial com at rate 115200
 
-print("Enter 1 to turn ON LED and 0 to turn OFF LED")
+board.Servos.attach(9, min=720, max=1240)
 
-while 1:
+while True:
+    board.Servos.write(9, 80)
 
-    datafromUser = input()
+    time.sleep(1)
 
-    if datafromUser == '1':
-        arduino.write(b'1')
-        print("LED  turned ON")
-    elif datafromUser == '0':
-        arduino.write(b'0')
-        print("LED turned OFF")
+    board.Servos.write(9, 180)
+    time.sleep(1)
