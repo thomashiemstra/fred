@@ -112,6 +112,8 @@ def set_speed():
     if raw_speed is None:
         return jsonify(success=False)
     speed = int(raw_speed)
+    if speed < 0 or speed > 50:
+        return jsonify(success=False)
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     xbox_robot_controller.set_maximum_speed(speed)
     return jsonify(success=True)
