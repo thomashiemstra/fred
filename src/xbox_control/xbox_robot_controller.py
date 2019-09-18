@@ -36,6 +36,7 @@ class XboxRobotController:
         self.center = None
         self.move_speed = 10
         self.recorded_moves = []
+        self.maximum_speed = self.pose_updater.maximum_speed
 
     @synchronized_with_lock("lock")
     def is_done(self):
@@ -185,6 +186,10 @@ class XboxRobotController:
             string = infile.read()
         moves = jsonpickle.decode(string)
         self.recorded_moves = moves
+
+    @synchronized_with_lock("lock")
+    def set_maximum_speed(self, new_maximum_speed):
+        self.pose_updater.maximum_speed = new_maximum_speed
 
     def playback_recorded_moves(self, recorded_moves):
         recorded_moves[0].go_to_start_of_move(self.dynamixel_servo_controller)

@@ -68,6 +68,14 @@
                 </form>
              </div>
              <div class="col-sm-4">
+                 <h2>Set max speed:</h2>
+                 <form id="speedInput" action=#>
+                     Speed (in cm/s):<br>
+                     <label>
+                         <input type="text" name="speed" id="newSpeed">
+                     </label><br>
+                  <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/xbox/setSpeed', '#speedInput'); document.getElementById('newSpeed').value = ''" value="Submit">
+                </form>
              </div>
         </div>
     </div>

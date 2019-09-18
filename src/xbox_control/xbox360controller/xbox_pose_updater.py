@@ -1,5 +1,7 @@
 from __future__ import division
 
+import threading
+
 from src.kinematics.kinematics_utils import Pose
 import numpy as np
 from numpy import pi
@@ -8,6 +10,7 @@ from src.global_constants import WorkSpaceLimits
 
 # class used to update a pose using the inputs from the xbox360 controller
 # i.e. move the pose (and thus robot) with the xbox360 controller
+from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import get_angles_center
 from src.utils.os_utils import is_linux
 
@@ -21,22 +24,34 @@ class XboxPoseUpdater:
         self.v_alpha, self.v_gamma = 0, 0
         self.steps_per_second = 20
         self.dt = 1.0 / self.steps_per_second
-        self.maximum_speed = maximum_speed  # cm/sec
+        self._maximum_speed = maximum_speed  # cm/sec
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down
-        self.dv = self.maximum_speed / (self.ramp_up_time * self.steps_per_second)  # v/step
+        self._dv = self._maximum_speed / (self.ramp_up_time * self.steps_per_second)  # v/step
         self.controller_state_manager = controller_state_manager
+        self.lock = threading.RLock()
+
+    @property
+    @synchronized_with_lock("lock")
+    def maximum_speed(self):
+        return self._maximum_speed
+
+    @maximum_speed.setter
+    @synchronized_with_lock("lock")
+    def maximum_speed(self, value):
+        self._maximum_speed = value
+        self._dv = self._maximum_speed / (self.ramp_up_time * self.steps_per_second)
 
     def input_to_delta_velocity(self, controller_input, velocity, maximum_velocity):
         new_velocity = 0
         direction = np.sign(controller_input)
         if controller_input != 0:
-            new_velocity = velocity + direction * self.dv
+            new_velocity = velocity + direction * self._dv
             return np.clip(new_velocity, -np.abs(maximum_velocity), np.abs(maximum_velocity))
         else:
             if velocity > 0:
-                new_velocity = velocity - self.dv if velocity - self.dv > 0 else 0
+                new_velocity = velocity - self._dv if velocity - self._dv > 0 else 0
             elif velocity < 0:
-                new_velocity = velocity + self.dv if velocity + self.dv < 0 else 0
+                new_velocity = velocity + self._dv if velocity + self._dv < 0 else 0
         return new_velocity
 
     def get_xyz_from_poller(self):

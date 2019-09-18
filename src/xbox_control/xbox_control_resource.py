@@ -106,8 +106,26 @@ def play_from_file():
     return resp
 
 
+@xbox_api.route('/setSpeed', methods=['POST'])
+def set_speed():
+    raw_speed = get_parameter('speed')
+    if raw_speed is None:
+        return jsonify(success=False)
+    speed = int(raw_speed)
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
+    xbox_robot_controller.set_maximum_speed(speed)
+    return jsonify(success=True)
+
+
 def get_filename():
     try:
         return request.get_json()['filename'] + '.json'
+    except KeyError:
+        return None
+
+
+def get_parameter(param_name):
+    try:
+        return request.get_json()[param_name]
     except KeyError:
         return None
