@@ -22,9 +22,9 @@ def get_robot(port):
 def get_xbox_robot_controller(port):
     dynamixel_servo_controller = get_robot(port)
     controller_state_manager = ControllerStateManager()
-    pose_poller = XboxPoseUpdater(controller_state_manager)
+    pose_updater = XboxPoseUpdater(controller_state_manager)
 
-    return XboxRobotController(global_constants.dynamixel_robot_config, dynamixel_servo_controller, pose_poller)
+    return XboxRobotController(global_constants.dynamixel_robot_config, dynamixel_servo_controller, pose_updater)
 
 
 @lru_cache(maxsize=1)

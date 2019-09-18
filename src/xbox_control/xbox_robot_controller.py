@@ -21,8 +21,8 @@ import logging as log
 class XboxRobotController:
     start_pose = Pose(-26, 16.0, 6)
 
-    def __init__(self, dynamixel_robot_config, dynamixel_servo_controller, pose_poller):
-        self.pose_poller = pose_poller
+    def __init__(self, dynamixel_robot_config, dynamixel_servo_controller, pose_updater):
+        self.pose_updater = pose_updater
         self.dynamixel_robot_config = dynamixel_robot_config
         self.dynamixel_servo_controller = dynamixel_servo_controller
         self.lock = threading.RLock()
@@ -92,18 +92,18 @@ class XboxRobotController:
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
         from_current_angles_to_pose(self.current_pose, self.dynamixel_servo_controller, 1)
         self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.dynamixel_servo_controller, 2)
-        self.pose_poller.reset_buttons()
+        self.pose_updater.reset_buttons()
 
         while True:
             if self.is_done():
                 break
-            self.current_pose = self.pose_poller.get_updated_pose_from_controller(self.current_pose,
-                                                                                  self.find_center_mode, self.center)
+            self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
+                                                                                   self.find_center_mode, self.center)
             recommended_time = self.dynamixel_servo_controller.move_to_pose(self.current_pose)
 
-            buttons = self.pose_poller.get_buttons()
+            buttons = self.pose_updater.get_buttons()
             self.handle_buttons(buttons)
-            time_to_sleep = np.maximum(recommended_time, self.pose_poller.dt)
+            time_to_sleep = np.maximum(recommended_time, self.pose_updater.dt)
 
             sleep(time_to_sleep)
 
