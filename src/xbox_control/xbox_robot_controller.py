@@ -36,7 +36,6 @@ class XboxRobotController:
         self.center = None
         self.move_speed = 10
         self.recorded_moves = []
-        self.maximum_speed = self.pose_updater.maximum_speed
 
     @synchronized_with_lock("lock")
     def is_done(self):
@@ -145,6 +144,10 @@ class XboxRobotController:
             print('cleared recorded moves and positions!')
         elif buttons.rb:
             pass
+        elif buttons.pad_ud != 0:
+            old_speed = self.pose_updater.maximum_speed
+            new_speed = np.clip(old_speed + buttons.pad_ud * 5, 5, 50)
+            self.pose_updater.maximum_speed = new_speed
 
     def has_enough_recorded_positions(self):
         return len(self.recorded_positions) > 1
