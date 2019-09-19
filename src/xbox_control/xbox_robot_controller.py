@@ -102,7 +102,7 @@ class XboxRobotController:
                                                                                    self.find_center_mode, self.center)
             recommended_time = self.dynamixel_servo_controller.move_to_pose(self.current_pose)
 
-            buttons = self.pose_updater.get_buttons()
+            buttons = self.pose_updater.controller_state_manager.get_buttons()
             self.handle_buttons(buttons)
             time_to_sleep = np.maximum(recommended_time, self.pose_updater.dt)
 

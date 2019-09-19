@@ -6,7 +6,7 @@ from src.utils.decorators import synchronized_with_lock
 
 
 class Buttons:
-    def __init__(self, start=False, x=False, y=False, a=False, b=False, rb=False, lb=False):
+    def __init__(self, start=False, x=False, y=False, a=False, b=False, rb=False, lb=False, pad_lr=False, pad_ud=False):
         self.rb = rb
         self.lb = lb
         self.b = b
@@ -14,10 +14,12 @@ class Buttons:
         self.y = y
         self.x = x
         self.start = start
+        self.pad_lr = pad_lr  # +1 for right -1 for left
+        self.pad_ud = pad_ud  # +1 for up -1 for down
 
     def __str__(self):
         return 'Buttons: start ={} x={} y={} a={}, b={}, rb={}, lb={}'\
-            .format(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb)
+            .format(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb, self.pad_lr, self.pad_ud)
 
 
 # A wrapper class used to get the most up to date xbox360 controller state
@@ -38,6 +40,8 @@ class ControllerStateManager:
         self.b = False
         self.lb = False
         self.rb = False
+        self.pad_lr = False
+        self.pad_ud = False
 
         self.xbox_controller = XboxController(None, deadzone=30, scale=100, invertYAxis=True)
         self.setup_callbacks()
@@ -62,6 +66,7 @@ class ControllerStateManager:
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.Y, self.__y)
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.RB, self.__right_bumper)
         self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.LB, self.___left_bumper)
+        self.xbox_controller.setupControlCallback(self.xbox_controller.XboxControls.DPAD, self.__d_pad)
 
     # todo maybe return the entire controller state in 1 lock. See if it's any faster
     @synchronized_with_lock("lock")
@@ -78,7 +83,7 @@ class ControllerStateManager:
 
     @synchronized_with_lock("lock")
     def get_buttons(self):
-        buttons = Buttons(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb)
+        buttons = Buttons(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb, self.pad_lr, self.pad_ud)
         self.reset_buttons()
         return buttons
 
@@ -151,6 +156,10 @@ class ControllerStateManager:
     def _right_trigger(self, right_trigger_value):
         self.lr_trigger = -((right_trigger_value / 2.0) + 50)
 
+    @synchronized_with_lock("lock")
+    def __d_pad(self, pad_val):
+        self.pad_lr, self.pad_ud = pad_val
+
     def reset_buttons(self):
         self.start = False
         self.x = False
@@ -159,3 +168,6 @@ class ControllerStateManager:
         self.b = False
         self.rb = False
         self.lb = False
+        self.pad_lr = False
+        self.pad_ud = False
+

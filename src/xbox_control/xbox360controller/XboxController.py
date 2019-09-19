@@ -319,12 +319,17 @@ if __name__ == '__main__':
         print("RTRIGGER {}".format( (yValue/200) + 0.5))
 
 
-    # setup xbox controller, set out the deadzone and scale, also invert the Y Axis (for some reason in Pygame negative is up - wierd!
-    xboxCont = XboxController(None, deadzone=30, scale=100, invertYAxis=True)
+    def print_val(val):
+        print(val)
 
-    # setup the left thumb (X & Y) callbacks
-    xboxCont.setupControlCallback(xboxCont.XboxControls.LTRIGGER, leftThumbX)
-    xboxCont.setupControlCallback(xboxCont.XboxControls.RTRIGGER, leftThumbY)
+
+    try:
+        xboxCont = XboxController(None, deadzone=30, scale=100, invertYAxis=True)
+    except pygame.error:
+        print("whoop")
+        sys.exit()
+
+    xboxCont.setupControlCallback(xboxCont.XboxControls.DPAD, print_val)
 
     try:
         # start the controller
@@ -336,7 +341,6 @@ if __name__ == '__main__':
     # Ctrl C
     except KeyboardInterrupt:
         print("User cancelled")
-
     # error
     except:
         print("Unexpected error:", sys.exc_info()[0])

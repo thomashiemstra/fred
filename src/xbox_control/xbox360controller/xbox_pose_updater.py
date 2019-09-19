@@ -118,9 +118,6 @@ class XboxPoseUpdater:
 
         return alpha, gamma
 
-    def get_buttons(self):
-        return self.controller_state_manager.get_buttons()
-
     def reset_buttons(self):
         self.controller_state_manager.reset_buttons()
 
