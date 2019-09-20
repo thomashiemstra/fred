@@ -297,6 +297,10 @@ scenarios = [Scenario([],
              Scenario([BoxObstacle([10, 10, 40], [5, 30, 0], alpha=0),
                        BoxObstacle([30, 30, 20], [-5, 40, 0], alpha=0)],
                       Pose(-35, 15, 10), Pose(25, 30, 30)),
+             Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
+                       BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4)],
+                      Pose(-35, 15, 10), Pose(25, 30, 30)),
+
              ]
 
 if __name__ == '__main__':
