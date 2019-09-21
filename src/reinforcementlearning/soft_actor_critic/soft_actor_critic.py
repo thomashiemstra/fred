@@ -106,7 +106,22 @@ with tf.compat.v2.summary.record_if(
     observation_spec = time_step_spec.observation
     action_spec = tf_env.action_spec()
 
-    tf_agent = create_agent(time_step_spec, observation_spec, action_spec, global_step)
+    tf_agent = create_agent(time_step_spec, observation_spec, action_spec, global_step,
+                            actor_fc_layers=actor_fc_layers,
+                            critic_obs_fc_layers=critic_obs_fc_layers,
+                            critic_action_fc_layers=critic_action_fc_layers,
+                            critic_joint_fc_layers=critic_joint_fc_layers,
+                            target_update_tau=target_update_tau,
+                            target_update_period=target_update_period,
+                            actor_learning_rate=actor_learning_rate,
+                            critic_learning_rate=critic_learning_rate,
+                            alpha_learning_rate=alpha_learning_rate,
+                            td_errors_loss_fn=td_errors_loss_fn,
+                            gamma=gamma,
+                            reward_scale_factor=reward_scale_factor,
+                            gradient_clipping=gradient_clipping,
+                            debug_summaries=debug_summaries,
+                            summarize_grads_and_vars=summarize_grads_and_vars)
 
     # Make the replay buffer.
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
