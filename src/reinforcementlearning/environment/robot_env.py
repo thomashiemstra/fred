@@ -240,13 +240,13 @@ class RobotEnv(py_environment.PyEnvironment):
     def show_occupancy_grid_and_curve(self):
         if self._obstacles is None:
             return
-        from src.reinforcementlearning.occupancy_grid_util import create_grid_from_obstacles
+        from src.reinforcementlearning.occupancy_grid_util import create_occupancy_grid_from_obstacles
 
         len_x = 40
         len_y = 40
         curve_iteration = 3
 
-        grid = create_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=1)
+        grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=1)
         curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, iteration=curve_iteration)
 
         import matplotlib.pyplot as plt

@@ -36,7 +36,7 @@ def get_obstacles_for_point(point_location, obstacles):
     return np.array(res)
 
 
-def create_grid_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40, grid_size=5):
+def create_occupancy_grid_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40, grid_size=5):
     if grid_len_x % grid_size != 0:
         raise ValueError("grid_len_x has to be a multiple of grid_size")
     if grid_len_y % grid_size != 0:
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     obs_2 = BoxObstacle(np.array([10, 20, 10]), np.array([-10, 20, 0]), alpha=-np.pi / 4)
     obs_2.build(physics_client)
 
-    grid = create_grid_from_obstacles(np.array([obs_1, obs_2]))
+    grid = create_occupancy_grid_from_obstacles(np.array([obs_1, obs_2]))
 
     curve = create_hilbert_curve_from_obstacles(np.array([obs_1, obs_2]))
 
