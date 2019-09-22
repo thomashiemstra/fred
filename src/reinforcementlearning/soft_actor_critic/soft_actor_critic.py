@@ -22,7 +22,7 @@ from tf_agents.utils import common
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
-    make_and_initialze_checkpointers, make_video, show_progress
+    make_and_initialze_checkpointers, make_video, show_progress, print_time_progression
 
 tf.compat.v1.enable_v2_behavior()
 logging.set_verbosity(logging.INFO)
@@ -32,20 +32,20 @@ print("GPU Available: ", tf.test.is_gpu_available())
 print("eager is on: {}".format(tf.executing_eagerly()))
 
 env_name = 'BipedalWalker-v2'
-num_iterations = 50
+total_train_steps = 2000000
 actor_fc_layers = (256, 256)
 critic_obs_fc_layers = None
 critic_action_fc_layers = None
 critic_joint_fc_layers = (256, 256)
 # Params for collect
 initial_collect_steps = 10000
-collect_steps_per_iteration = 1000
+collect_steps_per_iteration = 100
 replay_buffer_capacity = 1000000
 # Params for target update
 target_update_tau = 0.005
 target_update_period = 1
 # Params for train
-train_steps_per_iteration = 10
+train_steps_per_iteration = 100
 batch_size = 256
 actor_learning_rate = 3e-4
 critic_learning_rate = 3e-4
@@ -62,7 +62,7 @@ eval_interval = 2500
 train_checkpoint_interval = 5000
 policy_checkpoint_interval = 5000
 rb_checkpoint_interval = 50000
-log_interval = 10000
+log_interval = 1000
 summary_interval = 1000
 summaries_flush_secs = 10
 debug_summaries = False
@@ -121,8 +121,6 @@ with tf.compat.v2.summary.record_if(
         tf_metrics.NumberOfEpisodes(),
         environment_steps_metric,
     ]
-
-    print("tf_env.batch_size = {}".format(tf_env.batch_size))
 
     # Make the replay buffer.
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
@@ -201,19 +199,22 @@ with tf.compat.v2.summary.record_if(
 
     time_before_training = time.time()
 
-    for iteration in range(num_iterations):
+    steps_taken_in_prev_round = global_step.numpy()  # From a previous training round
+    while global_step.numpy() < total_train_steps:
+        global_steps_taken = global_step.numpy()
+
         start_time = time.time()
         time_step, policy_state = collect_driver.run(
-            # time_step=time_step,
-            # policy_state=policy_state,
+            time_step=time_step,
+            policy_state=policy_state,
         )
-        print("steps so far: {}".format(environment_steps_metric.result()))
+
         for _ in range(train_steps_per_iteration):
             train_loss = train_step()
         time_acc += time.time() - start_time
 
-        if global_step.numpy() % log_interval == 0:
-            logging.info('step = %d, loss = %f', global_step.numpy(),
+        if global_steps_taken % log_interval == 0:
+            logging.info('step = %d, loss = %f', global_steps_taken,
                          train_loss.loss)
             steps_per_sec = (global_step.numpy() - timed_at_step) / time_acc
             logging.info('%.3f steps/sec', steps_per_sec)
@@ -221,19 +222,19 @@ with tf.compat.v2.summary.record_if(
                 name='global_steps_per_sec', data=steps_per_sec, step=global_step)
             timed_at_step = global_step.numpy()
             time_acc = 0
+            print_time_progression(time_before_training, global_steps_taken - steps_taken_in_prev_round,
+                                   total_train_steps - steps_taken_in_prev_round)
 
         for train_metric in train_metrics:
             train_metric.tf_summaries(
                 train_step=global_step, step_metrics=train_metrics[:2])
 
-        if global_step.numpy() % eval_interval == 0:
+        if global_steps_taken % eval_interval == 0:
             compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
-            print("current itteration: {}".format(iteration))
+            print("current step: {}".format(global_steps_taken))
 
-        global_step_val = global_step.numpy()
-
-        save_checkpoints(global_step_val, train_checkpoint_interval, policy_checkpoint_interval,
+        save_checkpoints(global_steps_taken, train_checkpoint_interval, policy_checkpoint_interval,
                          rb_checkpoint_interval, train_checkpointer, policy_checkpointer, rb_checkpointer)
 
     time_after_trianing = time.time()
@@ -242,4 +243,4 @@ with tf.compat.v2.summary.record_if(
     print(time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
 
 
-make_video(env_name, tf_agent, video_filename='test')
+# make_video(env_name, tf_agent, video_filename='test')

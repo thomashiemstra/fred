@@ -190,3 +190,15 @@ def show_progress(agent, env):
         time_step = env.step(action_step.action)
         env.render()
         steps += 1
+
+
+def print_time_progression(time_before_training, global_step_taken, total_train_steps):
+    time_elapsed_so_far = time.time() - time_before_training
+    steps_taken_so_far = global_step_taken
+    avrg_time_per_step = time_elapsed_so_far / steps_taken_so_far
+
+    steps_left_to_take = total_train_steps - global_step_taken
+    remaining_time = steps_left_to_take * avrg_time_per_step
+    print("Total time taken so far: {}, time left: {}"
+          .format(time.strftime("%H:%M:%S", time.gmtime(time_elapsed_so_far)),
+                  time.strftime("%H:%M:%S", time.gmtime(remaining_time))))
