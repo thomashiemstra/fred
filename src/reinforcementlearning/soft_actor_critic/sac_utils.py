@@ -40,9 +40,7 @@ def normal_projection_net(action_spec,
         scale_distribution=True)
 
 
-def create_agent(time_step_spec,
-                 observation_spec,
-                 action_spec,
+def create_agent(env,
                  global_step,
                  actor_fc_layers=(256, 256),
                  critic_obs_fc_layers=None,
@@ -59,6 +57,10 @@ def create_agent(time_step_spec,
                  gradient_clipping=None,
                  debug_summaries=False,
                  summarize_grads_and_vars=False):
+    time_step_spec = env.time_step_spec()
+    observation_spec = time_step_spec.observation
+    action_spec = env.action_spec()
+
     actor_net = actor_distribution_network.ActorDistributionNetwork(
         observation_spec,
         action_spec,

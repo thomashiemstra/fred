@@ -102,11 +102,7 @@ with tf.compat.v2.summary.record_if(
     tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
     eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
 
-    time_step_spec = tf_env.time_step_spec()
-    observation_spec = time_step_spec.observation
-    action_spec = tf_env.action_spec()
-
-    tf_agent = create_agent(time_step_spec, observation_spec, action_spec, global_step,
+    tf_agent = create_agent(tf_env, global_step,
                             actor_fc_layers=actor_fc_layers,
                             critic_obs_fc_layers=critic_obs_fc_layers,
                             critic_action_fc_layers=critic_action_fc_layers,
