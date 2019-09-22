@@ -9,7 +9,7 @@ import imageio
 import tensorflow as tf
 from absl import logging
 from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import suite_gym
+from tf_agents.environments import suite_gym, parallel_py_environment
 from tf_agents.environments import tf_py_environment
 from tf_agents.eval import metric_utils
 from tf_agents.metrics import py_metrics
@@ -31,27 +31,27 @@ print("GPU Available: ", tf.test.is_gpu_available())
 
 print("eager is on: {}".format(tf.executing_eagerly()))
 
-env_name = 'BipedalWalkerHardcore-v2'
-num_iterations = 100000
+env_name = 'BipedalWalker-v2'
+num_iterations = 50
 actor_fc_layers = (256, 256)
 critic_obs_fc_layers = None
 critic_action_fc_layers = None
 critic_joint_fc_layers = (256, 256)
 # Params for collect
 initial_collect_steps = 10000
-collect_steps_per_iteration = 1
+collect_steps_per_iteration = 1000
 replay_buffer_capacity = 1000000
 # Params for target update
 target_update_tau = 0.005
 target_update_period = 1
 # Params for train
-train_steps_per_iteration = 1
+train_steps_per_iteration = 10
 batch_size = 256
 actor_learning_rate = 3e-4
 critic_learning_rate = 3e-4
 alpha_learning_rate = 3e-4
 td_errors_loss_fn = tf.compat.v1.losses.mean_squared_error
-gamma = 0.99
+gamma = 0.95
 reward_scale_factor = 1.0
 gradient_clipping = None
 use_tf_functions = True
@@ -62,14 +62,16 @@ eval_interval = 2500
 train_checkpoint_interval = 5000
 policy_checkpoint_interval = 5000
 rb_checkpoint_interval = 50000
-log_interval = 1000
+log_interval = 10000
 summary_interval = 1000
 summaries_flush_secs = 10
 debug_summaries = False
 summarize_grads_and_vars = False
 eval_metrics_callback = None
 
-root_dir = os.path.expanduser('/home/thomas/PycharmProjects/test')
+num_parallel_environments = 10
+
+root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/soft_actor_critic')
 train_dir = os.path.join(root_dir, 'train')
 eval_dir = os.path.join(root_dir, 'eval')
 
@@ -88,7 +90,13 @@ global_step = tf.compat.v1.train.get_or_create_global_step()
 with tf.compat.v2.summary.record_if(
         lambda: tf.math.equal(global_step % summary_interval, 0)):
     # tf_env = tf_py_environment.TFPyEnvironment(suite_gym.wrap_env(BipedalWalker2(), max_episode_steps=1600))
-    tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
+
+    # tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
+
+    tf_env = tf_py_environment.TFPyEnvironment(
+        parallel_py_environment.ParallelPyEnvironment(
+            [lambda: suite_gym.load(env_name)] * num_parallel_environments))
+
     eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
 
     tf_agent = create_agent(tf_env, global_step,
@@ -108,18 +116,26 @@ with tf.compat.v2.summary.record_if(
                             debug_summaries=debug_summaries,
                             summarize_grads_and_vars=summarize_grads_and_vars)
 
+    environment_steps_metric = tf_metrics.EnvironmentSteps()
+    step_metrics = [
+        tf_metrics.NumberOfEpisodes(),
+        environment_steps_metric,
+    ]
+
+    print("tf_env.batch_size = {}".format(tf_env.batch_size))
+
     # Make the replay buffer.
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         data_spec=tf_agent.collect_data_spec,
-        batch_size=1,
+        batch_size=tf_env.batch_size,
         max_length=replay_buffer_capacity)
     replay_observer = [replay_buffer.add_batch]
 
-    train_metrics = [
+    train_metrics = step_metrics + [
         tf_metrics.NumberOfEpisodes(),
         tf_metrics.EnvironmentSteps(),
-        tf_py_metric.TFPyMetric(py_metrics.AverageReturnMetric()),
-        tf_py_metric.TFPyMetric(py_metrics.AverageEpisodeLengthMetric()),
+        tf_py_metric.TFPyMetric(py_metrics.AverageReturnMetric(batch_size=tf_env.batch_size)),
+        tf_py_metric.TFPyMetric(py_metrics.AverageEpisodeLengthMetric(batch_size=tf_env.batch_size)),
     ]
 
     eval_policy = greedy_policy.GreedyPolicy(tf_agent.policy)
@@ -137,7 +153,7 @@ with tf.compat.v2.summary.record_if(
     eval_py_env = suite_gym.load(env_name)
 
     # show_progress(tf_agent, eval_py_env)
-
+    # experience, _ = next(iterator)
     initial_collect_driver = dynamic_step_driver.DynamicStepDriver(
         tf_env,
         initial_collect_policy,
@@ -178,7 +194,7 @@ with tf.compat.v2.summary.record_if(
 
     def train_step():
         experience, _ = next(iterator)
-        return tf_agent.train(experience)
+        return tf_agent.train(experience=experience)
 
     if use_tf_functions:
         train_step = common.function(train_step)
@@ -188,9 +204,10 @@ with tf.compat.v2.summary.record_if(
     for iteration in range(num_iterations):
         start_time = time.time()
         time_step, policy_state = collect_driver.run(
-            time_step=time_step,
-            policy_state=policy_state,
+            # time_step=time_step,
+            # policy_state=policy_state,
         )
+        print("steps so far: {}".format(environment_steps_metric.result()))
         for _ in range(train_steps_per_iteration):
             train_loss = train_step()
         time_acc += time.time() - start_time
