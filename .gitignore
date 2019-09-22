@@ -109,3 +109,6 @@ test.py
 *.yml
 *.json
 *.avi
+
+eval/
+train/
