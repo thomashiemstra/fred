@@ -12,7 +12,7 @@ root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforceme
 train_dir = os.path.join(root_dir, 'train')
 tf.compat.v1.enable_v2_behavior()
 
-global_step = tf.compat.v1.train.get_or_create_global_step()
+global_step = tf.compat.v1.train.create_global_step()
 with tf.compat.v2.summary.record_if(False):
     eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
 
