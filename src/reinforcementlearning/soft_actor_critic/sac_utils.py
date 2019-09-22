@@ -94,3 +94,90 @@ def create_agent(env,
         train_step_counter=global_step)
     agent.initialize()
     return agent
+
+
+def compute_metrics(eval_metrics,
+                    eval_tf_env,
+                    eval_policy,
+                    num_eval_episodes,
+                    global_step,
+                    eval_summary_writer):
+    results = metric_utils.eager_compute(
+        eval_metrics,
+        eval_tf_env,
+        eval_policy,
+        num_episodes=num_eval_episodes,
+        train_step=global_step,
+        summary_writer=eval_summary_writer,
+        summary_prefix='Metrics',
+    )
+    metric_utils.log_metrics(eval_metrics)
+    return results
+
+
+def save_checkpoints(global_step_val,
+                     train_checkpoint_interval,
+                     policy_checkpoint_interval,
+                     rb_checkpoint_interval,
+                     train_checkpointer,
+                     policy_checkpointer,
+                     rb_checkpointer
+                     ):
+    if global_step_val % train_checkpoint_interval == 0:
+        train_checkpointer.save(global_step=global_step_val)
+
+    if global_step_val % policy_checkpoint_interval == 0:
+        policy_checkpointer.save(global_step=global_step_val)
+
+    if global_step_val % rb_checkpoint_interval == 0:
+        rb_checkpointer.save(global_step=global_step_val)
+
+
+def make_and_initialze_checkpointers(train_dir,
+                                     tf_agent,
+                                     global_step,
+                                     eval_policy,
+                                     replay_buffer,
+                                     train_metrics):
+    train_checkpointer = common.Checkpointer(
+        ckpt_dir=train_dir,
+        agent=tf_agent,
+        global_step=global_step,
+        metrics=metric_utils.MetricsGroup(train_metrics, 'train_metrics'))
+    policy_checkpointer = common.Checkpointer(
+        ckpt_dir=os.path.join(train_dir, 'policy'),
+        policy=eval_policy,
+        global_step=global_step)
+    rb_checkpointer = common.Checkpointer(
+        ckpt_dir=os.path.join(train_dir, 'replay_buffer'),
+        max_to_keep=1,
+        replay_buffer=replay_buffer)
+
+    train_checkpointer.initialize_or_restore()
+    rb_checkpointer.initialize_or_restore()
+
+    return train_checkpointer, policy_checkpointer, rb_checkpointer
+
+
+def make_video(env_name, tf_agent, video_filename='test'):
+    video_filename += '.mp4'
+    eval_py_env = suite_gym.load(env_name)
+    num_episodes = 3
+    with imageio.get_writer(video_filename, fps=60) as video:
+        for _ in range(num_episodes):
+            time_step = eval_py_env.reset()
+            video.append_data(eval_py_env.render())
+            while not time_step.is_last():
+                action_step = tf_agent.policy.action(time_step)
+                time_step = eval_py_env.step(action_step.action)
+                video.append_data(eval_py_env.render())
+
+
+def show_progress(agent, env):
+    time_step = env.reset()
+    steps = 0
+    while not time_step.is_last() and steps < 400:
+        action_step = agent.policy.action(time_step)
+        time_step = env.step(action_step.action)
+        env.render()
+        steps += 1

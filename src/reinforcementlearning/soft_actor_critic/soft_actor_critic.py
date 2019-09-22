@@ -21,18 +21,8 @@ from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
-from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent
-
-
-def show_progress(agent, env):
-    time_step = env.reset()
-    steps = 0
-    while not time_step.is_last() and steps < 400:
-        action_step = agent.policy.action(time_step)
-        time_step = env.step(action_step.action)
-        env.render()
-        steps += 1
-
+from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
+    make_and_initialze_checkpointers, make_video, show_progress
 
 tf.compat.v1.enable_v2_behavior()
 logging.set_verbosity(logging.INFO)
@@ -97,7 +87,6 @@ eval_metrics = [
 global_step = tf.compat.v1.train.get_or_create_global_step()
 with tf.compat.v2.summary.record_if(
         lambda: tf.math.equal(global_step % summary_interval, 0)):
-
     # tf_env = tf_py_environment.TFPyEnvironment(suite_gym.wrap_env(BipedalWalker2(), max_episode_steps=1600))
     tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
     eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
@@ -138,26 +127,16 @@ with tf.compat.v2.summary.record_if(
         tf_env.time_step_spec(), tf_env.action_spec())
     collect_policy = tf_agent.collect_policy
 
-    train_checkpointer = common.Checkpointer(
-        ckpt_dir=train_dir,
-        agent=tf_agent,
-        global_step=global_step,
-        metrics=metric_utils.MetricsGroup(train_metrics, 'train_metrics'))
-    policy_checkpointer = common.Checkpointer(
-        ckpt_dir=os.path.join(train_dir, 'policy'),
-        policy=eval_policy,
-        global_step=global_step)
-    rb_checkpointer = common.Checkpointer(
-        ckpt_dir=os.path.join(train_dir, 'replay_buffer'),
-        max_to_keep=1,
-        replay_buffer=replay_buffer)
-
-    train_checkpointer.initialize_or_restore()
-    rb_checkpointer.initialize_or_restore()
+    train_checkpointer, policy_checkpointer, rb_checkpointer = make_and_initialze_checkpointers(train_dir,
+                                                                                                tf_agent,
+                                                                                                global_step,
+                                                                                                eval_policy,
+                                                                                                replay_buffer,
+                                                                                                train_metrics)
 
     eval_py_env = suite_gym.load(env_name)
 
-    show_progress(tf_agent, eval_py_env)
+    # show_progress(tf_agent, eval_py_env)
 
     initial_collect_driver = dynamic_step_driver.DynamicStepDriver(
         tf_env,
@@ -182,16 +161,7 @@ with tf.compat.v2.summary.record_if(
         'a random policy.', initial_collect_steps)
     initial_collect_driver.run()
 
-    results = metric_utils.eager_compute(
-        eval_metrics,
-        eval_tf_env,
-        eval_policy,
-        num_episodes=num_eval_episodes,
-        train_step=global_step,
-        summary_writer=eval_summary_writer,
-        summary_prefix='Metrics',
-    )
-    metric_utils.log_metrics(eval_metrics)
+    compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
     time_step = None
     policy_state = collect_policy.get_initial_state(tf_env.batch_size)
@@ -206,11 +176,9 @@ with tf.compat.v2.summary.record_if(
         num_steps=2).prefetch(3)
     iterator = iter(dataset)
 
-
     def train_step():
         experience, _ = next(iterator)
         return tf_agent.train(experience)
-
 
     if use_tf_functions:
         train_step = common.function(train_step)
@@ -242,42 +210,19 @@ with tf.compat.v2.summary.record_if(
                 train_step=global_step, step_metrics=train_metrics[:2])
 
         if global_step.numpy() % eval_interval == 0:
-            results = metric_utils.eager_compute(
-                eval_metrics,
-                eval_tf_env,
-                eval_policy,
-                num_episodes=num_eval_episodes,
-                train_step=global_step,
-                summary_writer=eval_summary_writer,
-                summary_prefix='Metrics',
-            )
-            metric_utils.log_metrics(eval_metrics)
+            compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
             print("current itteration: {}".format(iteration))
 
         global_step_val = global_step.numpy()
-        if global_step_val % train_checkpoint_interval == 0:
-            train_checkpointer.save(global_step=global_step_val)
 
-        if global_step_val % policy_checkpoint_interval == 0:
-            policy_checkpointer.save(global_step=global_step_val)
-
-        if global_step_val % rb_checkpoint_interval == 0:
-            rb_checkpointer.save(global_step=global_step_val)
+        save_checkpoints(global_step_val, train_checkpoint_interval, policy_checkpoint_interval,
+                         rb_checkpoint_interval, train_checkpointer, policy_checkpointer, rb_checkpointer)
 
     time_after_trianing = time.time()
 
     elapsed_time = time_after_trianing - time_before_training
     print(time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
 
-eval_py_env = suite_gym.load(env_name)
-num_episodes = 3
-video_filename = 'test.mp4'
-with imageio.get_writer(video_filename, fps=60) as video:
-    for _ in range(num_episodes):
-        time_step = eval_py_env.reset()
-        video.append_data(eval_py_env.render())
-        while not time_step.is_last():
-            action_step = tf_agent.policy.action(time_step)
-            time_step = eval_py_env.step(action_step.action)
-            video.append_data(eval_py_env.render())
+
+make_video(env_name, tf_agent, video_filename='test')
