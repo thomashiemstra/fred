@@ -86,7 +86,7 @@ def create_agent(env,
         target_update_period=target_update_period,
         td_errors_loss_fn=td_errors_loss_fn,
         gamma=gamma,
-        target_entropy=-6,
+        target_entropy=-12,
         reward_scale_factor=reward_scale_factor,
         gradient_clipping=gradient_clipping,
         debug_summaries=debug_summaries,
@@ -157,6 +157,15 @@ def make_and_initialze_checkpointers(train_dir,
     rb_checkpointer.initialize_or_restore()
 
     return train_checkpointer, policy_checkpointer, rb_checkpointer
+
+
+def initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step):
+    train_checkpointer = common.Checkpointer(
+        ckpt_dir=train_dir,
+        agent=tf_agent,
+        global_step=global_step,
+        metrics=metric_utils.MetricsGroup([], 'nothing'))
+    train_checkpointer.initialize_or_restore()
 
 
 def make_video(env_name, tf_agent, video_filename='test'):
