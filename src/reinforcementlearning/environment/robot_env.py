@@ -164,7 +164,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._steps_taken += 1
 
         if self._steps_taken > 1000 or collision:
-            return ts.termination(np.array(observation, dtype=np.float32), reward=0)
+            return ts.termination(np.array(observation, dtype=np.float32), reward=-10)
         elif total_distance < 5:  # target reached
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:
