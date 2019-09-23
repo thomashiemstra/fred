@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import sys
 import time
 
 import imageio
@@ -30,6 +31,10 @@ logging.set_verbosity(logging.INFO)
 print("GPU Available: ", tf.test.is_gpu_available())
 
 print("eager is on: {}".format(tf.executing_eagerly()))
+
+if not tf.test.is_gpu_available():
+    print("no point in training without a gpu, go watch the grass grow instead")
+    sys.exit()
 
 env_name = 'BipedalWalker-v2'
 total_train_steps = 2000000
@@ -62,7 +67,7 @@ eval_interval = 2500
 train_checkpoint_interval = 5000
 policy_checkpoint_interval = 5000
 rb_checkpoint_interval = 50000
-log_interval = 1000
+log_interval = 5000
 summary_interval = 1000
 summaries_flush_secs = 10
 debug_summaries = False
@@ -222,6 +227,8 @@ with tf.compat.v2.summary.record_if(
                 name='global_steps_per_sec', data=steps_per_sec, step=global_step)
             timed_at_step = global_step.numpy()
             time_acc = 0
+
+            print("current step: {}".format(global_steps_taken))
             print_time_progression(time_before_training, global_steps_taken - steps_taken_in_prev_round,
                                    total_train_steps - steps_taken_in_prev_round)
 
@@ -231,8 +238,6 @@ with tf.compat.v2.summary.record_if(
 
         if global_steps_taken % eval_interval == 0:
             compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
-
-            print("current step: {}".format(global_steps_taken))
 
         save_checkpoints(global_steps_taken, train_checkpoint_interval, policy_checkpoint_interval,
                          rb_checkpoint_interval, train_checkpointer, policy_checkpointer, rb_checkpointer)
