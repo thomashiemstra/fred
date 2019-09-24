@@ -110,6 +110,7 @@ test.py
 *.json
 *.avi
 
+checkpoints/
 eval/
 train/
 
