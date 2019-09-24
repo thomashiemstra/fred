@@ -193,6 +193,8 @@ def show_progress(agent, env):
 
 
 def print_time_progression(time_before_training, global_step_taken, total_train_steps):
+    if global_step_taken == 0:
+        return
     time_elapsed_so_far = time.time() - time_before_training
     steps_taken_so_far = global_step_taken
     avrg_time_per_step = time_elapsed_so_far / steps_taken_so_far
