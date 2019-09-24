@@ -14,7 +14,7 @@ def start_simulated_robot(use_gui=False):
         physics_client = p.connect(p.GUI)
     else:
         physics_client = p.connect(p.DIRECT)
-    p.setGravity(0, 0, -10)
+    p.setGravity(0, 0, -10, physicsClientId=physics_client)
     p.loadURDF(current_dir + "/urdf/plane.urdf", physicsClientId=physics_client)
 
     if use_gui:

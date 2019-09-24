@@ -6,13 +6,11 @@ import os
 import sys
 import time
 
-import imageio
 import tensorflow as tf
 from absl import logging
 from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import suite_gym, parallel_py_environment
+from tf_agents.environments import suite_gym, parallel_py_environment, suite_pybullet
 from tf_agents.environments import tf_py_environment
-from tf_agents.eval import metric_utils
 from tf_agents.metrics import py_metrics
 from tf_agents.metrics import tf_metrics
 from tf_agents.metrics import tf_py_metric
@@ -22,8 +20,9 @@ from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
+from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
-    make_and_initialze_checkpointers, make_video, show_progress, print_time_progression
+    make_and_initialze_checkpointers, print_time_progression
 
 tf.compat.v1.enable_v2_behavior()
 logging.set_verbosity(logging.INFO)
@@ -74,9 +73,11 @@ debug_summaries = False
 summarize_grads_and_vars = False
 eval_metrics_callback = None
 
+robot_env_no_obstacles = True
+
 num_parallel_environments = 10
 
-root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/soft_actor_critic')
+root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/checkpoints/robotenv')
 train_dir = os.path.join(root_dir, 'train')
 eval_dir = os.path.join(root_dir, 'eval')
 
@@ -94,15 +95,22 @@ eval_metrics = [
 global_step = tf.compat.v1.train.get_or_create_global_step()
 with tf.compat.v2.summary.record_if(
         lambda: tf.math.equal(global_step % summary_interval, 0)):
-    # tf_env = tf_py_environment.TFPyEnvironment(suite_gym.wrap_env(BipedalWalker2(), max_episode_steps=1600))
 
+    # min_env = suite_pybullet.load("MinitaurBulletEnv-v0")
+    # min_env.reset()
+
+    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
+
+    eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
+    #
     # tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
+    # eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
 
-    tf_env = tf_py_environment.TFPyEnvironment(
-        parallel_py_environment.ParallelPyEnvironment(
-            [lambda: suite_gym.load(env_name)] * num_parallel_environments))
-
-    eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
+    # tf_env = tf_py_environment.TFPyEnvironment(
+    #     parallel_py_environment.ParallelPyEnvironment(
+    #         [lambda: RobotEnv(no_obstacles=robot_env_no_obstacles)] * num_parallel_environments))
+    #
+    # eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
 
     tf_agent = create_agent(tf_env, global_step,
                             actor_fc_layers=actor_fc_layers,
@@ -179,6 +187,7 @@ with tf.compat.v2.summary.record_if(
         'Initializing replay buffer by collecting experience for %d steps with '
         'a random policy.', initial_collect_steps)
     initial_collect_driver.run()
+    print("done filling replay buffer")
 
     compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
@@ -209,13 +218,17 @@ with tf.compat.v2.summary.record_if(
         global_steps_taken = global_step.numpy()
 
         start_time = time.time()
+        print("start collecting")
         time_step, policy_state = collect_driver.run(
             time_step=time_step,
             policy_state=policy_state,
         )
+        print("done collecting")
 
+        print("start training")
         for _ in range(train_steps_per_iteration):
             train_loss = train_step()
+        print("done training")
         time_acc += time.time() - start_time
 
         if global_steps_taken % log_interval == 0:

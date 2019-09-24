@@ -19,6 +19,7 @@ from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 
+# todo, transform to gym env, PyEnvironment get's stuck in a FUCKING loop
 class RobotEnv(py_environment.PyEnvironment):
 
     def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
@@ -59,6 +60,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._current_scenario = None
         self.scenario_id = None
         self.reverse_scenario = False
+        self._done = True
 
     @property
     def current_angles(self):
@@ -100,13 +102,13 @@ class RobotEnv(py_environment.PyEnvironment):
         target_sphere_3.build(self._physics_client)
 
         for sphere_id in [target_sphere_2.obstacle_id, target_sphere_3.obstacle_id]:
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 2, -1, 0)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 3, -1, 0)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 4, -1, 0)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 5, -1, 0)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 6, -1, 0)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 7, -1, 0)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 8, -1, 0)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 2, -1, 0, physicsClientId=self._physics_client)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 3, -1, 0, physicsClientId=self._physics_client)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 4, -1, 0, physicsClientId=self._physics_client)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 5, -1, 0, physicsClientId=self._physics_client)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 6, -1, 0, physicsClientId=self._physics_client)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 7, -1, 0, physicsClientId=self._physics_client)
+            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 8, -1, 0, physicsClientId=self._physics_client)
 
         self._target_spheres = [target_sphere_2, target_sphere_3]
 
@@ -117,6 +119,7 @@ class RobotEnv(py_environment.PyEnvironment):
         return self._observation_spec
 
     def _reset(self):
+        print("resetting")
         start_pos = [0, 0, 0]
         start_orientation = p.getQuaternionFromEuler([0, 0, 0])
         p.resetBasePositionAndOrientation(self._robot_body_id, start_pos, start_orientation,
@@ -137,7 +140,18 @@ class RobotEnv(py_environment.PyEnvironment):
         observation, self._previous_distance_to_target = self._get_observations()
         self._episode_ended = False
         self._steps_taken = 0
+        self._done = False
         return ts.restart(np.array(observation, dtype=np.float32))
+
+    @property
+    def done(self):
+        return self._done
+
+    def close(self):
+        pass
+
+    def get_info(self):
+        return None
 
     def _step(self, action):
         if not action.shape == (6,):
@@ -145,6 +159,9 @@ class RobotEnv(py_environment.PyEnvironment):
 
         if self._current_angles is None:
             raise ValueError("Please reset the environment before taking steps!")
+
+        if self._done:
+            return self.reset()
 
         converted_action = np.append([0], action)  # angles are not 0 indexed
         self._current_angles = self._current_angles + self._update_step_size * converted_action
@@ -164,10 +181,13 @@ class RobotEnv(py_environment.PyEnvironment):
         self._steps_taken += 1
 
         if self._steps_taken > 1000 or collision:
+            self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=-10)
         elif total_distance < 5:  # target reached
+            self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:
+            self._done = False
             return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
 
     def _clip_state(self):
