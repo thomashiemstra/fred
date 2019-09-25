@@ -78,7 +78,7 @@ class RobotEnv(py_environment.PyEnvironment):
             self._current_scenario = scenarios[self.scenario_id]
         else:
             if self._no_obstacles:
-                scenario_id = random.randint(0, 4)
+                scenario_id = random.randint(0, 3)
             else:
                 scenario_id = random.randint(0, len(scenarios) - 1)
             self._current_scenario = scenarios[scenario_id]
