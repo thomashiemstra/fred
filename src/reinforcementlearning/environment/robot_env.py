@@ -190,12 +190,12 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
 
     def _clip_state(self):
-        np.clip(self._current_angles[1], 0, pi)
-        np.clip(self._current_angles[2], 0, pi)
-        np.clip(self._current_angles[3], -pi / 3, 2 * pi / 3)
-        np.clip(self._current_angles[4], 0, pi)
-        np.clip(self._current_angles[5], -3 * pi / 4, 3 * pi / 4)
-        np.clip(self._current_angles[6], 0, pi)
+        self._current_angles[1] = np.clip(self._current_angles[1], 0, pi)
+        self._current_angles[2] = np.clip(self._current_angles[2], 0, pi)
+        self._current_angles[3] = np.clip(self._current_angles[3], -pi / 3, 2 * pi / 3)
+        self._current_angles[4] = np.clip(self._current_angles[4], 0, pi)
+        self._current_angles[5] = np.clip(self._current_angles[5], -3 * pi / 4, 3 * pi / 4)
+        self._current_angles[6] = np.clip(self._current_angles[6], 0, pi)
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points
