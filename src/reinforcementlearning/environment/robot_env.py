@@ -127,8 +127,15 @@ class RobotEnv(py_environment.PyEnvironment):
                             physicsClientId=self._physics_client)
 
         self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
-        if self.reverse_scenario:
-            self._target_pose, self._start_pose = self._start_pose, self._target_pose
+
+        # If a specific scenario is set (i.e. for evaluation) only reverse the scenario if that's explicitly requested
+        if self.scenario_id is not None:
+            if self.reverse_scenario:
+                self._target_pose, self._start_pose = self._start_pose, self._target_pose
+        else:
+            # If we are in training mode randomly flip the start and stop pose of the scenario
+            if random.choice([True, False]):
+                self._target_pose, self._start_pose = self._start_pose, self._target_pose
 
         self._create_visual_target_spheres(self._target_pose)
 
@@ -326,7 +333,7 @@ if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
     state = env.observation_spec()
     print(state)
-    env.scenario_id = 8
+    # env.scenario_id = 8
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")
