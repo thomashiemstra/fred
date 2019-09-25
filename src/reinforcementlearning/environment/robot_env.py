@@ -72,7 +72,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
     def _generate_obstacles_and_target_pose(self):
         if self._current_scenario is not None:
-            self._current_scenario.destroy_scenario()
+            self._current_scenario.destroy_scenario(self._physics_client)
 
         if self.scenario_id is not None:
             self._current_scenario = scenarios[self.scenario_id]
@@ -92,7 +92,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
         if self._target_spheres is not None:
             for target_sphere in self._target_spheres:
-                p.removeBody(target_sphere.obstacle_id)
+                p.removeBody(target_sphere.obstacle_id, physicsClientId=self._physics_client)
 
         _, target_point_2, target_point_3 = get_target_points(target_pose, self._robot_controller.robot_config.d6)
 
@@ -119,7 +119,6 @@ class RobotEnv(py_environment.PyEnvironment):
         return self._observation_spec
 
     def _reset(self):
-        print("resetting")
         start_pos = [0, 0, 0]
         start_orientation = p.getQuaternionFromEuler([0, 0, 0])
         p.resetBasePositionAndOrientation(self._robot_body_id, start_pos, start_orientation,
@@ -183,7 +182,7 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._steps_taken > 1000 or collision:
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=-10)
-        elif total_distance < 5:  # target reached
+        elif total_distance < 10:  # target reached
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:

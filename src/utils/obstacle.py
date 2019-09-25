@@ -50,8 +50,8 @@ class BoxObstacle(Obstacle):
         if self.color is not None:
             p.changeVisualShape(self.obstacle_id, -1, rgbaColor=self.color, physicsClientId=physics_client)
 
-    def destroy(self):
-        p.removeBody(self.obstacle_id)
+    def destroy(self, physics_client):
+        p.removeBody(self.obstacle_id, physicsClientId=self.physics_client)
 
 
 class SphereObstacle(Obstacle):
