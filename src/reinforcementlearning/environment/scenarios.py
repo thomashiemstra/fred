@@ -16,9 +16,9 @@ class Scenario:
         for obstacle in self.obstacles:
             obstacle.build(physics_client)
 
-    def destroy_scenario(self):
+    def destroy_scenario(self, physics_client):
         for obstacle in self.obstacles:
-            obstacle.destroy()
+            obstacle.destroy(physics_client)
 
 
 if __name__ == '__main__':
