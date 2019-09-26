@@ -10,7 +10,8 @@ from numpy import pi
 
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
-    get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world
+    get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
+    get_normalized_current_angles
 from src.reinforcementlearning.environment.scenarios import Scenario
 from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
 
@@ -19,7 +20,7 @@ from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 
-# todo, transform to gym env, PyEnvironment get's stuck in a FUCKING loop
+# TODO unify rep and attr forces into 1 vector?
 class RobotEnv(py_environment.PyEnvironment):
 
     def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
@@ -34,12 +35,12 @@ class RobotEnv(py_environment.PyEnvironment):
             shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         if no_obstacles:
             self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(15,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+                shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
         else:
             self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(15 + 2**(2*self._hilbert_curve_iteration),),
+                shape=(20 + 2**(2*self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.01
+        self._update_step_size = 0.005
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -188,21 +189,21 @@ class RobotEnv(py_environment.PyEnvironment):
 
         if self._steps_taken > 1000 or collision:
             self._done = True
-            return ts.termination(np.array(observation, dtype=np.float32), reward=-10)
+            return ts.termination(np.array(observation, dtype=np.float32), reward=-100)
         elif total_distance < 10:  # target reached
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:
             self._done = False
-            return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
+            return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance + np.abs(delta_distance)/2, discount=1.0)
 
     def _clip_state(self):
         self._current_angles[1] = np.clip(self._current_angles[1], 0, pi)
         self._current_angles[2] = np.clip(self._current_angles[2], 0, pi)
         self._current_angles[3] = np.clip(self._current_angles[3], -pi / 3, 2 * pi / 3)
-        self._current_angles[4] = np.clip(self._current_angles[4], 0, pi)
+        self._current_angles[4] = np.clip(self._current_angles[4], -pi, pi)
         self._current_angles[5] = np.clip(self._current_angles[5], -3 * pi / 4, 3 * pi / 4)
-        self._current_angles[6] = np.clip(self._current_angles[6], 0, pi)
+        self._current_angles[6] = np.clip(self._current_angles[6], -pi, pi)
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points
@@ -233,6 +234,8 @@ class RobotEnv(py_environment.PyEnvironment):
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[0])
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[1])
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
+
+        total_observation += get_normalized_current_angles(self._current_angles)
 
         if not self._no_obstacles:
             curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,

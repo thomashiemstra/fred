@@ -1,4 +1,5 @@
 import numpy as np
+from numpy import pi
 import pybullet as p
 
 # Ids of the control points in the urdf robot
@@ -162,3 +163,25 @@ def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces,
                                                   lineWidth=3, replaceItemUniqueId=rep_lines[i],
                                                   physicsClientId=physics_client_id)
     return new_attr_lines, new_rep_lines
+
+
+def get_clipped_state(angles):
+    res = np.zeros(len(angles), dtype=np.float64)
+    res[1] = np.clip(angles[1], 0, pi)
+    res[2] = np.clip(angles[2], 0, pi)
+    res[3] = np.clip(angles[3], -pi / 3, 2 * pi / 3)
+    res[4] = np.clip(angles[4], -pi, pi)
+    res[5] = np.clip(angles[5], -3 * pi / 4, 3 * pi / 4)
+    res[6] = np.clip(angles[6], -pi, pi)
+    return res
+
+
+def get_normalized_current_angles(angles):
+    # Rescale the angles such that we get -1 or 1 if the angle is at it's limits
+    return [
+        (2 * angles[1] - pi) / pi,
+        (2 * angles[2] - pi) / pi,
+        ((2 / pi) * angles[3]) - (1 / 3),
+        angles[4] / pi,
+        angles[5] / (3 * pi / 4)
+        ]

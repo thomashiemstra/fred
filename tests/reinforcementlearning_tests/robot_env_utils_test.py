@@ -1,11 +1,12 @@
 import unittest
 
 import numpy as np
+from numpy import pi
 import pybullet as p
 
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
-    get_repulsive_forces_world
+    get_repulsive_forces_world, get_clipped_state, get_normalized_current_angles
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle
 
@@ -158,3 +159,42 @@ class ObstacleIntegrationTests(unittest.TestCase):
 
 
         print(obstacle)
+
+
+class AnglesTest(unittest.TestCase):
+
+    def test_clipping_upper_bounds(self):
+        angles = [0, 10, 10, 10, 10, 10, 10]
+        clipped_angels = get_clipped_state(angles)
+
+        for angle in clipped_angels:
+            self.assertTrue(angle < 10, msg='angle should have been clipped to something smaller')
+
+    def test_clipping_lower_bounds(self):
+        angles = [0, -10, -10, -10, -10, -10, -10]
+        clipped_angels = get_clipped_state(angles)
+
+        for angle in clipped_angels:
+            self.assertTrue(angle > -10, msg='angle should have been clipped to something bigger')
+
+    def test_get_normalized_angles_upper_bound(self):
+        angles = [0, pi, pi,  2 * pi / 3, pi, 3 * pi / 4]
+
+        normalized_angles = get_normalized_current_angles(angles)
+
+        self.assertEqual(1, normalized_angles[0], msg="angle 1 should have been normalized to 1")
+        self.assertEqual(1, normalized_angles[1], msg="angle 2 should have been normalized to 1")
+        self.assertEqual(1, normalized_angles[2], msg="angle 3 should have been normalized to 1")
+        self.assertEqual(1, normalized_angles[3], msg="angle 4 should have been normalized to 1")
+        self.assertEqual(1, normalized_angles[4], msg="angle 5 should have been normalized to 1")
+
+    def test_get_normalized_angles_lower_bound(self):
+        angles = [0, 0, 0,  -pi / 3, -pi, -3 * pi / 4]
+
+        normalized_angles = get_normalized_current_angles(angles)
+
+        self.assertEqual(-1, normalized_angles[0], msg="angle 1 should have been normalized to -1")
+        self.assertEqual(-1, normalized_angles[1], msg="angle 2 should have been normalized to -1")
+        self.assertEqual(-1, normalized_angles[2], msg="angle 3 should have been normalized to -1")
+        self.assertEqual(-1, normalized_angles[3], msg="angle 4 should have been normalized to -1")
+        self.assertEqual(-1, normalized_angles[4], msg="angle 5 should have been normalized to -1")
