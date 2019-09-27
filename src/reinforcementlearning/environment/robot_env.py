@@ -40,7 +40,7 @@ class RobotEnv(py_environment.PyEnvironment):
             self._observation_spec = array_spec.BoundedArraySpec(
                 shape=(20 + 2**(2*self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.01
+        self._update_step_size = 0.005
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -182,8 +182,11 @@ class RobotEnv(py_environment.PyEnvironment):
         # print("collision: {}".format(collision))
 
         observation, total_distance = self._get_observations()
-        delta_distance = self._previous_distance_to_target - total_distance
+        reward = self._previous_distance_to_target - total_distance
         self._previous_distance_to_target = total_distance
+
+        for a in action:
+            reward -= 0.05 * np.clip(np.abs(a), 0, 1)
 
         self._steps_taken += 1
 
@@ -198,7 +201,8 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:
             self._done = False
-            return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
+
+            return ts.transition(np.array(observation, dtype=np.float32), reward=reward, discount=1.0)
 
     def _clip_state(self):
         self._current_angles[1] = np.clip(self._current_angles[1], 0, pi)
@@ -214,9 +218,15 @@ class RobotEnv(py_environment.PyEnvironment):
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
 
         # Control point 1 is not used for the attractive forces
+        attractive_cutoff_dis = 5
         attractive_forces, total_distance = get_attractive_force_world(
             np.array([c1.position, c2.position, c3.position]),
-            np.array([None, target_point_2, target_point_3]))
+            np.array([None, target_point_2, target_point_3]),
+            attractive_cutoff_distance=attractive_cutoff_dis)
+
+        # now the attractive foces will go from 1 down to 0 when the robot is within attractive_cutoff_dis of the target
+        attractive_forces[1] /= attractive_cutoff_dis
+        attractive_forces[2] /= attractive_cutoff_dis
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
@@ -252,7 +262,7 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._raw_obs:
             return vec.tolist()
         norm = np.linalg.norm(vec)
-        if norm == 0:
+        if norm < 1:  # Only normalize the vector if it's too big
             return vec.tolist()
         normalized_vec = vec / np.linalg.norm(vec)
         return normalized_vec.tolist()
