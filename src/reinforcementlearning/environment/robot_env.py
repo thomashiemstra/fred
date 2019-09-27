@@ -40,7 +40,7 @@ class RobotEnv(py_environment.PyEnvironment):
             self._observation_spec = array_spec.BoundedArraySpec(
                 shape=(20 + 2**(2*self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.005
+        self._update_step_size = 0.01
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -187,7 +187,10 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._steps_taken += 1
 
-        if self._steps_taken > 1000 or collision:
+        if self._steps_taken > 1000:
+            self._done = True
+            return ts.termination(np.array(observation, dtype=np.float32), reward=0)
+        elif collision:
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=-100)
         elif total_distance < 10:  # target reached
@@ -195,7 +198,7 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.termination(np.array(observation, dtype=np.float32), reward=100)
         else:
             self._done = False
-            return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance + np.abs(delta_distance)/2, discount=1.0)
+            return ts.transition(np.array(observation, dtype=np.float32), reward=delta_distance, discount=1.0)
 
     def _clip_state(self):
         self._current_angles[1] = np.clip(self._current_angles[1], 0, pi)
