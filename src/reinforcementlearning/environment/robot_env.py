@@ -185,9 +185,7 @@ class RobotEnv(py_environment.PyEnvironment):
         reward = self._previous_distance_to_target - total_distance
         self._previous_distance_to_target = total_distance
 
-        effort = 0
-        for a in action:
-            effort += self._update_step_size * 5 * np.clip(np.abs(a), 0, 1)
+        effort = np.sum(action * action) * self._update_step_size * 5
         reward -= effort
 
         self._steps_taken += 1
