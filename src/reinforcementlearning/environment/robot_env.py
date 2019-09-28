@@ -40,7 +40,7 @@ class RobotEnv(py_environment.PyEnvironment):
             self._observation_spec = array_spec.BoundedArraySpec(
                 shape=(20 + 2**(2*self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self._update_step_size = 0.005
+        self._update_step_size = 0.01
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -79,7 +79,7 @@ class RobotEnv(py_environment.PyEnvironment):
             self._current_scenario = scenarios[self.scenario_id]
         else:
             if self._no_obstacles:
-                scenario_id = random.randint(0, 3)
+                scenario_id = random.randint(0, 9)
             else:
                 scenario_id = random.randint(0, len(scenarios) - 1)
             self._current_scenario = scenarios[scenario_id]
@@ -185,11 +185,12 @@ class RobotEnv(py_environment.PyEnvironment):
         reward = self._previous_distance_to_target - total_distance
         self._previous_distance_to_target = total_distance
 
+        effort = 0
         for a in action:
-            reward -= 0.05 * np.clip(np.abs(a), 0, 1)
+            effort += self._update_step_size * 5 * np.clip(np.abs(a), 0, 1)
+        reward -= effort
 
         self._steps_taken += 1
-
         if self._steps_taken > 1000:
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=0)
@@ -313,7 +314,19 @@ scenarios = [Scenario([],
              Scenario([],
                       Pose(-35, 15, 10), Pose(25, 30, 30)),
              Scenario([],
-                      Pose(0, 20, 10), Pose(0, 30, 40)),
+                      Pose(0, 20, 15), Pose(0, 35, 40)),
+             Scenario([],
+                      Pose(-25, 35, 10), Pose(0, 35, 30)),
+             Scenario([],
+                      Pose(0, 35, 30), Pose(30, 30, 10)),
+             Scenario([],
+                      Pose(0, 35, 30), Pose(-30, 30, 10)),
+             Scenario([],
+                      Pose(20, 40, 15), Pose(-20, 30, 30)),
+             Scenario([],
+                      Pose(0, 35, 10), Pose(-25, 30, 30)),
+             Scenario([],
+                      Pose(0, 35, 10), Pose(25, 30, 30)),
              Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 25, 10), Pose(25, 25, 10)),
              Scenario([BoxObstacle([10, 10, 30], [0, 35, 0], alpha=0),
