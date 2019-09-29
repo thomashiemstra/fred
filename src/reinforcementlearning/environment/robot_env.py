@@ -19,8 +19,6 @@ from src.simulation.simulation_utils import start_simulated_robot
 
 from src.utils.obstacle import BoxObstacle, SphereObstacle
 
-
-# TODO unify rep and attr forces into 1 vector?
 class RobotEnv(py_environment.PyEnvironment):
 
     def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
@@ -422,7 +420,7 @@ if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
     state = env.observation_spec()
     print(state)
-    # env.scenario_id = 8
+    env.scenario_id = 11
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")
