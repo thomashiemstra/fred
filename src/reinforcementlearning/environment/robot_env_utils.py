@@ -9,7 +9,6 @@ sphere_3_id = 6  # tip of the gripper
 control_point_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])  # todo convert control points to class
 
 control_point_base_radius = 1
-repulsive_cutoff_distance = 2
 
 
 def get_target_points(target_pose, d6):
@@ -86,7 +85,7 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
     return workspace_forces, total_distance
 
 
-def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id):
+def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id, repulsive_cutoff_distance):
     _, _, _, _, _, _, _, normal_on_b, d, *x = p.getClosestPoints(bodyA=robot_body_id, bodyB=obstacle_id,
                                                                  linkIndexA=control_point_id,
                                                                  distance=repulsive_cutoff_distance,
@@ -94,7 +93,9 @@ def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physic
     return normal_on_b, d * 100
 
 
-def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids, physics_client_id):
+def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids,
+                               physics_client_id, repulsive_cutoff_distance=2,
+                               clip_force=None):
     nr_of_control_points = control_points.shape[0]
     workspace_forces = np.zeros((3, nr_of_control_points))
 
@@ -104,19 +105,23 @@ def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids, phys
         smallest_distance = repulsive_cutoff_distance  # anything further away should not be considered
 
         closest_obstacle_normal = None
-        closest_obstacle_distance = None
 
         for obstacle_id in obstacle_ids:
-            normal, d = get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id)
-            distance = d - control_point.radius  # todo handle zero or negative distance
+            normal, d = get_normal_and_distance(robot_body_id, obstacle_id, control_point_id,
+                                                physics_client_id, repulsive_cutoff_distance)
+            distance = d - control_point.radius
+            if distance < 0:  # Control point overlaps with the obstacle
+                distance = 0.1
+
             if distance < smallest_distance:
                 closest_obstacle_normal = normal
-                closest_obstacle_distance = d
                 smallest_distance = distance
 
         if smallest_distance < repulsive_cutoff_distance:
-            distance = closest_obstacle_distance - control_point.radius
+            distance = smallest_distance
             constant_term = control_point.weight * (1 / distance - 1 / repulsive_cutoff_distance) * (1 / (distance * distance))
+            if clip_force is not None:
+                constant_term = np.clip(constant_term, 0, clip_force)
 
             workspace_forces[i][0] += constant_term * closest_obstacle_normal[0]
             workspace_forces[i][1] += constant_term * closest_obstacle_normal[1]

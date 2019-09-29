@@ -38,7 +38,7 @@ class RobotEnv(py_environment.PyEnvironment):
                 shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
         else:
             self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(20 + 2**(2*self._hilbert_curve_iteration),),
+                shape=(20 + 2 ** (2 * self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
         self._update_step_size = 0.01
         self._simulation_steps_per_step = 1
@@ -62,6 +62,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self.scenario_id = None
         self.reverse_scenario = False
         self._done = True
+        self.scenario = None
 
     @property
     def current_angles(self):
@@ -75,7 +76,9 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._current_scenario is not None:
             self._current_scenario.destroy_scenario(self._physics_client)
 
-        if self.scenario_id is not None:
+        if self.scenario is not None:
+            self._current_scenario = self.scenario
+        elif self.scenario_id is not None:
             self._current_scenario = scenarios[self.scenario_id]
         else:
             if self._no_obstacles:
@@ -130,7 +133,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
 
         # If a specific scenario is set (i.e. for evaluation) only reverse the scenario if that's explicitly requested
-        if self.scenario_id is not None:
+        if self.scenario_id is not None or self.scenario is not None:
             if self.reverse_scenario:
                 self._target_pose, self._start_pose = self._start_pose, self._target_pose
         else:
@@ -229,13 +232,17 @@ class RobotEnv(py_environment.PyEnvironment):
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
+        repulsive_cutoff_distance = 4
         repulsive_forces = get_repulsive_forces_world(self._robot_body_id, np.array([c1, c2, c3]),
-                                                      obstacle_ids, self._physics_client)
+                                                      obstacle_ids, self._physics_client,
+                                                      repulsive_cutoff_distance=repulsive_cutoff_distance,
+                                                      clip_force=2)
 
         if self._use_gui:
             self._attr_lines, self._rep_lines = draw_debug_lines(self._physics_client, np.array([c1, c2, c3]),
                                                                  attractive_forces, repulsive_forces,
-                                                                 self._attr_lines, self._rep_lines)
+                                                                 self._attr_lines, self._rep_lines,
+                                                                 line_size=6)
 
         total_observation = []
 
@@ -288,7 +295,8 @@ class RobotEnv(py_environment.PyEnvironment):
         curve_iteration = 3
 
         grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=1)
-        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, iteration=curve_iteration)
+        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y,
+                                                    iteration=curve_iteration)
 
         import matplotlib.pyplot as plt
 
@@ -325,14 +333,18 @@ scenarios = [Scenario([],
                       Pose(0, 35, 10), Pose(-25, 30, 30)),
              Scenario([],
                       Pose(0, 35, 10), Pose(25, 30, 30)),
+
              Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 25, 10), Pose(25, 25, 10)),
-             Scenario([BoxObstacle([10, 10, 30], [0, 35, 0], alpha=0),
-                       BoxObstacle([10, 20, 20], [10, 35, 0], alpha=np.pi / 4)],
+
+             Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
+                       BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 20, 10), Pose(30, 30, 10)),
-             Scenario([BoxObstacle([10, 20, 20], [-10, 35, 0], alpha=-np.pi / 4),
-                       BoxObstacle([10, 20, 20], [10, 35, 0], alpha=np.pi / 4)],
+
+             Scenario([BoxObstacle([10, 20, 20], [-10, 38, 0], alpha=-np.pi / 4),
+                       BoxObstacle([10, 20, 20], [10, 38, 0], alpha=np.pi / 4)],
                       Pose(-25, 20, 10), Pose(25, 20, 10)),
+
              Scenario([BoxObstacle([10, 40, 25], [0, 35, 0], alpha=0)],
                       Pose(-25, 30, 10), Pose(25, 30, 10)),
              Scenario([BoxObstacle([10, 30, 20], [0, 30, 0], alpha=np.pi / 8),
@@ -352,7 +364,57 @@ scenarios = [Scenario([],
                       Pose(-35, 15, 10), Pose(25, 30, 30)),
              Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
                        BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4)],
-                      Pose(-35, 15, 10), Pose(25, 30, 30)),
+                      Pose(-35, 15, 10), Pose(25, 30, 20)),
+             Scenario([BoxObstacle([10, 40, 20], [10, 35, 0], alpha=0),
+                       BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 2)],
+                      Pose(-30, 25, 10), Pose(35, 20, 10)),
+
+             Scenario([BoxObstacle([10, 40, 20], [-10, 35, 0], alpha=0),
+                       BoxObstacle([10, 40, 20], [15, 40, 0], alpha=np.pi / 2)],
+                      Pose(-30, 25, 10), Pose(20, 25, 10)),
+
+             Scenario([BoxObstacle([10, 30, 20], [5, 30, 0], alpha=0),
+                       BoxObstacle([10, 30, 20], [25, 40, 0], alpha=np.pi / 2),
+                       BoxObstacle([10, 10, 40], [-5, 30, 0], alpha=np.pi / 2)],
+                      Pose(-30, 25, 10), Pose(30, 25, 10)),
+             Scenario([BoxObstacle([10, 30, 20], [-5, 30, 0], alpha=0),
+                       BoxObstacle([10, 30, 20], [-25, 40, 0], alpha=np.pi / 2),
+                       BoxObstacle([10, 10, 40], [5, 30, 0], alpha=np.pi / 2)],
+                      Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+             Scenario([BoxObstacle([10, 30, 20], [15, 35, 0], alpha=0),
+                       BoxObstacle([10, 30, 20], [-15, 35, 0], alpha=np.pi / 2),
+                       BoxObstacle([10, 10, 40], [5, 30, 0], alpha=np.pi / 2)],
+                      Pose(-30, 15, 10), Pose(30, 25, 10)),
+
+             Scenario([BoxObstacle([10, 40, 10], [0, 30, 0], alpha=0),
+                       BoxObstacle([10, 40, 40], [40, 25, 0], alpha=0),
+                       BoxObstacle([80, 10, 40], [0, 40, 0], alpha=0),
+                       BoxObstacle([10, 40, 40], [-40, 25, 0], alpha=0)],
+                      Pose(-25, 20, 10), Pose(25, 20, 10)),
+
+             Scenario([BoxObstacle([10, 40, 20], [0, 35, 0], alpha=np.pi / 4),
+                       BoxObstacle([10, 40, 20], [0, 35, 0], alpha=-np.pi / 4),
+                       BoxObstacle([10, 10, 40], [0, 35, 0], alpha=-np.pi / 4)
+                       ],
+                      Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+             Scenario([BoxObstacle([10, 40, 25], [-10, 35, 0], alpha=0),
+                       BoxObstacle([10, 40, 20], [15, 35, 0], alpha=-np.pi / 4),
+                       ],
+                      Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+             Scenario([BoxObstacle([10, 40, 15], [-10, 35, 0], alpha=0),
+                            BoxObstacle([10, 40, 20], [20, 35, 0], alpha=-np.pi/4),
+                            BoxObstacle([10, 40, 20], [40, 35, 0], alpha=np.pi/4)
+                            ],
+                           Pose(-20, 25, 30), Pose(30, 25, 10)),
+
+             Scenario([BoxObstacle([10, 40, 15], [10, 35, 0], alpha=0),
+                       BoxObstacle([10, 40, 20], [-35, 35, 0], alpha=-np.pi / 4),
+                       BoxObstacle([10, 40, 20], [-15, 35, 0], alpha=np.pi / 4)
+                       ],
+                      Pose(-25, 25, 10), Pose(30, 25, 30)),
 
              ]
 
