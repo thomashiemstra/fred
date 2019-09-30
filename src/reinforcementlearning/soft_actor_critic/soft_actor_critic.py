@@ -37,25 +37,25 @@ if not tf.test.is_gpu_available():
 
 env_name = 'BipedalWalker-v2'
 total_train_steps = 2000000
-actor_fc_layers = (256, 256)
+# actor_fc_layers = (256, 256)
 critic_obs_fc_layers = None
 critic_action_fc_layers = None
-critic_joint_fc_layers = (256, 256)
+# critic_joint_fc_layers = (256, 256)
 # Params for collect
 initial_collect_steps = 10000
-collect_steps_per_iteration = 100
+collect_steps_per_iteration = 150
 replay_buffer_capacity = 1000000
 # Params for target update
 target_update_tau = 0.005
 target_update_period = 1
 # Params for train
-train_steps_per_iteration = 100
+train_steps_per_iteration = 150
 batch_size = 256
 actor_learning_rate = 3e-4
 critic_learning_rate = 3e-4
 alpha_learning_rate = 3e-4
 td_errors_loss_fn = tf.compat.v1.losses.mean_squared_error
-gamma = 0.95
+gamma = 0.99
 reward_scale_factor = 1.0
 gradient_clipping = None
 use_tf_functions = True
@@ -75,7 +75,7 @@ eval_metrics_callback = None
 
 robot_env_no_obstacles = True
 
-num_parallel_environments = 10
+num_parallel_environments = 15
 
 root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/checkpoints/robotenv')
 train_dir = os.path.join(root_dir, 'train')
@@ -95,28 +95,22 @@ eval_metrics = [
 global_step = tf.compat.v1.train.get_or_create_global_step()
 with tf.compat.v2.summary.record_if(
         lambda: tf.math.equal(global_step % summary_interval, 0)):
+    suite_gym.load(env_name)
 
-    # min_env = suite_pybullet.load("MinitaurBulletEnv-v0")
-    # min_env.reset()
-
-    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
-
-    eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
-    #
-    # tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
-    # eval_tf_env = tf_py_environment.TFPyEnvironment(suite_gym.load(env_name))
-
-    # tf_env = tf_py_environment.TFPyEnvironment(
-    #     parallel_py_environment.ParallelPyEnvironment(
-    #         [lambda: RobotEnv(no_obstacles=robot_env_no_obstacles)] * num_parallel_environments))
-    #
+    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
     # eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
 
+    tf_env = tf_py_environment.TFPyEnvironment(
+        parallel_py_environment.ParallelPyEnvironment(
+            [lambda: RobotEnv(no_obstacles=robot_env_no_obstacles)] * num_parallel_environments))
+
+    eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
+
     tf_agent = create_agent(tf_env, global_step,
-                            actor_fc_layers=actor_fc_layers,
+                            # actor_fc_layers=actor_fc_layers,
                             critic_obs_fc_layers=critic_obs_fc_layers,
                             critic_action_fc_layers=critic_action_fc_layers,
-                            critic_joint_fc_layers=critic_joint_fc_layers,
+                            # critic_joint_fc_layers=critic_joint_fc_layers,
                             target_update_tau=target_update_tau,
                             target_update_period=target_update_period,
                             actor_learning_rate=actor_learning_rate,
@@ -182,12 +176,14 @@ with tf.compat.v2.summary.record_if(
         collect_driver.run = common.function(collect_driver.run)
         tf_agent.train = common.function(tf_agent.train)
 
-    # Collect initial replay data.
-    logging.info(
-        'Initializing replay buffer by collecting experience for %d steps with '
-        'a random policy.', initial_collect_steps)
-    initial_collect_driver.run()
-    print("done filling replay buffer")
+    if global_step.numpy() == 0:
+        # Collect initial replay data.
+        logging.info(
+            'Initializing replay buffer by collecting experience for %d steps with '
+            'a random policy.', initial_collect_steps)
+        initial_collect_driver.run()
+    else:
+        logging.info("skipping initial collect because we already have data")
 
     compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
@@ -218,17 +214,13 @@ with tf.compat.v2.summary.record_if(
         global_steps_taken = global_step.numpy()
 
         start_time = time.time()
-        print("start collecting")
         time_step, policy_state = collect_driver.run(
             time_step=time_step,
             policy_state=policy_state,
         )
-        print("done collecting")
 
-        print("start training")
         for _ in range(train_steps_per_iteration):
             train_loss = train_step()
-        print("done training")
         time_acc += time.time() - start_time
 
         if global_steps_taken % log_interval == 0:
