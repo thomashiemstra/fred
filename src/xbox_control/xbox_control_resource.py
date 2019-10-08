@@ -106,6 +106,14 @@ def play_from_file():
     return resp
 
 
+@xbox_api.route('/clearAll',  methods=['POST'])
+def clear_all():
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
+    xbox_robot_controller.clear_recorded_moves_and_positions()
+    resp = jsonify(success=True)
+    return resp
+
+
 @xbox_api.route('/setSpeed', methods=['POST'])
 def set_speed():
     raw_speed = get_parameter('speed')

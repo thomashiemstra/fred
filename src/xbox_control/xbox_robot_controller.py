@@ -138,10 +138,7 @@ class XboxRobotController:
             else:
                 print("not enough positions for a movement")
         elif buttons.lb:
-            # todo convert this to a website button (endpoint)
-            self.recorded_moves = []
-            self.recorded_positions = []
-            print('cleared recorded moves and positions!')
+            pass
         elif buttons.rb:
             pass
         elif buttons.pad_ud != 0:
@@ -189,6 +186,12 @@ class XboxRobotController:
             string = infile.read()
         moves = jsonpickle.decode(string)
         self.recorded_moves = moves
+
+    @synchronized_with_lock("lock")
+    def clear_recorded_moves_and_positions(self):
+        self.recorded_moves = []
+        self.recorded_positions = []
+        print('cleared recorded moves and positions!')
 
     @synchronized_with_lock("lock")
     def set_maximum_speed(self, new_maximum_speed):

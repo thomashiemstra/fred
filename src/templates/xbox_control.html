@@ -65,7 +65,12 @@
                          <input type="text" name="filename" id="toRestoreFileName">
                      </label><br>
                   <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/xbox/restoreFromFile', '#restoreForm'); document.getElementById('toRestoreFileName').value = ''" value="Submit">
-                </form>
+                  </form>
+                  <h2>Clear all recorded moves and positions:</h2>
+                 <form id="clearAll" action=#>
+                     File name:<br>
+                     <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/clearAll')">clear all</button>
+                  </form>
              </div>
              <div class="col-sm-4">
                  <h2>Set max speed:</h2>
