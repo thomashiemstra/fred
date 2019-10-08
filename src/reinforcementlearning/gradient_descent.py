@@ -1,18 +1,39 @@
 from src.kinematics.kinematics import jacobian_transpose_on_f
+from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 import numpy as np
 
+from src.reinforcementlearning.environment.scenarios import Scenario
+from src.utils.obstacle import BoxObstacle
+
 control_point_1_position = 11.2
 
+
+def reset_to_scenario_id(env, id):
+    env.scenario_id = id
+    env.reverse_scenario = False
+    env.reset()
+
+
+def reset_to_scenario(env, scenario, reverse=False):
+    env.scenario = scenario
+    env.reverse_scenario = reverse
+    env.reset()
+
+
 env = RobotEnv(use_gui=True, raw_obs=True)
-env.scenario_id = 12
-env.reverse_scenario = False
-state = env.reset()
+reset_to_scenario(env,
+                  Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
+                            BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4)],
+                           Pose(-35, 15, 10), Pose(25, 30, 20))
+                  )
+
 
 steps_taken = 0
 
 while True:
     observation = state.observation
+    print(observation[15:20])
 
     c1_attr = np.zeros(3)
     c2_attr = observation[0:3] #+ [0, 0, 0.5]
