@@ -21,10 +21,10 @@ import logging as log
 class XboxRobotController:
     start_pose = Pose(-26, 16.0, 6)
 
-    def __init__(self, dynamixel_robot_config, dynamixel_servo_controller, pose_updater):
+    def __init__(self, dynamixel_robot_config, servo_controller, pose_updater):
         self.pose_updater = pose_updater
         self.dynamixel_robot_config = dynamixel_robot_config
-        self.dynamixel_servo_controller = dynamixel_servo_controller
+        self.servo_controller = servo_controller
         self.lock = threading.RLock()
         self.done = False
         self.recorded_positions = []
@@ -36,6 +36,7 @@ class XboxRobotController:
         self.center = None
         self.move_speed = 10
         self.recorded_moves = []
+        self.gripper_state = 0
 
     @synchronized_with_lock("lock")
     def is_done(self):
@@ -63,7 +64,7 @@ class XboxRobotController:
         self.center = None
         self.find_center_mode = True
         reset_orientation(self.current_pose, self.dynamixel_robot_config,
-                          self.dynamixel_servo_controller)
+                          self.servo_controller)
 
     @synchronized_with_lock("lock")
     def clear_center(self):
@@ -78,7 +79,7 @@ class XboxRobotController:
         if self.done:
             return False
 
-        self.dynamixel_servo_controller.enable_servos()
+        self.servo_controller.enable_servos()
         self.current_pose = copy(self.start_pose)
         if self.thread is None:
             self.thread = threading.Thread(target=self.__start_internal, args=())
@@ -90,8 +91,8 @@ class XboxRobotController:
     def __start_internal(self):
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
-        from_current_angles_to_pose(self.current_pose, self.dynamixel_servo_controller, 1)
-        self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.dynamixel_servo_controller, 2)
+        from_current_angles_to_pose(self.current_pose, self.servo_controller, 1)
+        self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.servo_controller, 2)
         self.pose_updater.reset_buttons()
 
         while True:
@@ -99,7 +100,7 @@ class XboxRobotController:
                 break
             self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
                                                                                    self.find_center_mode, self.center)
-            recommended_time = self.dynamixel_servo_controller.move_to_pose(self.current_pose)
+            recommended_time = self.servo_controller.move_to_pose(self.current_pose)
 
             buttons = self.pose_updater.controller_state_manager.get_buttons()
             self.handle_buttons(buttons)
@@ -110,8 +111,8 @@ class XboxRobotController:
         self.stop_robot()
 
     def stop_robot(self):
-        from_current_angles_to_pose(self.start_pose, self.dynamixel_servo_controller, 4)
-        self.dynamixel_servo_controller.disable_servos()
+        from_current_angles_to_pose(self.start_pose, self.servo_controller, 4)
+        self.servo_controller.disable_servos()
 
     def handle_buttons(self, buttons):
         if buttons.start:
@@ -121,7 +122,7 @@ class XboxRobotController:
 
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
-                                                  self.dynamixel_servo_controller)
+                                                  self.servo_controller)
         elif buttons.a:
             self.current_pose.flip = not self.current_pose.flip
         elif buttons.y:
@@ -132,7 +133,7 @@ class XboxRobotController:
             print(self.current_pose)
         elif buttons.x:
             if self.has_enough_recorded_positions():
-                move = create_move(self.dynamixel_servo_controller, self.recorded_positions,
+                move = create_move(self.servo_controller, self.recorded_positions,
                                    self.move_speed, self.center, WorkSpaceLimits)
                 self.store_move_or_go_back(move)
             else:
@@ -153,7 +154,7 @@ class XboxRobotController:
         if move is None:
             print('move outside workspace limits, not adding this move!')
             self.recorded_positions = [self.recorded_positions[0]]
-            from_current_angles_to_pose(self.recorded_positions[0], self.dynamixel_servo_controller, 4)
+            from_current_angles_to_pose(self.recorded_positions[0], self.servo_controller, 4)
             self.current_pose = self.recorded_positions[0]
         else:
             print('created move')
@@ -198,13 +199,13 @@ class XboxRobotController:
         self.pose_updater.maximum_speed = new_maximum_speed
 
     def playback_recorded_moves(self, recorded_moves):
-        recorded_moves[0].go_to_start_of_move(self.dynamixel_servo_controller)
+        recorded_moves[0].go_to_start_of_move(self.servo_controller)
         try:
             for move in recorded_moves:
-                move.move(self.dynamixel_servo_controller)
+                move.move(self.servo_controller)
         except MovementException as e:
             log.warning(e)
-            from_current_angles_to_pose(self.start_pose, self.dynamixel_servo_controller, 4)
+            from_current_angles_to_pose(self.start_pose, self.servo_controller, 4)
             return self.start_pose
 
         return recorded_moves[-1].poses[-1]
