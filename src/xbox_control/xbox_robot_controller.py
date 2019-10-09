@@ -101,12 +101,10 @@ class XboxRobotController:
                 break
             self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
                                                                                    self.find_center_mode, self.center)
+            self.handle_buttons()
+
             recommended_time = self.servo_controller.move_to_pose(self.current_pose)
-
-            buttons = self.pose_updater.controller_state_manager.get_buttons()
-            self.handle_buttons(buttons)
             time_to_sleep = np.maximum(recommended_time, self.pose_updater.dt)
-
             sleep(time_to_sleep)
 
         self.stop_robot()
@@ -115,16 +113,17 @@ class XboxRobotController:
         from_current_angles_to_pose(self.start_pose, self.servo_controller, 4)
         self.servo_controller.disable_servos()
 
-    def handle_buttons(self, buttons):
+    def handle_buttons(self):
+        buttons = self.pose_updater.controller_state_manager.get_buttons()
         if buttons.start:
             if len(self.recorded_moves) < 1:
                 return
             self.current_pose = self.playback_recorded_moves(self.recorded_moves)
         elif buttons.lb:
-            self.gripper_state = np.clip(self.gripper_state - 5, 0, 100)
+            self.gripper_state = np.clip(self.gripper_state - 20, 0, 100)
             self.servo_controller.set_gripper(self.gripper_state)
         elif buttons.rb:
-            self.gripper_state = np.clip(self.gripper_state + 5, 0, 100)
+            self.gripper_state = np.clip(self.gripper_state + 20, 0, 100)
             self.servo_controller.set_gripper(self.gripper_state)
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
