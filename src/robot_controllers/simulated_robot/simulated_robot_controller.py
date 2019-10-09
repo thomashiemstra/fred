@@ -76,6 +76,9 @@ class SimulatedRobotController(AbstractRobotController):
         p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)
 
+    def set_gripper(self, new_gripper_state):
+        pass
+
     def set_velocity_profile(self):
         pass
 

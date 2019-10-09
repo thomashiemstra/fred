@@ -1,3 +1,5 @@
+from Arduino import Arduino
+
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
@@ -12,6 +14,14 @@ from numpy import pi
 
 # Facade for the robot as a whole, abstracting away the servo handling
 from src.utils.robot_controller_utils import get_recommended_wait_time
+
+gripper_min_pwm = 60
+gripper_max_pwm = 160
+gripper_servo_pin = 9
+
+
+def convert_gripper_state_to_pwm(state):
+    return gripper_min_pwm + ((gripper_max_pwm - gripper_min_pwm) * (state / 100))
 
 
 class DynamixelRobotController(AbstractRobotController):
@@ -42,14 +52,18 @@ class DynamixelRobotController(AbstractRobotController):
         self.status = False
         self.lock = threading.RLock()
         self._current_angles = self.get_current_angles()
+        self.board = Arduino()
+        self.gripper_state = 0  # 0 is completely open 100 is completely closed
 
     def enable_servos(self):
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
+        self.board.Servos.attach(gripper_servo_pin, min=720, max=1240)
 
     def disable_servos(self):
         self.base_servo_handler.set_torque(enable=False)
         self.wrist_servo_handler.set_torque(enable=False)
+        self.board.Servos.detach(9)
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
@@ -71,6 +85,11 @@ class DynamixelRobotController(AbstractRobotController):
         # Next physically move the servos to their target_position
         self.base_servo_handler.move_to_angles()
         self.wrist_servo_handler.move_to_angles()
+
+    def set_gripper(self, new_gripper_state):
+        pwm = convert_gripper_state_to_pwm(new_gripper_state)
+        self.board.Servos.write(gripper_servo_pin, pwm)
+        self.gripper_state = new_gripper_state
 
     def set_velocity_profile(self):
         self.base_servo_handler.set_profile_velocity_and_acceleration()

@@ -18,3 +18,7 @@ class AbstractRobotController(ABC):
     @abstractmethod
     def pose_to_angles(self, pose):
         pass
+
+    @abstractmethod
+    def set_gripper(self, new_gripper_state):
+        pass

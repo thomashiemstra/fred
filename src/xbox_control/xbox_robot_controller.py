@@ -92,6 +92,7 @@ class XboxRobotController:
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
         from_current_angles_to_pose(self.current_pose, self.servo_controller, 1)
+        self.servo_controller.set_gripper(self.gripper_state)
         self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.servo_controller, 2)
         self.pose_updater.reset_buttons()
 
@@ -119,7 +120,12 @@ class XboxRobotController:
             if len(self.recorded_moves) < 1:
                 return
             self.current_pose = self.playback_recorded_moves(self.recorded_moves)
-
+        elif buttons.lb:
+            self.gripper_state = np.clip(self.gripper_state - 5, 0, 100)
+            self.servo_controller.set_gripper(self.gripper_state)
+        elif buttons.rb:
+            self.gripper_state = np.clip(self.gripper_state + 5, 0, 100)
+            self.servo_controller.set_gripper(self.gripper_state)
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
                                                   self.servo_controller)
@@ -138,10 +144,6 @@ class XboxRobotController:
                 self.store_move_or_go_back(move)
             else:
                 print("not enough positions for a movement")
-        elif buttons.lb:
-            pass
-        elif buttons.rb:
-            pass
         elif buttons.pad_ud != 0:
             old_speed = self.pose_updater.maximum_speed
             new_speed = np.clip(old_speed + buttons.pad_ud * 5, 5, 50)

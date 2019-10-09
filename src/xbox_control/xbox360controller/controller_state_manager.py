@@ -120,11 +120,15 @@ class ControllerStateManager:
     def __right_bumper(self, value):
         if value == 1:
             self.rb = True
+        else:
+            self.rb = False
 
     @synchronized_with_lock("lock")
     def ___left_bumper(self, value):
         if value == 1:
             self.lb = True
+        else:
+            self.lb = False
 
     @synchronized_with_lock("lock")
     def __left_thumb_x(self, x_value):
@@ -166,8 +170,8 @@ class ControllerStateManager:
         self.y = False
         self.a = False
         self.b = False
-        self.rb = False
-        self.lb = False
+        # self.rb = False
+        # self.lb = False
         self.pad_lr = False
         self.pad_ud = False
 
