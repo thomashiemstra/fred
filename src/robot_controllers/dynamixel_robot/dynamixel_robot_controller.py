@@ -8,6 +8,7 @@ from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.kinematics.kinematics import inverse_kinematics
 from src.utils.decorators import synchronized_with_lock
 import threading
+from timeit import default_timer as timer
 
 import numpy as np
 from numpy import pi
@@ -68,10 +69,12 @@ class DynamixelRobotController(AbstractRobotController):
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
         recommended_time = get_recommended_wait_time(self._current_angles, angles)
-        self.move_servos(angles)
-        return recommended_time
+        time_taken = self.move_servos(angles)
+        return recommended_time, time_taken
 
+    # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
+        start = timer()
         self._current_angles = angles
         # First set the target_position variable of all servos
         self.base_servo_handler.set_angle(1, angles[1])
@@ -85,6 +88,8 @@ class DynamixelRobotController(AbstractRobotController):
         # Next physically move the servos to their target_position
         self.base_servo_handler.move_to_angles()
         self.wrist_servo_handler.move_to_angles()
+        end = timer()
+        return end - start
 
     def set_gripper(self, new_gripper_state):
         pwm = convert_gripper_state_to_pwm(new_gripper_state)

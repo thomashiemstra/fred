@@ -16,10 +16,11 @@ from src.utils.movement_exception import MovementException
 from src.utils.movement_utils import pose_to_pose, from_current_angles_to_pose
 from time import sleep
 import logging as log
+from timeit import default_timer as timer
 
 
 class XboxRobotController:
-    start_pose = Pose(-26, 16.0, 6)
+    start_pose = Pose(-26, 21.0, 6)
 
     def __init__(self, dynamixel_robot_config, servo_controller, pose_updater):
         self.pose_updater = pose_updater
@@ -93,18 +94,30 @@ class XboxRobotController:
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
         from_current_angles_to_pose(self.current_pose, self.servo_controller, 1)
         self.servo_controller.set_gripper(self.gripper_state)
-        self.current_pose = pose_to_pose(self.current_pose, Pose(0, 20, 10), self.servo_controller, 2)
+        # self.current_pose = pose_to_pose(self.current_pose, Pose(0, 25, 10), self.servo_controller, 2)
         self.pose_updater.reset_buttons()
+
+        pose_update_sleep_time = self.pose_updater.dt
+        steps_to_take_without_pose_update = 4
+        steps_taken_since_pose_update = 0
+        default_sleep_time = pose_update_sleep_time / steps_to_take_without_pose_update
 
         while True:
             if self.is_done():
                 break
-            self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
-                                                                                   self.find_center_mode, self.center)
+
+            recommended_time, time_taken = 0, 0
+            if steps_taken_since_pose_update == steps_to_take_without_pose_update - 1:
+                self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
+                                                                                       self.find_center_mode, self.center)
+                recommended_time, time_taken = self.servo_controller.move_to_pose(self.current_pose)
+                steps_taken_since_pose_update = 0
+            else:
+                steps_taken_since_pose_update += 1
+
             self.handle_buttons()
 
-            recommended_time = self.servo_controller.move_to_pose(self.current_pose)
-            time_to_sleep = np.maximum(recommended_time, self.pose_updater.dt)
+            time_to_sleep = np.maximum(np.maximum(recommended_time, default_sleep_time) - time_taken, 0)
             sleep(time_to_sleep)
 
         self.stop_robot()
@@ -120,10 +133,11 @@ class XboxRobotController:
                 return
             self.current_pose = self.playback_recorded_moves(self.recorded_moves)
         elif buttons.lb:
-            self.gripper_state = np.clip(self.gripper_state - 20, 0, 100)
+            self.gripper_state = np.clip(self.gripper_state - 10, 0, 100)
             self.servo_controller.set_gripper(self.gripper_state)
+            return
         elif buttons.rb:
-            self.gripper_state = np.clip(self.gripper_state + 20, 0, 100)
+            self.gripper_state = np.clip(self.gripper_state + 10, 0, 100)
             self.servo_controller.set_gripper(self.gripper_state)
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,

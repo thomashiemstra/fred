@@ -22,13 +22,14 @@ class XboxPoseUpdater:
         self.workspace_limits = workspace_limits
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
-        self.steps_per_second = 20
+        self.steps_per_second = 10
         self.dt = 1.0 / self.steps_per_second
         self._maximum_speed = maximum_speed  # cm/sec
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down
         self._dv = self._maximum_speed / (self.ramp_up_time * self.steps_per_second)  # v/step
         self.controller_state_manager = controller_state_manager
         self.lock = threading.RLock()
+        self.is_linux = is_linux()
 
     @property
     @synchronized_with_lock("lock")
@@ -61,7 +62,7 @@ class XboxPoseUpdater:
 
     def __update_orientation_velocities(self, find_center_mode):
         right_thumb_x, right_thumb_y = self.controller_state_manager.get_right_thumb()
-        if not is_linux():
+        if not self.is_linux:
             right_thumb_x *= -1
         right_thumb_y *= -1
 
