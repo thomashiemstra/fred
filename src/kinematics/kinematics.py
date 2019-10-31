@@ -1,7 +1,6 @@
-# from __future__ import division
 import numpy as np
-from numpy import sqrt
 from numpy import arctan2, sin, cos, pi, power
+from numpy import sqrt
 
 
 def inverse_kinematics(pose, robot_config):
