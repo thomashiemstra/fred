@@ -187,7 +187,8 @@ class RobotEnv(py_environment.PyEnvironment):
         self._previous_distance_to_target = total_distance
 
         effort = np.sum(action * action) * self._update_step_size * 5
-        reward -= effort
+        if total_distance > 20:  # if we're close enough we don't care about effort, just get there!
+            reward -= effort
 
         self._steps_taken += 1
         if self._steps_taken > 1000:
