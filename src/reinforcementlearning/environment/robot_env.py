@@ -11,7 +11,7 @@ from numpy import pi
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
-    get_normalized_current_angles
+    get_normalized_current_angles, get_clipped_state
 from src.reinforcementlearning.environment.scenarios import Scenario
 from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
 
@@ -172,8 +172,7 @@ class RobotEnv(py_environment.PyEnvironment):
             return self.reset()
 
         converted_action = np.append([0], action)  # angles are not 0 indexed
-        self._current_angles = self._current_angles + self._update_step_size * converted_action
-        self._clip_state()
+        self._current_angles = get_clipped_state(self._current_angles + self._update_step_size * converted_action)
 
         self._robot_controller.move_servos(self._current_angles)
         self._advance_simulation()
@@ -204,14 +203,6 @@ class RobotEnv(py_environment.PyEnvironment):
             self._done = False
 
             return ts.transition(np.array(observation, dtype=np.float32), reward=reward, discount=1.0)
-
-    def _clip_state(self):
-        self._current_angles[1] = np.clip(self._current_angles[1], 0, pi)
-        self._current_angles[2] = np.clip(self._current_angles[2], 0, pi)
-        self._current_angles[3] = np.clip(self._current_angles[3], -pi / 3, 2 * pi / 3)
-        self._current_angles[4] = np.clip(self._current_angles[4], -pi, pi)
-        self._current_angles[5] = np.clip(self._current_angles[5], -3 * pi / 4, 3 * pi / 4)
-        self._current_angles[6] = np.clip(self._current_angles[6], -pi, pi)
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points

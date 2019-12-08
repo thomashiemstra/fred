@@ -177,6 +177,13 @@ class AnglesTest(unittest.TestCase):
         for angle in clipped_angels:
             self.assertTrue(angle > -10, msg='angle should have been clipped to something bigger')
 
+    def test_no_clipping(self):
+        angles = [0, 0, 0, 0, 0, 0, 0]
+        clipped_angels = get_clipped_state(angles)
+
+        for angle in clipped_angels:
+            self.assertEqual(0, angle, msg='angle should have been clipped to something bigger')
+
     def test_get_normalized_angles_upper_bound(self):
         angles = [0, pi, pi,  2 * pi / 3, pi, 3 * pi / 4]
 
