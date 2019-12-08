@@ -183,15 +183,15 @@ class RobotEnv(py_environment.PyEnvironment):
         # print("collision: {}".format(collision))
 
         observation, total_distance = self._get_observations()
-        reward = self._previous_distance_to_target - total_distance
+        reward = np.sign(self._previous_distance_to_target - total_distance)
         self._previous_distance_to_target = total_distance
 
-        effort = np.sum(action * action) * self._update_step_size * 5
-        if total_distance > 20:  # if we're close enough we don't care about effort, just get there!
+        effort = np.sum(action * action) * self._update_step_size * 15
+        if reward > 0:  # Only take effort into account when getting close, moving away should not be double punished
             reward -= effort
 
         self._steps_taken += 1
-        if self._steps_taken > 1000:
+        if self._steps_taken > 500:
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=0)
         elif collision:
@@ -219,7 +219,7 @@ class RobotEnv(py_environment.PyEnvironment):
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
 
         # Control point 1 is not used for the attractive forces
-        attractive_cutoff_dis = 5
+        attractive_cutoff_dis = 10
         attractive_forces, total_distance = get_attractive_force_world(
             np.array([c1.position, c2.position, c3.position]),
             np.array([None, target_point_2, target_point_3]),
