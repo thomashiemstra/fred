@@ -227,8 +227,10 @@ class XboxRobotController:
 
 
 def create_move(servo_controller, poses, speed, center, workspace_limits):
-    if len(poses) == 2 and np.allclose([poses[0].x, poses[0].y, poses[0].z], [poses[1].x, poses[1].y, poses[1].z]):
-        return PoseToPoseMovement(poses, 0.5, center, workspace_limits)  # orientation adjustment
+    time = determine_time(poses, speed)
+
+    if len(poses) == 2:  # and np.allclose([poses[0].x, poses[0].y, poses[0].z], [poses[1].x, poses[1].y, poses[1].z]):
+        return PoseToPoseMovement(poses, time, center, workspace_limits)  # orientation adjustment
 
     time = determine_time(poses, speed)
     move = SplineMovement(poses, time, center, workspace_limits)
