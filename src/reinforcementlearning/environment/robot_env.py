@@ -34,10 +34,12 @@ class RobotEnv(py_environment.PyEnvironment):
         if no_obstacles:
             self._observation_spec = array_spec.BoundedArraySpec(
                 shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+            self.scenarios = scenarios_no_obstacles
         else:
             self._observation_spec = array_spec.BoundedArraySpec(
                 shape=(20 + 2 ** (2 * self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
+            self.scenarios = scenarios_no_obstacles + scenarios_obstacles
         self._update_step_size = 0.01
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
@@ -77,13 +79,10 @@ class RobotEnv(py_environment.PyEnvironment):
         if self.scenario is not None:
             self._current_scenario = self.scenario
         elif self.scenario_id is not None:
-            self._current_scenario = scenarios[self.scenario_id]
+            self._current_scenario = self.scenarios[self.scenario_id]
         else:
-            if self._no_obstacles:
-                scenario_id = random.randint(0, 9)
-            else:
-                scenario_id = random.randint(0, len(scenarios) - 1)
-            self._current_scenario = scenarios[scenario_id]
+            scenario_id = random.randint(0, len(self.scenarios) - 1)
+            self._current_scenario = self.scenarios[scenario_id]
 
         self._current_scenario.build_scenario(self._physics_client)
         return self._current_scenario.obstacles, self._current_scenario.target_pose, self._current_scenario.start_pose
@@ -303,7 +302,7 @@ class RobotEnv(py_environment.PyEnvironment):
         plt.show()
 
 
-scenarios = [Scenario([],
+scenarios_no_obstacles = [Scenario([],
                       Pose(-25, 35, 10), Pose(25, 35, 10)),
              Scenario([],
                       Pose(-30, 20, 10), Pose(20, 40, 20)),
@@ -325,6 +324,9 @@ scenarios = [Scenario([],
                       Pose(0, 35, 10), Pose(25, 30, 30)),
 
              Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
+                      Pose(-25, 25, 10), Pose(25, 25, 10))]
+
+scenarios_obstacles = [Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 25, 10), Pose(25, 25, 10)),
 
              Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
@@ -404,9 +406,7 @@ scenarios = [Scenario([],
                        BoxObstacle([10, 40, 20], [-35, 35, 0], alpha=-np.pi / 4),
                        BoxObstacle([10, 40, 20], [-15, 35, 0], alpha=np.pi / 4)
                        ],
-                      Pose(-25, 25, 10), Pose(30, 25, 30)),
-
-             ]
+                      Pose(-25, 25, 10), Pose(30, 25, 30))]
 
 if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
