@@ -232,13 +232,15 @@ def create_move(servo_controller, poses, speed, center, workspace_limits):
     if len(poses) == 2:  # and np.allclose([poses[0].x, poses[0].y, poses[0].z], [poses[1].x, poses[1].y, poses[1].z]):
         return PoseToPoseMovement(poses, time, center, workspace_limits)  # orientation adjustment
 
-    time = determine_time(poses, speed)
     move = SplineMovement(poses, time, center, workspace_limits)
     is_ok = move.check_workspace_limits(servo_controller, workspace_limits)
     return move if is_ok else None
 
 
 def determine_time(poses, speed):
+    if speed == 0:
+        raise ValueError("Cannot have zero speed")
+
     dr = 0
     prev_x, prev_y, prev_z = poses[0].x, poses[0].y, poses[0].z
 
@@ -249,6 +251,9 @@ def determine_time(poses, speed):
         dz = abs(z - prev_z)
         dr += np.sqrt(np.power(dx, 2) + np.power(dy, 2) + np.power(dz, 2))
         prev_x, prev_y, prev_z = x, y, z
+
+    if dr < 0.1:
+        return 0.5
 
     return dr / speed
 
