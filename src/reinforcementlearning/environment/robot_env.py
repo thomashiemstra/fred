@@ -1,23 +1,20 @@
 import random
 from time import sleep
 
+import numpy as np
+import pybullet as p
 from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
-import pybullet as p
-import numpy as np
-from numpy import pi
 
-from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
     get_normalized_current_angles, get_clipped_state
-from src.reinforcementlearning.environment.scenarios import Scenario
+from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles
 from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
-
 from src.simulation.simulation_utils import start_simulated_robot
-
 from src.utils.obstacle import BoxObstacle, SphereObstacle
+
 
 class RobotEnv(py_environment.PyEnvironment):
 
@@ -59,7 +56,6 @@ class RobotEnv(py_environment.PyEnvironment):
         self._attr_lines = None
         self._rep_lines = None
         self._current_scenario = None
-        self.scenario_id = None
         self.reverse_scenario = False
         self._done = True
         self.scenario = None
@@ -78,8 +74,6 @@ class RobotEnv(py_environment.PyEnvironment):
 
         if self.scenario is not None:
             self._current_scenario = self.scenario
-        elif self.scenario_id is not None:
-            self._current_scenario = self.scenarios[self.scenario_id]
         else:
             scenario_id = random.randint(0, len(self.scenarios) - 1)
             self._current_scenario = self.scenarios[scenario_id]
@@ -130,7 +124,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
 
         # If a specific scenario is set (i.e. for evaluation) only reverse the scenario if that's explicitly requested
-        if self.scenario_id is not None or self.scenario is not None:
+        if self.scenario is not None:
             if self.reverse_scenario:
                 self._target_pose, self._start_pose = self._start_pose, self._target_pose
         else:
@@ -302,117 +296,10 @@ class RobotEnv(py_environment.PyEnvironment):
         plt.show()
 
 
-scenarios_no_obstacles = [Scenario([],
-                      Pose(-25, 35, 10), Pose(25, 35, 10)),
-             Scenario([],
-                      Pose(-30, 20, 10), Pose(20, 40, 20)),
-             Scenario([],
-                      Pose(-35, 15, 10), Pose(25, 30, 30)),
-             Scenario([],
-                      Pose(0, 20, 15), Pose(0, 35, 40)),
-             Scenario([],
-                      Pose(-25, 35, 10), Pose(0, 35, 30)),
-             Scenario([],
-                      Pose(0, 35, 30), Pose(30, 30, 10)),
-             Scenario([],
-                      Pose(0, 35, 30), Pose(-30, 30, 10)),
-             Scenario([],
-                      Pose(20, 40, 15), Pose(-20, 30, 30)),
-             Scenario([],
-                      Pose(0, 35, 10), Pose(-25, 30, 30)),
-             Scenario([],
-                      Pose(0, 35, 10), Pose(25, 30, 30)),
-
-             Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 25, 10), Pose(25, 25, 10))]
-
-scenarios_obstacles = [Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 25, 10), Pose(25, 25, 10)),
-
-             Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
-                       BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 20, 10), Pose(30, 30, 10)),
-
-             Scenario([BoxObstacle([10, 20, 20], [-10, 38, 0], alpha=-np.pi / 4),
-                       BoxObstacle([10, 20, 20], [10, 38, 0], alpha=np.pi / 4)],
-                      Pose(-25, 20, 10), Pose(25, 20, 10)),
-
-             Scenario([BoxObstacle([10, 40, 25], [0, 35, 0], alpha=0)],
-                      Pose(-25, 30, 10), Pose(25, 30, 10)),
-             Scenario([BoxObstacle([10, 30, 20], [0, 30, 0], alpha=np.pi / 8),
-                       BoxObstacle([10, 10, 30], [10, 35, 0], alpha=0)],
-                      Pose(-25, 30, 10), Pose(25, 30, 10)),
-             Scenario([BoxObstacle([10, 30, 20], [0, 35, 0], alpha=np.pi / 2),
-                       BoxObstacle([10, 10, 35], [0, 25, 0], alpha=0)],
-                      Pose(-25, 30, 10), Pose(25, 30, 10)),
-             Scenario([BoxObstacle([20, 20, 20], [-20, 40, 0], alpha=np.pi / 2),
-                       BoxObstacle([10, 10, 35], [0, 25, 0], alpha=0)],
-                      Pose(-25, 20, 10), Pose(20, 40, 10)),
-             Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 8),
-                       BoxObstacle([10, 10, 35], [-5, 38, 0], alpha=0)],
-                      Pose(-25, 40, 10), Pose(20, 20, 10)),
-             Scenario([BoxObstacle([10, 10, 40], [5, 30, 0], alpha=0),
-                       BoxObstacle([30, 30, 20], [-5, 40, 0], alpha=0)],
-                      Pose(-35, 15, 10), Pose(25, 30, 30)),
-             Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
-                       BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4)],
-                      Pose(-35, 15, 10), Pose(25, 30, 20)),
-             Scenario([BoxObstacle([10, 40, 20], [10, 35, 0], alpha=0),
-                       BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 2)],
-                      Pose(-30, 25, 10), Pose(35, 20, 10)),
-
-             Scenario([BoxObstacle([10, 40, 20], [-10, 35, 0], alpha=0),
-                       BoxObstacle([10, 40, 20], [15, 40, 0], alpha=np.pi / 2)],
-                      Pose(-30, 25, 10), Pose(20, 25, 10)),
-
-             Scenario([BoxObstacle([10, 30, 20], [5, 30, 0], alpha=0),
-                       BoxObstacle([10, 30, 20], [25, 40, 0], alpha=np.pi / 2),
-                       BoxObstacle([10, 10, 40], [-5, 30, 0], alpha=np.pi / 2)],
-                      Pose(-30, 25, 10), Pose(30, 25, 10)),
-             Scenario([BoxObstacle([10, 30, 20], [-5, 30, 0], alpha=0),
-                       BoxObstacle([10, 30, 20], [-25, 40, 0], alpha=np.pi / 2),
-                       BoxObstacle([10, 10, 40], [5, 30, 0], alpha=np.pi / 2)],
-                      Pose(-30, 25, 10), Pose(30, 25, 10)),
-
-             Scenario([BoxObstacle([10, 30, 20], [15, 35, 0], alpha=0),
-                       BoxObstacle([10, 30, 20], [-15, 35, 0], alpha=np.pi / 2),
-                       BoxObstacle([10, 10, 40], [5, 30, 0], alpha=np.pi / 2)],
-                      Pose(-30, 15, 10), Pose(30, 25, 10)),
-
-             Scenario([BoxObstacle([10, 40, 10], [0, 30, 0], alpha=0),
-                       BoxObstacle([10, 40, 40], [40, 25, 0], alpha=0),
-                       BoxObstacle([80, 10, 40], [0, 40, 0], alpha=0),
-                       BoxObstacle([10, 40, 40], [-40, 25, 0], alpha=0)],
-                      Pose(-25, 20, 10), Pose(25, 20, 10)),
-
-             Scenario([BoxObstacle([10, 40, 20], [0, 35, 0], alpha=np.pi / 4),
-                       BoxObstacle([10, 40, 20], [0, 35, 0], alpha=-np.pi / 4),
-                       BoxObstacle([10, 10, 40], [0, 35, 0], alpha=-np.pi / 4)
-                       ],
-                      Pose(-30, 25, 10), Pose(30, 25, 10)),
-
-             Scenario([BoxObstacle([10, 40, 25], [-10, 35, 0], alpha=0),
-                       BoxObstacle([10, 40, 20], [15, 35, 0], alpha=-np.pi / 4),
-                       ],
-                      Pose(-30, 25, 10), Pose(30, 25, 10)),
-
-             Scenario([BoxObstacle([10, 40, 15], [-10, 35, 0], alpha=0),
-                            BoxObstacle([10, 40, 20], [20, 35, 0], alpha=-np.pi/4),
-                            BoxObstacle([10, 40, 20], [40, 35, 0], alpha=np.pi/4)
-                            ],
-                           Pose(-20, 25, 30), Pose(30, 25, 10)),
-
-             Scenario([BoxObstacle([10, 40, 15], [10, 35, 0], alpha=0),
-                       BoxObstacle([10, 40, 20], [-35, 35, 0], alpha=-np.pi / 4),
-                       BoxObstacle([10, 40, 20], [-15, 35, 0], alpha=np.pi / 4)
-                       ],
-                      Pose(-25, 25, 10), Pose(30, 25, 30))]
-
 if __name__ == '__main__':
     env = RobotEnv(use_gui=True)
     state = env.observation_spec()
     print(state)
-    env.scenario_id = 11
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")

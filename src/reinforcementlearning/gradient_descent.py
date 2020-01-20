@@ -3,7 +3,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 import numpy as np
 
-from src.reinforcementlearning.environment.scenarios import Scenario
+from src.reinforcementlearning.environment.scenario import Scenario
 from src.utils.obstacle import BoxObstacle
 
 control_point_1_position = 11.2
