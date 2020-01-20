@@ -17,7 +17,7 @@ class TestRobotEnv(unittest.TestCase):
         env.scenario_id = 0
         utils.validate_py_environment(env, episodes=5)
 
-    def test_initial_observasions_normalized(self):
+    def test_initial_observations_normalized(self):
         env = RobotEnv(use_gui=False)
         initial_obs = env.reset()
 
