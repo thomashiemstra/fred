@@ -88,8 +88,7 @@ def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_ste
     return dx, dy, dz, actual_stop_pose
 
 
-def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None,
-                   plot_only=False, calculate_only=False):
+def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None):
     """
     Move along a B-spline defined by the poses provided
     :param poses: array of Pose, knot points for the B-spline
@@ -97,29 +96,9 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     :param servo_controller:
     :param workspace_limits:
     :param center: [x, y, z] the end effector will always be oriented towards this center point
-    :param plot_only:
-    :param calculate_only:
     :return: final pose
     """
-    if len(poses) < 2:
-        log.warning("not enough poses")
-        return
-
-    k_val = min(len(poses) - 1, 3)
-
-    x_poses = [pose.x for pose in poses]
-    y_poses = [pose.y for pose in poses]
-    z_poses = [pose.z for pose in poses]
-
-    # noinspection PyTupleAssignmentBalance
-    tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=2)
-
-    total_steps = ceil(time * src.global_constants.steps_per_second)
-    dt = 1.0 / src.global_constants.steps_per_second
-    lin = np.linspace(0, 1, total_steps)
-    path_parameter = [get_curve_val(t) for t in lin]
-
-    x_steps, y_steps, z_steps = splev(path_parameter, tck)
+    x_steps, y_steps, z_steps, total_steps, path_parameter = get_spline_step_arrays(poses, time)
 
     start_pose = poses[0]
     stop_pose = poses[-1]
@@ -131,22 +110,14 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
     flip = stop_pose.flip
 
-    if plot_only:
-        plot_curve(x_steps, y_steps, z_steps, poses)
-        return start_pose
-
-    if workspace_limits is not None:
-        allowed = check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits)
-        if not allowed:
-            raise MovementException('curve goes outside of workspace limits!')
-
-    if calculate_only:
-        return actual_stop_pose
+    if workspace_limits is not None and not check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):
+        raise MovementException('curve goes outside of workspace limits!')
 
     alpha, beta, gamma = start_pose.alpha, start_pose.beta, start_pose.gamma
     if center is not None:
         fix_initial_orientation(alpha, beta, center, gamma, servo_controller, start_pose)
 
+    dt = 1.0 / src.global_constants.steps_per_second
     for i in range(total_steps):
         x = x_steps[i] - dx
         y = y_steps[i] - dy
@@ -159,10 +130,10 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
-        rec_Time, time_taken = servo_controller.move_to_pose(temp_pose)
+        rec_time, time_taken = servo_controller.move_to_pose(temp_pose)
 
-        print("rec time: {}, dt: {}".format(rec_Time, dt))
-        sleep_time = np.maximum(dt, rec_Time)
+        print("rec time: {}, dt: {}".format(rec_time, dt))
+        sleep_time = np.maximum(dt, rec_time)
         sleep(sleep_time)
 
     if center is not None:
@@ -171,6 +142,44 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
         actual_stop_pose.gamma = gamma
 
     return actual_stop_pose
+
+
+def b_spline_plot(poses):
+    x_steps, y_steps, z_steps, total_steps, path_parameter = get_spline_step_arrays(poses, 1)
+    plot_curve(x_steps, y_steps, z_steps, poses)
+
+
+def b_spline_curve_calculate_only(poses, time, workspace_limits):
+    x_steps, y_steps, z_steps, total_steps, path_parameter = get_spline_step_arrays(poses, time)
+    if not check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):
+        raise MovementException('curve goes outside of workspace limits!')
+
+    start_pose = poses[0]
+    stop_pose = poses[-1]
+    _, _, _, actual_stop_pose = get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_steps)
+    return actual_stop_pose
+
+
+def get_spline_step_arrays(poses, time):
+    if len(poses) < 2:
+        raise ValueError("Not enough poses, need at least 2 for a b spline movement")
+
+    k_val = min(len(poses) - 1, 3)
+
+    x_poses = [pose.x for pose in poses]
+    y_poses = [pose.y for pose in poses]
+    z_poses = [pose.z for pose in poses]
+
+    # noinspection PyTupleAssignmentBalance
+    tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=2)
+
+    total_steps = ceil(time * src.global_constants.steps_per_second)
+    lin = np.linspace(0, 1, total_steps)
+    path_parameter = [get_curve_val(t) for t in lin]
+
+    x_steps, y_steps, z_steps = splev(path_parameter, tck)
+
+    return x_steps, y_steps, z_steps, total_steps, path_parameter
 
 
 def check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):

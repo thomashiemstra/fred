@@ -7,7 +7,7 @@ from numpy import pi
 import numpy.testing as test
 
 from src.utils.movement_exception import MovementException
-from src.utils.movement_utils import b_spline_curve
+from src.utils.movement_utils import b_spline_curve, b_spline_curve_calculate_only
 
 
 class GetCentreTests(unittest.TestCase):
@@ -165,7 +165,7 @@ class BSplineCurveTests(unittest.TestCase):
         pose2 = Pose(100, 100, 100)
         poses = [pose1, pose2]
 
-        self.assertRaises(MovementException, lambda: b_spline_curve(poses, 2, None, DummyWorkspaceLimits))
+        self.assertRaises(MovementException, lambda: b_spline_curve_calculate_only(poses, 2, DummyWorkspaceLimits))
 
     # With these poses the b-spline should start and stop exactly as required
     def test_spline_perfect_fit(self):
@@ -175,7 +175,7 @@ class BSplineCurveTests(unittest.TestCase):
 
         poses = [pose1, pose2, pose3]
 
-        stop_pose = b_spline_curve(poses, 2, None, DummyWorkspaceLimits, calculate_only=True)
+        stop_pose = b_spline_curve_calculate_only(poses, 2, DummyWorkspaceLimits)
         self.assertIsNotNone(stop_pose)
         self.assertEqual(pose3, stop_pose)
 
@@ -189,7 +189,7 @@ class BSplineCurveTests(unittest.TestCase):
 
         poses = [pose1, pose2, pose3, pose4, pose5]
 
-        stop_pose = b_spline_curve(poses, 2, None, DummyWorkspaceLimits, calculate_only=True)
+        stop_pose = b_spline_curve_calculate_only(poses, 2, DummyWorkspaceLimits)
         self.assertIsNotNone(stop_pose)
         self.assertNotEqual(pose5, stop_pose)
         self.assertAlmostEqual(stop_pose.x, pose5.x, places=1)

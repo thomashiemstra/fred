@@ -4,7 +4,8 @@ import logging as log
 import numpy as np
 
 from src.utils.movement_exception import MovementException
-from src.utils.movement_utils import b_spline_curve, pose_to_pose, from_current_angles_to_pose
+from src.utils.movement_utils import b_spline_curve, pose_to_pose, from_current_angles_to_pose, \
+    b_spline_curve_calculate_only
 
 
 def convert_center_to_float(center):
@@ -67,7 +68,7 @@ class SplineMovement(Movement):
 
     def check_workspace_limits(self, servo_controller, workspace_limits):
         try:
-            b_spline_curve(self.poses, self.time, servo_controller, workspace_limits=workspace_limits, center=self.center, calculate_only=True)
+            b_spline_curve_calculate_only(self.poses, self.time, workspace_limits)
         except MovementException:
             return False
         return True
