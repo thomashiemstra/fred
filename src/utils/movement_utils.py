@@ -184,11 +184,10 @@ def get_spline_step_arrays(poses, time):
 
 def check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):
     for i in range(total_steps):
-        if x_steps[i] > workspace_limits.x_max or x_steps[i] < workspace_limits.x_min:
+        r = np.sqrt(x_steps[i]*x_steps[i] + y_steps[i]*y_steps[i] + z_steps[i]*z_steps[i])
+        if r < workspace_limits.radius_min or r > workspace_limits.radius_max:
             return False
-        if y_steps[i] > workspace_limits.y_max or y_steps[i] < workspace_limits.y_min:
-            return False
-        if z_steps[i] > workspace_limits.z_max or z_steps[i] < workspace_limits.z_min:
+        if z_steps[i] < workspace_limits.z_min:
             return False
     return True
 

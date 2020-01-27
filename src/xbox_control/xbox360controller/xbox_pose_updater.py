@@ -95,18 +95,29 @@ class XboxPoseUpdater:
         self.__update_position_velocities(find_center_mode)
         self.__update_orientation_velocities(find_center_mode)
 
-        x = old_pose.x + self.dt * self.v_x
-        y = old_pose.y + self.dt * self.v_y
-        z = old_pose.z + self.dt * self.v_z
+        dx = self.dt * self.v_x
+        dy = self.dt * self.v_y
+        dz = self.dt * self.v_z
+
+        if self.workspace_limits is None:
+            x = old_pose.x + dx
+            y = old_pose.y + dy
+            z = old_pose.z + dz
+        else:
+            new_x = old_pose.x + dx
+            new_y = old_pose.y + dy
+            new_z = old_pose.z + dz
+            new_r = np.sqrt(new_x*new_x + new_y*new_y + new_z*new_z)
+
+            if new_r > self.workspace_limits.radius_max or new_r < self.workspace_limits.radius_min:
+                x, y, z = old_pose.x, old_pose.y, old_pose.z
+            else:
+                x, y = new_x, new_y
+                z = new_z if new_z > self.workspace_limits.z_min else old_pose.z
 
         alpha, gamma = self.get_orientation(old_pose, center)
-
-        if self.workspace_limits is not None:
-            x = np.clip(x, self.workspace_limits.x_min, self.workspace_limits.x_max)
-            y = np.clip(y, self.workspace_limits.y_min, self.workspace_limits.y_max)
-            z = np.clip(z, self.workspace_limits.z_min, self.workspace_limits.z_max)
-            alpha = np.clip(alpha, -pi / 2, pi / 2)
-            gamma = np.clip(gamma, -pi / 2, pi / 2)
+        alpha = np.clip(alpha, -pi / 2, pi / 2)
+        gamma = np.clip(gamma, -pi / 2, pi / 2)
 
         return Pose(x, y, z, flip=old_pose.flip, alpha=alpha, gamma=gamma, beta=0.0)
 
