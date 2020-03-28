@@ -40,10 +40,7 @@ scenarios_no_obstacles = [Scenario([],
              Scenario([],
                       Pose(0, 35, 10), Pose(-25, 30, 30)),
              Scenario([],
-                      Pose(0, 35, 10), Pose(25, 30, 30)),
-
-             Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 25, 10), Pose(25, 25, 10))]
+                      Pose(0, 35, 10), Pose(25, 30, 30))]
 
 scenarios_obstacles = [Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
                       Pose(-25, 25, 10), Pose(25, 25, 10)),
@@ -125,7 +122,12 @@ scenarios_obstacles = [Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.
                        BoxObstacle([10, 40, 20], [-35, 35, 0], alpha=-np.pi / 4),
                        BoxObstacle([10, 40, 20], [-15, 35, 0], alpha=np.pi / 4)
                        ],
-                      Pose(-25, 25, 10), Pose(30, 25, 30))]
+                      Pose(-25, 25, 10), Pose(30, 25, 30)),
+
+             Scenario([BoxObstacle([20, 25, 40], [0, 35, 0], alpha=np.pi / 4)],
+                      Pose(-25, 25, 10), Pose(25, 25, 10))
+                       ]
+
 
 if __name__ == '__main__':
     scenarios = [Scenario([BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4),
