@@ -27,7 +27,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._grid_len_x = 40
         self._grid_len_y = 40
         self._action_spec = array_spec.BoundedArraySpec(
-            shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
+            shape=(5,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         if no_obstacles:
             self._observation_spec = array_spec.BoundedArraySpec(
                 shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
@@ -37,7 +37,7 @@ class RobotEnv(py_environment.PyEnvironment):
                 shape=(20 + 2 ** (2 * self._hilbert_curve_iteration),),
                 dtype=np.float32, minimum=-1, maximum=1, name='observation')
             self.scenarios = scenarios_no_obstacles + scenarios_obstacles
-        self._update_step_size = 0.01
+        self._update_step_size = 0.02
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -49,7 +49,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._target_pose = None
         self._steps_taken = 0
         self._current_angles = None
-        self._floor = BoxObstacle([1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 1])
+        self._floor = BoxObstacle([1000, 1000, 1], [0, 0, -1], color=[1, 1, 1, 0])
         self._floor.build(self._physics_client)
         self._obstacles = None
         self._target_spheres = None
@@ -155,8 +155,8 @@ class RobotEnv(py_environment.PyEnvironment):
         return None
 
     def _step(self, action):
-        if not action.shape == (6,):
-            raise ValueError("Action should be of shape (6,)")
+        if not action.shape == (5,):
+            raise ValueError("Action should be of shape (5,)")
 
         if self._current_angles is None:
             raise ValueError("Please reset the environment before taking steps!")
@@ -164,7 +164,7 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._done:
             return self.reset()
 
-        converted_action = np.append([0], action)  # angles are not 0 indexed
+        converted_action = np.append(np.append([0], action), [0])  # angles are not 0 indexed and we don't use the last angle
         self._current_angles = get_clipped_state(self._current_angles + self._update_step_size * converted_action)
 
         self._robot_controller.move_servos(self._current_angles)
@@ -175,26 +175,27 @@ class RobotEnv(py_environment.PyEnvironment):
         # print("collision: {}".format(collision))
 
         observation, total_distance = self._get_observations()
-        reward = np.sign(self._previous_distance_to_target - total_distance)
+        distance_covered = self._previous_distance_to_target - total_distance
+        reward = 1 if distance_covered > 0 else -0.5
         self._previous_distance_to_target = total_distance
 
-        effort = np.sum(action * action) * self._update_step_size * 15
-        if reward > 0:  # Only take effort into account when getting close, moving away should not be double punished
-            reward -= effort
+        effort = np.sum(action * action) * 0.2
+        if reward > 0 and total_distance > 20:
+            reward = np.max([reward * 0.75, reward - effort])
 
         self._steps_taken += 1
-        if self._steps_taken > 500:
+        if self._steps_taken > 200:
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=0)
         elif collision:
             self._done = True
-            return ts.termination(np.array(observation, dtype=np.float32), reward=-100)
+            return ts.termination(np.array(observation, dtype=np.float32), reward=-20)
         elif total_distance < 10:  # target reached
             self._done = True
-            return ts.termination(np.array(observation, dtype=np.float32), reward=100)
+            done_reward = 100 + ((200 - self._steps_taken) / 2)
+            return ts.termination(np.array(observation, dtype=np.float32), reward=done_reward)
         else:
             self._done = False
-
             return ts.transition(np.array(observation, dtype=np.float32), reward=reward, discount=1.0)
 
     def _get_observations(self):
