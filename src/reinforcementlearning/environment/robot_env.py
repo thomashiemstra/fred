@@ -107,6 +107,9 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._target_spheres = [target_sphere_2, target_sphere_3]
 
+    def render(self, mode='rgb_array'):
+        pass
+
     def action_spec(self):
         return self._action_spec
 
