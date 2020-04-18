@@ -181,7 +181,9 @@ def get_clipped_state(angles):
     return res
 
 
-def get_normalized_current_angles(angles):
+def get_normalized_current_angles(angles, raw_obs=False):
+    if raw_obs:
+        return angles
     # Rescale the angles such that we get -1 or 1 if the angle is at it's limits
     return [
         (2 * angles[1] - pi) / pi,
