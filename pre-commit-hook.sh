@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 echo "Running pre-commit hook"
+cd tests/ || exit 1
 nosetests
 
 # $? stores exit value of the last command
