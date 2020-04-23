@@ -7,10 +7,11 @@ from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
+from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
     get_normalized_current_angles, get_clipped_state
-from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles
+from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles, Scenario
 from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle, SphereObstacle
@@ -281,7 +282,7 @@ class RobotEnv(py_environment.PyEnvironment):
         len_y = 40
         curve_iteration = 3
 
-        grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=1)
+        grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=4)
         curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y,
                                                     iteration=curve_iteration)
 
@@ -301,9 +302,25 @@ class RobotEnv(py_environment.PyEnvironment):
 
 
 if __name__ == '__main__':
-    env = RobotEnv(use_gui=True)
+    env = RobotEnv(use_gui=True, no_obstacles=False)
     state = env.observation_spec()
     print(state)
+    env.scenario = Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
+                       BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
+                      Pose(-25, 20, 10), Pose(30, 30, 10))
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")
+
+
+# ░░░░░░░█▐▓▓░████▄▄▄█▀▄▓▓▓▌█ Epic code
+# ░░░░░▄█▌▀▄▓▓▄▄▄▄▀▀▀▄▓▓▓▓▓▌█
+# ░░░▄█▀▀▄▓█▓▓▓▓▓▓▓▓▓▓▓▓▀░▓▌█
+# ░░█▀▄▓▓▓███▓▓▓███▓▓▓▄░░▄▓▐█▌ level is so high
+# ░█▌▓▓▓▀▀▓▓▓▓███▓▓▓▓▓▓▓▄▀▓▓▐█
+# ▐█▐██▐░▄▓▓▓▓▓▀▄░▀▓▓▓▓▓▓▓▓▓▌█▌
+# █▌███▓▓▓▓▓▓▓▓▐░░▄▓▓███▓▓▓▄▀▐█ much quality
+# █▐█▓▀░░▀▓▓▓▓▓▓▓▓▓██████▓▓▓▓▐█
+# ▌▓▄▌▀░▀░▐▀█▄▓▓██████████▓▓▓▌█▌
+# ▌▓▓▓▄▄▀▀▓▓▓▀▓▓▓▓▓▓▓▓█▓█▓█▓▓▌█▌ Wow.
+# █▐▓▓▓▓▓▓▄▄▄▓▓▓▓▓▓█▓█▓█▓█▓▓▓▐█
