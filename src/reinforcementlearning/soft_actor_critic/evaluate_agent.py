@@ -1,17 +1,23 @@
+import inspect
 import os
 import random
 
 from tf_agents.environments import tf_py_environment, suite_gym
 import tensorflow as tf
+from tf_agents.trajectories import policy_step
 
 from src.reinforcementlearning.environment import scenario
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, make_video, \
     initialize_and_restore_train_checkpointer
 
+checkpoint_dir = 'reward_test_3'
 
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
-root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/checkpoints/robotenv')
+# root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/checkpoints/trained_no_obstacles')
+root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
+
 train_dir = os.path.join(root_dir, 'train')
 tf.compat.v1.enable_v2_behavior()
 
@@ -26,13 +32,21 @@ num_episodes = 100
 
 eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
 
-eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[0]
+# eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[3]
 for i in range(num_episodes):
     # eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[i % 10]
     # eval_py_env.pyenv.envs[0].reverse_scenario = random.choice([True, False])
+    reward = 0
+
     time_step = eval_py_env.reset()
     while not time_step.is_last():
         action_step = tf_agent.policy.action(time_step)
+
+        actions = tf.constant([[0, 1]], dtype=tf.int32)
+        action_steps = policy_step.PolicyStep(actions)
+
         time_step = eval_py_env.step(action_step.action)
+        reward += time_step.reward
+    print("reward for this episode = {}".format(reward))
 
 # make_video(env_name, tf_agent, video_filename='eval')

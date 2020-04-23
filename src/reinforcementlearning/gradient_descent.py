@@ -22,14 +22,21 @@ def reset_to_scenario(env, scenario, reverse=False):
 
 
 env = RobotEnv(use_gui=True, raw_obs=True)
+# reset_to_scenario(env,
+#                   Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
+#                             BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4)],
+#                            Pose(-35, 15, 10), Pose(25, 30, 20))
+#                   )
 reset_to_scenario(env,
-                  Scenario([BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
-                            BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4)],
-                           Pose(-35, 15, 10), Pose(25, 30, 20))
+                  Scenario([],
+                           Pose(35, 15, 10), Pose(0, 30, 30))
                   )
 
-
 steps_taken = 0
+
+state = env.reset()
+
+total_reward = 0
 
 while True:
     observation = state.observation
@@ -59,7 +66,9 @@ while True:
 
     action = (joint_forces / absolute_force)
 
-    state = env.step(action[1:7])
+    state = env.step(action[1:6])
+    print(state.reward)
+    total_reward = total_reward + state.reward
 
     if state.step_type == 2:
         print("goal reached!")

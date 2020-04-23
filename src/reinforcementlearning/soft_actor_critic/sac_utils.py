@@ -31,10 +31,7 @@ def normal_projection_net(action_spec,
 
 def create_agent(env,
                  global_step,
-                 actor_fc_layers=(256, 256),
-                 critic_obs_fc_layers=None,
-                 critic_action_fc_layers=None,
-                 critic_joint_fc_layers=(256, 256),
+                 actor_fc_layers=(256, ),
                  target_update_tau=0.005,
                  target_update_period=1,
                  actor_learning_rate=3e-4,
@@ -55,11 +52,25 @@ def create_agent(env,
         action_spec,
         fc_layer_params=actor_fc_layers,
         continuous_projection_net=normal_projection_net)
-    critic_net = critic_network.CriticNetwork(
-        (observation_spec, action_spec),
-        observation_fc_layer_params=critic_obs_fc_layers,
-        action_fc_layer_params=critic_action_fc_layers,
-        joint_fc_layer_params=critic_joint_fc_layers)
+    # critic_net = critic_network.CriticNetwork(
+    #     (observation_spec, action_spec),
+    #     observation_fc_layer_params=critic_obs_fc_layers,
+    #     action_fc_layer_params=critic_action_fc_layers,
+    #     joint_fc_layer_params=critic_joint_fc_layers)
+
+    preprocessing_layers = (
+        tf.keras.layers.Dense(128),
+        tf.keras.layers.Dense(64)
+    )
+
+    critic_net = value_network.ValueNetwork(
+          (observation_spec, action_spec),
+          preprocessing_layers=preprocessing_layers,
+          preprocessing_combiner=tf.keras.layers.Concatenate(axis=-1),
+          fc_layer_params=(32,),
+          kernel_initializer='glorot_uniform'
+          )
+
     agent = sac_agent.SacAgent(
         time_step_spec,
         action_spec,

@@ -10,15 +10,17 @@ import time
 import tensorflow as tf
 from absl import logging
 from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import suite_gym, parallel_py_environment
+from tf_agents.environments import parallel_py_environment, suite_gym
 from tf_agents.environments import tf_py_environment
 from tf_agents.metrics import py_metrics
 from tf_agents.metrics import tf_metrics
 from tf_agents.metrics import tf_py_metric
-from tf_agents.policies import greedy_policy
+from tf_agents.policies import greedy_policy, fixed_policy
 from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
+import numpy as np
+
 
 from absl import app
 from absl import flags
@@ -37,27 +39,14 @@ FLAGS = flags.FLAGS
 
 def train_eval(checkpoint_dir,
                total_train_steps=2000000,
-               actor_fc_layers=(256, 256),
-               critic_obs_fc_layers=None,
-               critic_action_fc_layers=None,
-               critic_joint_fc_layers=(256, 256),
                # Params for collect,
                initial_collect_steps=10000,
                collect_steps_per_iteration=150,
                replay_buffer_capacity=1000000,
                # Params for target update,
-               target_update_tau=0.005,
-               target_update_period=1,
                # Params for train,
                train_steps_per_iteration=150,
                batch_size=256,
-               actor_learning_rate=3e-4,
-               critic_learning_rate=3e-4,
-               alpha_learning_rate=3e-4,
-               td_errors_loss_fn=tf.compat.v1.losses.mean_squared_error,
-               gamma=0.99,
-               reward_scale_factor=1.0,
-               gradient_clipping=None,
                use_tf_functions=True,
                # Params for eval,
                num_eval_episodes=1,
@@ -69,12 +58,11 @@ def train_eval(checkpoint_dir,
                log_interval=5000,
                summary_interval=1000,
                summaries_flush_secs=10,
-               debug_summaries=False,
-               summarize_grads_and_vars=False,
-               eval_metrics_callback=None,
                robot_env_no_obstacles=True,
-               num_parallel_environments=15):
+               num_parallel_environments=16):
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+
+    # tf.config.experimental_run_functions_eagerly(True)
 
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train')
@@ -105,22 +93,7 @@ def train_eval(checkpoint_dir,
 
         eval_py_env = RobotEnv(no_obstacles=robot_env_no_obstacles, use_gui=False)
 
-        tf_agent = create_agent(tf_env, global_step,
-                                actor_fc_layers=actor_fc_layers,
-                                critic_obs_fc_layers=critic_obs_fc_layers,
-                                critic_action_fc_layers=critic_action_fc_layers,
-                                critic_joint_fc_layers=critic_joint_fc_layers,
-                                target_update_tau=target_update_tau,
-                                target_update_period=target_update_period,
-                                actor_learning_rate=actor_learning_rate,
-                                critic_learning_rate=critic_learning_rate,
-                                alpha_learning_rate=alpha_learning_rate,
-                                td_errors_loss_fn=td_errors_loss_fn,
-                                gamma=gamma,
-                                reward_scale_factor=reward_scale_factor,
-                                gradient_clipping=gradient_clipping,
-                                debug_summaries=debug_summaries,
-                                summarize_grads_and_vars=summarize_grads_and_vars)
+        tf_agent = create_agent(tf_env, global_step)
 
         environment_steps_metric = tf_metrics.EnvironmentSteps()
         step_metrics = [
@@ -269,9 +242,9 @@ def main(_):
 
     print("eager is on: {}".format(tf.executing_eagerly()))
 
-    if not tf.test.is_gpu_available():
-        print("no point in training without a gpu, go watch the grass grow instead")
-        sys.exit()
+    # if not tf.test.is_gpu_available():
+    #     print("no point in training without a gpu, go watch the grass grow instead")
+    #     sys.exit()
 
     train_eval(FLAGS.root_dir)
 
