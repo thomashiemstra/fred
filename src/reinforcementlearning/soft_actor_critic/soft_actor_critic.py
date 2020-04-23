@@ -23,9 +23,11 @@ from tf_agents.utils import common
 from absl import app
 from absl import flags
 
+from src.reinforcementlearning.behavioral_cloning.behavioral_cloning import fill_replay_buffer_with_gradient_descent
 from src.reinforcementlearning.environment.robot_env import RobotEnv
+from src.reinforcementlearning.soft_actor_critic.custom_policy import CustomPolicy
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
-    make_and_initialze_checkpointers, print_time_progression
+    make_and_initialze_checkpointers, print_time_progression, show_progress
 
 flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
                     'Root directory for writing logs/summaries/checkpoints.')
@@ -101,6 +103,8 @@ def train_eval(checkpoint_dir,
 
         eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
 
+        eval_py_env = RobotEnv(no_obstacles=robot_env_no_obstacles, use_gui=False)
+
         tf_agent = create_agent(tf_env, global_step,
                                 actor_fc_layers=actor_fc_layers,
                                 critic_obs_fc_layers=critic_obs_fc_layers,
@@ -174,9 +178,14 @@ def train_eval(checkpoint_dir,
             logging.info(
                 'Initializing replay buffer by collecting experience for %d steps with '
                 'a random policy.', initial_collect_steps)
-            initial_collect_driver.run()
+            # initial_collect_driver.run()
+            with tf.device('/CPU:0'):
+                fill_replay_buffer_with_gradient_descent(tf_env, initial_collect_steps, replay_buffer)
         else:
             logging.info("skipping initial collect because we already have data")
+
+        # For debugging
+        # tf.config.experimental_run_functions_eagerly(False)
 
         compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
@@ -186,11 +195,14 @@ def train_eval(checkpoint_dir,
         timed_at_step = global_step.numpy()
         time_acc = 0
 
+        # Prepare replay buffer as dataset with invalid transitions filtered.
+        def _filter_invalid_transition(trajectories, unused_arg1):
+            return ~trajectories.is_boundary()[0]
         # Dataset generates trajectories with shape [Bx2x...]
         dataset = replay_buffer.as_dataset(
-            num_parallel_calls=3,
             sample_batch_size=batch_size,
-            num_steps=2).prefetch(3)
+            num_steps=2).unbatch().filter(
+            _filter_invalid_transition).batch(batch_size).prefetch(5)
         iterator = iter(dataset)
 
         def train_step():
@@ -207,13 +219,15 @@ def train_eval(checkpoint_dir,
             global_steps_taken = global_step.numpy()
 
             start_time = time.time()
+
+            for _ in range(train_steps_per_iteration):
+                 train_loss = train_step()
+
             time_step, policy_state = collect_driver.run(
                 time_step=time_step,
                 policy_state=policy_state,
             )
 
-            for _ in range(train_steps_per_iteration):
-                train_loss = train_step()
             time_acc += time.time() - start_time
 
             if global_steps_taken % log_interval == 0:

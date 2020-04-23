@@ -6,24 +6,13 @@ import os
 import time
 
 import imageio
-from absl import logging
-
 import tensorflow as tf
-
 from tf_agents.agents.ddpg import critic_network
 from tf_agents.agents.sac import sac_agent
-from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import suite_mujoco, suite_gym
-from tf_agents.environments import tf_py_environment
+from tf_agents.environments import suite_gym
 from tf_agents.eval import metric_utils
-from tf_agents.metrics import py_metrics
-from tf_agents.metrics import tf_metrics
-from tf_agents.metrics import tf_py_metric
-from tf_agents.networks import actor_distribution_network
+from tf_agents.networks import actor_distribution_network, value_network
 from tf_agents.networks import normal_projection_network
-from tf_agents.policies import greedy_policy
-from tf_agents.policies import random_tf_policy
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 
 
@@ -53,7 +42,7 @@ def create_agent(env,
                  alpha_learning_rate=3e-4,
                  td_errors_loss_fn=tf.compat.v1.losses.mean_squared_error,
                  gamma=0.99,
-                 reward_scale_factor=1.0,
+                 reward_scale_factor=0.1,
                  gradient_clipping=None,
                  debug_summaries=False,
                  summarize_grads_and_vars=False):
@@ -86,7 +75,7 @@ def create_agent(env,
         target_update_period=target_update_period,
         td_errors_loss_fn=td_errors_loss_fn,
         gamma=gamma,
-        target_entropy=-12,
+        # target_entropy=-6,
         reward_scale_factor=reward_scale_factor,
         gradient_clipping=gradient_clipping,
         debug_summaries=debug_summaries,
