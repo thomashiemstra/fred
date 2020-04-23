@@ -6,7 +6,7 @@ import pybullet as p
 
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
-    get_repulsive_forces_world, get_clipped_state, get_normalized_current_angles
+    get_repulsive_forces_world, get_clipped_state, get_normalized_current_angles, get_de_normalized_current_angles
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle
 
@@ -185,7 +185,7 @@ class AnglesTest(unittest.TestCase):
             self.assertEqual(0, angle, msg='angle should have been clipped to something bigger')
 
     def test_get_normalized_angles_upper_bound(self):
-        angles = [0, pi, pi,  2 * pi / 3, pi, 3 * pi / 4]
+        angles = [pi, pi,  2 * pi / 3, pi, 3 * pi / 4]
 
         normalized_angles = get_normalized_current_angles(angles)
 
@@ -196,7 +196,7 @@ class AnglesTest(unittest.TestCase):
         self.assertEqual(1, normalized_angles[4], msg="angle 5 should have been normalized to 1")
 
     def test_get_normalized_angles_lower_bound(self):
-        angles = [0, 0, 0,  -pi / 3, -pi, -3 * pi / 4]
+        angles = [0, 0,  -pi / 3, -pi, -3 * pi / 4]
 
         normalized_angles = get_normalized_current_angles(angles)
 
@@ -205,3 +205,26 @@ class AnglesTest(unittest.TestCase):
         self.assertEqual(-1, normalized_angles[2], msg="angle 3 should have been normalized to -1")
         self.assertEqual(-1, normalized_angles[3], msg="angle 4 should have been normalized to -1")
         self.assertEqual(-1, normalized_angles[4], msg="angle 5 should have been normalized to -1")
+
+    def test_get_de_normalized_current_angles_5_angles(self):
+        normalized_angles = [1, 1, 1, 1, 1, 1]
+
+        angles = get_de_normalized_current_angles(normalized_angles)
+
+        self.assertAlmostEqual(pi, angles[0], places=2, msg="Got a wrong value for angle 0")
+        self.assertAlmostEqual(pi, angles[1], places=2, msg="Got a wrong value for angle 1")
+        self.assertAlmostEqual(pi/2 * (1 + 1/3), angles[2], places=2, msg="Got a wrong value for angle 2")
+        self.assertAlmostEqual(pi, angles[3], places=2, msg="Got a wrong value for angle 3")
+        self.assertAlmostEqual((3 * pi / 4), angles[4], places=2, msg="Got a wrong value for angle 4")
+
+    def test_get_de_normalized_current_angles_6_angles(self):
+        normalized_angles = [1, 1, 1, 1, 1, 1, 1]
+
+        angles = get_de_normalized_current_angles(normalized_angles)
+
+        self.assertAlmostEqual(pi, angles[0], places=2, msg="Got a wrong value for angle 0")
+        self.assertAlmostEqual(pi, angles[1], places=2, msg="Got a wrong value for angle 1")
+        self.assertAlmostEqual(pi/2 * (1 + 1/3), angles[2], places=2, msg="Got a wrong value for angle 2")
+        self.assertAlmostEqual(pi, angles[3], places=2, msg="Got a wrong value for angle 3")
+        self.assertAlmostEqual((3 * pi / 4), angles[4], places=2, msg="Got a wrong value for angle 4")
+        self.assertAlmostEqual(pi, angles[5], places=2, msg="Got a wrong value for angle 5")

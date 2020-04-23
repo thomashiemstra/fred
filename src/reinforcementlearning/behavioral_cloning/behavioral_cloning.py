@@ -5,25 +5,14 @@ from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory, policy_step
 import tensorflow as tf
 import numpy as np
-from numpy import pi
 
 from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
+from src.reinforcementlearning.environment import robot_env_utils
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent
 from src.utils.decorators import timer
 from multiprocessing import Pool
-from tensorflow.keras.utils import plot_model
-
-
-def get_de_normalized_current_angles(normalized_angles):
-    return np.array([
-        (pi / 2) * (normalized_angles[0] + 1),
-        (pi / 2) * (normalized_angles[1] + 1),
-        (pi / 2) * (normalized_angles[2] + (1 / 3)),
-        pi * normalized_angles[3],
-        (3 * pi / 4) * normalized_angles[4]
-    ])
 
 
 def get_forces(observation):
@@ -44,7 +33,7 @@ def get_forces(observation):
 def handle_observation(observation):
     forces = get_forces(observation)
 
-    current_angles = get_de_normalized_current_angles(observation[15:20])
+    current_angles = robot_env_utils.get_de_normalized_current_angles(observation[15:20])
 
     joint_forces = jacobian_transpose_on_f(forces, np.append([0], current_angles),
                                            global_constants.simulated_robot_config, 11.2)
@@ -102,11 +91,9 @@ if __name__ == '__main__':
     #     parallel_py_environment.ParallelPyEnvironment(
     #         [lambda: RobotEnv(no_obstacles=True)] * 16))
 
-    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=True, use_gui=False))
+    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=True, use_gui=True))
 
-    tf_agent, actor_net, critic_net = create_agent(tf_env, None)
-
-
+    tf_agent = create_agent(tf_env, None)
 
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         data_spec=tf_agent.collect_data_spec,
@@ -117,32 +104,3 @@ if __name__ == '__main__':
 
     print("done")
     print(replay_buffer.num_frames().numpy())
-
-    cloning_agent = ActorBCAgent(
-        tf_agent.time_step_spec,
-        tf_agent.action_spec,
-        cloning_network=actor_net,
-        optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=0.01))
-
-    dataset = replay_buffer.as_dataset(sample_batch_size=1).prefetch(3)
-    iterator = iter(dataset)
-
-
-    def train_step():
-        experience, _ = next(iterator)
-        return cloning_agent.train(experience=experience)
-
-
-    observations = [tf.constant([[1, 2], [3, 4]], dtype=tf.float32)]
-    actions = tf.constant([0, 1], dtype=tf.int32)
-    rewards = tf.constant([10, 20], dtype=tf.float32)
-    discounts = tf.constant([0.9, 0.9], dtype=tf.float32)
-
-    experience = trajectory.first(
-        observation=observations,
-        action=actions,
-        policy_info=(),
-        reward=rewards,
-        discount=discounts)
-
-    train_step()

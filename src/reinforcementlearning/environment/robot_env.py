@@ -241,7 +241,7 @@ class RobotEnv(py_environment.PyEnvironment):
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[1])
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
 
-        total_observation += get_normalized_current_angles(self._current_angles)
+        total_observation += get_normalized_current_angles(self._current_angles[1:6])
 
         if not self._no_obstacles:
             curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
