@@ -7,7 +7,7 @@ from src import global_constants
 from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
 
 
-def start_simulated_robot(use_gui=False):
+def start_simulated_robot(use_gui=False, robot_config=global_constants.simulated_robot_config):
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
     if use_gui:
@@ -25,5 +25,5 @@ def start_simulated_robot(use_gui=False):
     body_id = p.loadURDF(current_dir + "/urdf/fred_with_spheres.urdf", start_pos, start_orientation,
                          physicsClientId=physics_client)
 
-    return SimulatedRobotController(global_constants.simulated_robot_config, physics_client, body_id)
+    return SimulatedRobotController(robot_config, physics_client, body_id)
 
