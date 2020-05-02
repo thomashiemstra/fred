@@ -29,20 +29,20 @@ def normal_projection_net(action_spec,
         scale_distribution=True)
 
 
-def create_agent(env,
-                 global_step,
-                 actor_fc_layers=(256, ),
-                 target_update_tau=0.005,
-                 target_update_period=1,
-                 actor_learning_rate=3e-4,
-                 critic_learning_rate=3e-4,
-                 alpha_learning_rate=3e-4,
-                 td_errors_loss_fn=tf.compat.v1.losses.mean_squared_error,
-                 gamma=0.99,
-                 reward_scale_factor=0.1,
-                 gradient_clipping=None,
-                 debug_summaries=False,
-                 summarize_grads_and_vars=False):
+def generate_agent_and_networks(env,
+                                global_step,
+                                actor_fc_layers=(256,),
+                                target_update_tau=0.005,
+                                target_update_period=1,
+                                actor_learning_rate=3e-4,
+                                critic_learning_rate=3e-4,
+                                alpha_learning_rate=3e-4,
+                                td_errors_loss_fn=tf.compat.v1.losses.mean_squared_error,
+                                gamma=0.99,
+                                reward_scale_factor=0.1,
+                                gradient_clipping=None,
+                                debug_summaries=False,
+                                summarize_grads_and_vars=False):
     time_step_spec = env.time_step_spec()
     observation_spec = time_step_spec.observation
     action_spec = env.action_spec()
@@ -64,12 +64,12 @@ def create_agent(env,
     )
 
     critic_net = value_network.ValueNetwork(
-          (observation_spec, action_spec),
-          preprocessing_layers=preprocessing_layers,
-          preprocessing_combiner=tf.keras.layers.Concatenate(axis=-1),
-          fc_layer_params=(32,),
-          kernel_initializer='glorot_uniform'
-          )
+        (observation_spec, action_spec),
+        preprocessing_layers=preprocessing_layers,
+        preprocessing_combiner=tf.keras.layers.Concatenate(axis=-1),
+        fc_layer_params=(32,),
+        kernel_initializer='glorot_uniform'
+    )
 
     agent = sac_agent.SacAgent(
         time_step_spec,
@@ -93,6 +93,12 @@ def create_agent(env,
         summarize_grads_and_vars=summarize_grads_and_vars,
         train_step_counter=global_step)
     agent.initialize()
+    return agent, actor_net, critic_network
+
+
+def create_agent(env,
+                 global_step):
+    agent, _, _ = generate_agent_and_networks(env, global_step)
     return agent
 
 
