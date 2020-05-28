@@ -90,6 +90,9 @@ class CustomPolicy(tf_policy.Base):
         super(CustomPolicy, self).__init__(time_step_spec, action_spec, *args,
                                            **kwargs)
 
+    def _setup_specs(self):
+        super()._setup_specs()
+
     def _variables(self):
         return []
 
