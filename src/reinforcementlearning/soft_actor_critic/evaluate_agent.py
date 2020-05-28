@@ -42,6 +42,8 @@ for i in range(num_episodes):
     while not time_step.is_last():
         action_step = tf_agent.policy.action(time_step)
 
+        means, stds, network_state = tf_agent.get_actor_network().call_raw(time_step.observation, time_step.step_type, (), None)
+
         actions = tf.constant([[0, 1]], dtype=tf.int32)
         action_steps = policy_step.PolicyStep(actions)
 

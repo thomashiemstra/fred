@@ -9,15 +9,15 @@ import time
 
 import imageio
 import tensorflow as tf
-from tf_agents.agents.ddpg import critic_network
 from tf_agents.agents.sac import sac_agent
 from tf_agents.environments import suite_gym
 from tf_agents.eval import metric_utils
-from tf_agents.networks import actor_distribution_network, value_network
-from tf_agents.networks import normal_projection_network
+from tf_agents.networks import value_network
 from tf_agents.utils import common
 
-from src.kinematics.neural_network.normal_projection_network_trainable import NormalProjectionNetworkTrainable
+from src.reinforcementlearning.soft_actor_critic.custom_objects.actor_distribution_network_trainable import ActorDistributionNetworkTrainable
+from src.reinforcementlearning.soft_actor_critic.custom_objects.custom_sac_agent import CustomSacAgent
+from src.reinforcementlearning.soft_actor_critic.custom_objects.normal_projection_network_trainable import NormalProjectionNetworkTrainable
 
 
 def normal_projection_net(action_spec,
@@ -51,7 +51,7 @@ def generate_agent_and_networks(env,
     observation_spec = time_step_spec.observation
     action_spec = env.action_spec()
 
-    actor_net = actor_distribution_network.ActorDistributionNetwork(
+    actor_net = ActorDistributionNetworkTrainable(
         observation_spec,
         action_spec,
         fc_layer_params=actor_fc_layers,
@@ -75,7 +75,7 @@ def generate_agent_and_networks(env,
         kernel_initializer='glorot_uniform'
     )
 
-    agent = sac_agent.SacAgent(
+    agent = CustomSacAgent(
         time_step_spec,
         action_spec,
         actor_network=actor_net,
