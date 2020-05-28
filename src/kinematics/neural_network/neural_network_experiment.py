@@ -4,6 +4,7 @@ import os
 import tensorflow as tf
 
 checkpoint_dir = 'test1'
+tf.config.experimental_run_functions_eagerly(True)
 
 (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
 

@@ -5,6 +5,8 @@ from __future__ import print_function
 import os
 import time
 
+
+
 import imageio
 import tensorflow as tf
 from tf_agents.agents.ddpg import critic_network
@@ -15,12 +17,14 @@ from tf_agents.networks import actor_distribution_network, value_network
 from tf_agents.networks import normal_projection_network
 from tf_agents.utils import common
 
+from src.kinematics.neural_network.normal_projection_network_trainable import NormalProjectionNetworkTrainable
+
 
 def normal_projection_net(action_spec,
                           init_action_stddev=0.35,
                           init_means_output_factor=0.1):
     del init_action_stddev
-    return normal_projection_network.NormalProjectionNetwork(
+    return NormalProjectionNetworkTrainable(
         action_spec,
         mean_transform=None,
         state_dependent_std=True,
@@ -93,7 +97,7 @@ def generate_agent_and_networks(env,
         summarize_grads_and_vars=summarize_grads_and_vars,
         train_step_counter=global_step)
     agent.initialize()
-    return agent, actor_net, critic_network
+    return agent, actor_net, critic_net
 
 
 def create_agent(env,
