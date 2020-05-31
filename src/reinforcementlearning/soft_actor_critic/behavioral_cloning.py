@@ -3,6 +3,7 @@ import os
 
 from tf_agents.agents.behavioral_cloning import behavioral_cloning_agent
 from tf_agents.environments import tf_py_environment, parallel_py_environment
+from tf_agents.eval import metric_utils
 from tf_agents.policies import actor_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory, policy_step
@@ -79,8 +80,7 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
     return traj_array
 
 
-def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env, total_collect_steps=100000):
-    tf.config.experimental_run_functions_eagerly(True)
+def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env, total_collect_steps=10000):
     # tf_env = tf_py_environment.TFPyEnvironment(
     #     parallel_py_environment.ParallelPyEnvironment(
     #         [lambda: RobotEnv(no_obstacles=True)] * 16))
@@ -107,17 +107,56 @@ def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env
 
     return replay_buffer
 
+def train_agent(replay_buffer, train_steps):
+    # Prepare replay buffer as dataset with invalid transitions filtered.
+    def _filter_invalid_transition(trajectories, unused_arg1):
+        return ~trajectories.is_boundary()[0]
+    dataset = replay_buffer.as_dataset(
+        sample_batch_size=batch_size,
+        num_steps=2).unbatch().filter(
+        _filter_invalid_transition).batch(batch_size).prefetch(5)
+    iterator = iter(dataset)
+
+    def train_step():
+        experience, _ = next(iterator)
+        return tf_agent.train_behavioral_cloning(experience=experience)
+
+    train_step = common.function(train_step)
+
+    print("training")
+    for step in range(train_steps):
+        train_loss, actor_loss, critic_loss = train_step()
+        if step % 50 == 0:
+            print("train loss {}, actor_loss {}, critic_loss {}".format(train_loss, actor_loss, critic_loss))
+            train_checkpointer.save(global_step)
+
+    print("done training")
+
+
 if __name__ == '__main__':
-    checkpoint_dir = 'test/'
+    # tf.config.experimental_run_functions_eagerly(True)
+    checkpoint_dir = 'bc/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
+    total_collect_steps = 100000
+    batch_size = 256
+    train_steps = 300
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
     tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=True, use_gui=False))
     tf_agent = create_agent(tf_env, None)
 
-    fill_and_get_replay_buffer(global_step, train_dir, tf_agent.collect_data_spec, tf_env)
+    replay_buffer = fill_and_get_replay_buffer(global_step, train_dir, tf_agent.collect_data_spec, tf_env,
+                                               total_collect_steps=total_collect_steps)
 
+    train_checkpointer = common.Checkpointer(
+        ckpt_dir=train_dir,
+        agent=tf_agent,
+        global_step=global_step)
+
+    train_checkpointer.initialize_or_restore()
+
+    train_agent(replay_buffer, train_steps)
 
