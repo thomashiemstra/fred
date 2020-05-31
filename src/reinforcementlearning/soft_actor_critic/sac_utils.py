@@ -5,8 +5,6 @@ from __future__ import print_function
 import os
 import time
 
-
-
 import imageio
 import tensorflow as tf
 from tf_agents.agents.sac import sac_agent
@@ -15,9 +13,11 @@ from tf_agents.eval import metric_utils
 from tf_agents.networks import value_network
 from tf_agents.utils import common
 
-from src.reinforcementlearning.soft_actor_critic.custom_objects.actor_distribution_network_trainable import ActorDistributionNetworkTrainable
+from src.reinforcementlearning.soft_actor_critic.custom_objects.actor_distribution_network_trainable import \
+    ActorDistributionNetworkTrainable
 from src.reinforcementlearning.soft_actor_critic.custom_objects.custom_sac_agent import CustomSacAgent
-from src.reinforcementlearning.soft_actor_critic.custom_objects.normal_projection_network_trainable import NormalProjectionNetworkTrainable
+from src.reinforcementlearning.soft_actor_critic.custom_objects.normal_projection_network_trainable import \
+    NormalProjectionNetworkTrainable
 
 
 def normal_projection_net(action_spec,
@@ -33,20 +33,20 @@ def normal_projection_net(action_spec,
         scale_distribution=True)
 
 
-def generate_agent_and_networks(env,
-                                global_step,
-                                actor_fc_layers=(256,),
-                                target_update_tau=0.005,
-                                target_update_period=1,
-                                actor_learning_rate=3e-4,
-                                critic_learning_rate=3e-4,
-                                alpha_learning_rate=3e-4,
-                                td_errors_loss_fn=tf.compat.v1.losses.mean_squared_error,
-                                gamma=0.99,
-                                reward_scale_factor=0.1,
-                                gradient_clipping=None,
-                                debug_summaries=False,
-                                summarize_grads_and_vars=False):
+def create_agent(env,
+                 global_step,
+                 actor_fc_layers=(256,),
+                 target_update_tau=0.005,
+                 target_update_period=1,
+                 actor_learning_rate=3e-4,
+                 critic_learning_rate=3e-4,
+                 alpha_learning_rate=3e-4,
+                 td_errors_loss_fn=tf.compat.v1.losses.mean_squared_error,
+                 gamma=0.99,
+                 reward_scale_factor=0.1,
+                 gradient_clipping=None,
+                 debug_summaries=False,
+                 summarize_grads_and_vars=False):
     time_step_spec = env.time_step_spec()
     observation_spec = time_step_spec.observation
     action_spec = env.action_spec()
@@ -88,7 +88,7 @@ def generate_agent_and_networks(env,
             learning_rate=alpha_learning_rate),
         target_update_tau=target_update_tau,
         target_update_period=target_update_period,
-        td_errors_loss_fn=td_errors_loss_fn,
+        # td_errors_loss_fn=td_errors_loss_fn,
         gamma=gamma,
         # target_entropy=-6,
         reward_scale_factor=reward_scale_factor,
@@ -97,12 +97,6 @@ def generate_agent_and_networks(env,
         summarize_grads_and_vars=summarize_grads_and_vars,
         train_step_counter=global_step)
     agent.initialize()
-    return agent, actor_net, critic_net
-
-
-def create_agent(env,
-                 global_step):
-    agent, _, _ = generate_agent_and_networks(env, global_step)
     return agent
 
 
