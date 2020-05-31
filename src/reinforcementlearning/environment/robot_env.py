@@ -97,14 +97,13 @@ class RobotEnv(py_environment.PyEnvironment):
         target_sphere_3 = SphereObstacle(1, target_point_3.tolist(), color=[1, 1, 0, 1])
         target_sphere_3.build(self._physics_client)
 
+        num_joints_on_robot = p.getNumJoints(self._robot_body_id)
+        # Disable collisions
         for sphere_id in [target_sphere_2.obstacle_id, target_sphere_3.obstacle_id]:
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 2, -1, 0, physicsClientId=self._physics_client)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 3, -1, 0, physicsClientId=self._physics_client)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 4, -1, 0, physicsClientId=self._physics_client)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 5, -1, 0, physicsClientId=self._physics_client)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 6, -1, 0, physicsClientId=self._physics_client)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 7, -1, 0, physicsClientId=self._physics_client)
-            p.setCollisionFilterPair(self._robot_body_id, sphere_id, 8, -1, 0, physicsClientId=self._physics_client)
+            # p.setCollisionFilterGroupMask(sphere_id, -1, 0, 0)
+            for link_id_on_robot in range(-1, num_joints_on_robot):
+                p.setCollisionFilterPair(self._robot_body_id, sphere_id, link_id_on_robot, -1, 0,
+                                         physicsClientId=self._physics_client)
 
         self._target_spheres = [target_sphere_2, target_sphere_3]
 
