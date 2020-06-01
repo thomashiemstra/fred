@@ -107,14 +107,11 @@ def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env
 
     return replay_buffer
 
+
 def train_agent(replay_buffer, train_steps):
-    # Prepare replay buffer as dataset with invalid transitions filtered.
-    def _filter_invalid_transition(trajectories, unused_arg1):
-        return ~trajectories.is_boundary()[0]
     dataset = replay_buffer.as_dataset(
         sample_batch_size=batch_size,
-        num_steps=2).unbatch().filter(
-        _filter_invalid_transition).batch(batch_size).prefetch(5)
+        num_steps=2).unbatch().batch(batch_size).prefetch(5)
     iterator = iter(dataset)
 
     def train_step():
@@ -134,7 +131,7 @@ def train_agent(replay_buffer, train_steps):
 
 
 if __name__ == '__main__':
-    # tf.config.experimental_run_functions_eagerly(True)
+    tf.config.experimental_run_functions_eagerly(True)
     checkpoint_dir = 'bc/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)

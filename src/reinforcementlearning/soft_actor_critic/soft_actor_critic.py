@@ -165,14 +165,9 @@ def train_eval(checkpoint_dir,
         timed_at_step = global_step.numpy()
         time_acc = 0
 
-        # Prepare replay buffer as dataset with invalid transitions filtered.
-        def _filter_invalid_transition(trajectories, unused_arg1):
-            return ~trajectories.is_boundary()[0]
-        # Dataset generates trajectories with shape [Bx2x...]
         dataset = replay_buffer.as_dataset(
             sample_batch_size=batch_size,
-            num_steps=2).unbatch().filter(
-            _filter_invalid_transition).batch(batch_size).prefetch(5)
+            num_steps=2).unbatch().batch(batch_size).prefetch(5)
         iterator = iter(dataset)
 
         def train_step():
