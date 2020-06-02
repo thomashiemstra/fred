@@ -35,7 +35,7 @@ def normal_projection_net(action_spec,
 
 def create_agent(env,
                  global_step,
-                 actor_fc_layers=(256,),
+                 actor_fc_layers=(32, 16),
                  target_update_tau=0.005,
                  target_update_period=1,
                  actor_learning_rate=3e-4,
@@ -63,15 +63,15 @@ def create_agent(env,
     #     joint_fc_layer_params=critic_joint_fc_layers)
 
     preprocessing_layers = (
-        tf.keras.layers.Dense(128),
-        tf.keras.layers.Dense(64)
+        tf.keras.layers.Dense(32),
+        tf.keras.layers.Dense(16)
     )
 
     critic_net = value_network.ValueNetwork(
         (observation_spec, action_spec),
         preprocessing_layers=preprocessing_layers,
         preprocessing_combiner=tf.keras.layers.Concatenate(axis=-1),
-        fc_layer_params=(32,),
+        fc_layer_params=(16,),
         kernel_initializer='glorot_uniform'
     )
 
@@ -192,7 +192,6 @@ def show_progress(agent, env):
     while not time_step.is_last() and steps < 400:
         action_step = agent.policy.action(time_step)
         time_step = env.step(action_step.action)
-        env.render()
         steps += 1
 
 
