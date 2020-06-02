@@ -108,7 +108,7 @@ def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env
     return replay_buffer
 
 
-def train_agent(replay_buffer, train_steps):
+def train_agent(tf_agent, replay_buffer, train_steps):
     dataset = replay_buffer.as_dataset(
         sample_batch_size=batch_size,
         num_steps=2).unbatch().batch(batch_size).prefetch(5)
@@ -138,7 +138,7 @@ if __name__ == '__main__':
     train_dir = os.path.join(root_dir, 'train/')
     total_collect_steps = 100000
     batch_size = 256
-    train_steps = 300
+    train_steps = 500
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
@@ -155,5 +155,5 @@ if __name__ == '__main__':
 
     train_checkpointer.initialize_or_restore()
 
-    train_agent(replay_buffer, train_steps)
+    train_agent(tf_agent, replay_buffer, train_steps)
 
