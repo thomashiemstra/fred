@@ -4,8 +4,8 @@ from src.utils.decorators import synchronized_with_lock
 
 
 class CameraCapture:
-    screen_width = 1280
-    screen_height = 720
+    screen_width = 1920
+    screen_height = 1080
     marker_size = 20
 
     half__height = int(screen_height / 2)
@@ -29,7 +29,7 @@ class CameraCapture:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
 
         thread = threading.Thread(target=self.__capture_camera, args=(False, ))
-        self.running = False
+        self.running = True
         thread.start()
 
     @synchronized_with_lock("lock")
@@ -39,12 +39,12 @@ class CameraCapture:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
 
         thread = threading.Thread(target=self.__capture_camera, args=(True, ))
-        self.running = False
+        self.running = True
         thread.start()
 
     @synchronized_with_lock("lock")
     def stop_camera(self):
-        self.running = True
+        self.running = False
 
     def __capture_camera(self, record):
         out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'),
@@ -64,7 +64,7 @@ class CameraCapture:
             cv2.imshow('frame', frame)
             cv2.waitKey(1)
             with self.lock:
-                if self.running:
+                if not self.running:
                     break
 
         self.cap.release()
