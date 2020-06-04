@@ -14,7 +14,7 @@ class CameraCapture:
     marker_x_right = int(half_width + marker_size)
     marker_y_low = int(half__height - 20)
     marker_y_high = int(half__height + 20)
-    fps = 20
+    fps = 60
 
     def __init__(self, camera):
         self.camera = camera
