@@ -38,7 +38,7 @@ while cap.isOpened():
                                              cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
                                              + cv2.CALIB_CB_NORMALIZE_IMAGE)
 
-    key_pressed = cv2.waitKey(0)
+    key_pressed = cv2.waitKey(1)
     if key_pressed % 256 == 27:
         print("Escape hit, closing...")
         break
@@ -61,22 +61,22 @@ while cap.isOpened():
 cap.release()
 cv2.destroyAllWindows()
 
-
 """
 Performing camera calibration by 
 passing the value of known 3D points (objpoints)
 and corresponding pixel coordinates of the 
 detected corners (imgpoints)
 """
-ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
+if last_frame is not None:
+    retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
 
-print("Camera matrix : \n")
-print(mtx)
-print("dist : \n")
-print(dist)
-print("rvecs : \n")
-print(rvecs)
-print("tvecs : \n")
-print(tvecs)
+    # print("Camera matrix : \n")
+    # print(mtx)
+    # print("dist : \n")
+    # print(dist)
+    # print("rvecs : \n")
+    # print(rvecs)
+    # print("tvecs : \n")
+    # print(tvecs)
 
-# https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/
+    # https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/
