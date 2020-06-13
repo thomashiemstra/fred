@@ -43,9 +43,13 @@ while cap.isOpened():
         print("Escape hit, closing...")
         break
     elif key_pressed % 256 == 32:  # SPACE pressed
-        img_name = "captures/opencv_frame_{}.png".format(img_counter)
-        cv2.imwrite(img_name, frame)
-        img_counter += 1
+        if ret:
+            img_name = "captures/opencv_frame_{}.png".format(img_counter)
+            print("Saving image as: {}".format(img_name))
+            cv2.imwrite(img_name, frame)
+            img_counter += 1
+        else:
+            print("Not saving image, no chessboard found!")
 
         if ret:
             objpoints.append(objp)

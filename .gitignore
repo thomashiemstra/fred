@@ -114,4 +114,6 @@ checkpoints/
 eval/
 train/
 
+# capture results
 *.mp4
+*.png
