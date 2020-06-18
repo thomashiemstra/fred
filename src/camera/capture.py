@@ -71,3 +71,8 @@ class CameraCapture:
         self.cap.release()
         out.release()
         cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    capture = CameraCapture(0)
+    capture.start_camera()
