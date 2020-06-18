@@ -24,7 +24,16 @@ class CameraCapture:
 
     @synchronized_with_lock("lock")
     def start_camera(self):
+        if self.running:
+            print("camera already running")
+            return
+
         self.cap = cv2.VideoCapture(self.camera)
+
+        if not self.cap.isOpened():
+            print("no camera connected!")
+            return
+
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -35,9 +44,18 @@ class CameraCapture:
 
     @synchronized_with_lock("lock")
     def start_camera_recording(self):
+        if self.running:
+            print("camera already running")
+            return
+
         self.cap = cv2.VideoCapture(self.camera)
+        if not self.cap.isOpened():
+            print("no camera connected!")
+            return
+
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
         thread = threading.Thread(target=self.__capture_camera, args=(True, ))
         self.running = True
