@@ -1,5 +1,8 @@
+import sys
+
 import cv2
 import numpy as np
+import json
 
 cap = cv2.VideoCapture(0, cv2.CAP_MSMF)
 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -48,13 +51,13 @@ while cap.isOpened():
             print("Saving image as: {}".format(img_name))
             cv2.imwrite(img_name, frame)
             img_counter += 1
-        else:
-            print("Not saving image, no chessboard found!")
 
-        if ret:
             objpoints.append(objp)
             corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
             imgpoints.append(corners2)
+        else:
+            print("Not saving image, no chessboard found!")
+
 
     if ret:
         corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
@@ -65,22 +68,36 @@ while cap.isOpened():
 cap.release()
 cv2.destroyAllWindows()
 
+
+if last_frame is not None:
+    print("no last frame, camera not connected? exiting.")
+    sys.exit()
+
+if img_counter < 10:
+    print("not enough images, need at least 10, but got {} instead. exiting.".format(img_counter))
+    sys.exit()
+
 """
 Performing camera calibration by 
 passing the value of known 3D points (objpoints)
 and corresponding pixel coordinates of the 
 detected corners (imgpoints)
 """
-if last_frame is not None:
-    retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
 
-    # print("Camera matrix : \n")
-    # print(mtx)
-    # print("dist : \n")
-    # print(dist)
-    # print("rvecs : \n")
-    # print(rvecs)
-    # print("tvecs : \n")
-    # print(tvecs)
+retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
 
-    # https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/
+print("Camera matrix : \n")
+print(cameraMatrix)
+print("dist : \n")
+print(distCoeffs)
+print("rvecs : \n")
+print(rvecs)
+print("tvecs : \n")
+print(tvecs)
+
+calibration_data = {'cameraMatrix': cameraMatrix, 'distCoeffs': distCoeffs}
+
+with open('calibration/calibration_data.txt', 'w'):
+    json.dump(calibration_data)
+
+# https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/
