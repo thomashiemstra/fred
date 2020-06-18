@@ -1,20 +1,10 @@
+import glob
 import sys
 
 import cv2
 import numpy as np
 import json
 
-cap = cv2.VideoCapture(0, cv2.CAP_MSMF)
-if not cap.isOpened():
-    print("Camera not connected, exiting!")
-    sys.exit()
-
-cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-cap.set(cv2.CAP_PROP_FPS, 30)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-fps = int(cap.get(cv2.CAP_PROP_FPS))
-print("fps:", fps)
 
 CHECKERBOARD = (6, 9)
 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -31,13 +21,11 @@ imgpoints = []
 img_counter = 0
 last_frame = None
 
-while cap.isOpened():
+images = glob.glob('captures/*.png')
 
-    ret, frame = cap.read()
-    frame = cv2.imread()
-    if not ret:
-        print("failed to grab frame")
-        break
+print("reading images")
+for fname in images:
+    frame = cv2.imread(fname)
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
@@ -46,33 +34,18 @@ while cap.isOpened():
                                              cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
                                              + cv2.CALIB_CB_NORMALIZE_IMAGE)
 
-    key_pressed = cv2.waitKey(1)
-    if key_pressed % 256 == 27:
-        print("Escape hit, closing...")
-        break
-    elif key_pressed % 256 == 32:  # SPACE pressed
-        if ret:
-            img_name = "captures/opencv_frame_{}.png".format(img_counter)
-            print("Saving image as: {}".format(img_name))
-            cv2.imwrite(img_name, frame)
-            img_counter += 1
-
-            objpoints.append(objp)
-            corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-            imgpoints.append(corners2)
-        else:
-            print("Not saving image, no chessboard found!")
-
 
     if ret:
+
+        img_counter += 1
+
+        objpoints.append(objp)
+        corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+        imgpoints.append(corners2)
         corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
         cv2.drawChessboardCorners(frame, CHECKERBOARD, corners2, ret)
-
-    cv2.imshow("test", frame)
-
-cap.release()
-cv2.destroyAllWindows()
-
+    else:
+        print("no chessboard found!")
 
 if last_frame is None:
     print("no last frame, camera not connected? exiting.")
@@ -89,20 +62,17 @@ and corresponding pixel coordinates of the
 detected corners (imgpoints)
 """
 
+print("calculating calibration parameters for {} images".format(img_counter))
 retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
 
 print("Camera matrix : \n")
 print(cameraMatrix)
 print("dist : \n")
 print(distCoeffs)
-print("rvecs : \n")
-print(rvecs)
-print("tvecs : \n")
-print(tvecs)
 
-calibration_data = {'cameraMatrix': cameraMatrix, 'distCoeffs': distCoeffs}
+calibration_data = {'cameraMatrix': cameraMatrix.tolist(), 'distCoeffs': distCoeffs.tolist()}
 
-with open('calibration/calibration_data.txt', 'w'):
-    json.dump(calibration_data)
+with open('calibration/calibration_data.json', 'w') as write_file:
+    json.dump(calibration_data, write_file, indent=4)
 
 # https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/
