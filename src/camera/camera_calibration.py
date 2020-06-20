@@ -34,7 +34,7 @@ last_frame = None
 while cap.isOpened():
 
     ret, frame = cap.read()
-    frame = cv2.imread()
+
     if not ret:
         print("failed to grab frame")
         break
