@@ -2,6 +2,8 @@ import cv2
 import threading
 from src.utils.decorators import synchronized_with_lock
 
+aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
+
 
 class CameraCapture:
     screen_width = 1920
