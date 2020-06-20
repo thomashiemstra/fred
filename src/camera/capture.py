@@ -2,6 +2,7 @@ import cv2
 import threading
 from src.utils.decorators import synchronized_with_lock
 
+charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
 aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
 
 
