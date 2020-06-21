@@ -19,65 +19,67 @@ class CameraCapture:
     marker_y_high = int(half__height + 20)
     fps = 60
 
-    def __init__(self, camera):
-        self.camera = camera
-        self.cap = None
-        self.running = False
+    def __init__(self, camera, image_handlers):
+        self._camera = camera
+        self._cap = None
+        self._running = False
         self.lock = threading.RLock()
+        self._image_handlers = image_handlers
 
     @synchronized_with_lock("lock")
     def start_camera(self):
-        if self.running:
+        if self._running:
             print("camera already running")
             return
 
-        self.cap = cv2.VideoCapture(self.camera)
+        self._cap = cv2.VideoCapture(self._camera)
 
-        if not self.cap.isOpened():
+        if not self._cap.isOpened():
             print("no camera connected!")
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
+        self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
-        thread = threading.Thread(target=self.__capture_camera, args=(False, ))
-        self.running = True
+        thread = threading.Thread(target=self.__capture_camera)
+        self._running = True
         thread.start()
 
     @synchronized_with_lock("lock")
     def start_camera_recording(self):
-        if self.running:
+        if self._running:
             print("camera already running")
             return
 
-        self.cap = cv2.VideoCapture(self.camera)
-        if not self.cap.isOpened():
+        self._cap = cv2.VideoCapture(self._camera)
+        if not self._cap.isOpened():
             print("no camera connected!")
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
+        self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
-        thread = threading.Thread(target=self.__capture_camera, args=(True, ))
-        self.running = True
+        thread = threading.Thread(target=self.__capture_camera)
+        self._running = True
         thread.start()
 
     @synchronized_with_lock("lock")
     def stop_camera(self):
-        self.running = False
+        self._running = False
 
-    def __capture_camera(self, record):
-        out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'),
-                              self.fps, (self.screen_width, self.screen_height))
-
+    def __capture_camera(self):
         while True:
             # Capture frame-by-frame
-            ret, frame = self.cap.read()
+            ret, frame = self._cap.read()
+            if not ret:
+                continue
 
-            if record:
-                out.write(frame)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            for image_handler in self._image_handlers:
+                image_handler.handle_frame(frame, gray)
 
             cv2.line(frame, (self.marker_x_left, self.half__height), (self.marker_x_right, self.half__height), (0, 255, 0))
             cv2.line(frame, (self.half_width, self.marker_y_low), (self.half_width, self.marker_y_high), (0, 255, 0))
@@ -86,11 +88,13 @@ class CameraCapture:
             cv2.imshow('frame', frame)
             cv2.waitKey(1)
             with self.lock:
-                if not self.running:
+                if not self._running:
                     break
 
-        self.cap.release()
-        out.release()
+        for image_handler in self._image_handlers:
+            image_handler.deactivate_handler()
+
+        self._cap.release()
         cv2.destroyAllWindows()
 
 
