@@ -32,7 +32,7 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
 squares_x = 5
 squares_y = 3
-square_length = 3.15
+square_length = 3.18
 marker_length = 2.55
 
 board = aruco.CharucoBoard_create(squares_x, squares_y, square_length, marker_length, charuco_board_dictionary)
@@ -57,6 +57,8 @@ def detect_and_draw_board(gray_image, captured_frame, detection_parameters):
                        50)  # axis length 100 can be changed according to your requirement
         return retval, rvec, tvec
 
+    return False, None, None
+
 
 def detect_and_draw_markers(gray_image, captured_frame, detection_parameters):
     corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, aruco_dictionary, parameters=detection_parameters)
@@ -66,7 +68,18 @@ def detect_and_draw_markers(gray_image, captured_frame, detection_parameters):
     rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, aruco_marker_length, cameraMatrix, distCoeffs)
     aruco.drawDetectedMarkers(captured_frame, corners, ids)
 
-    return rvecs, tvecs
+    return ids, rvecs, tvecs
+
+
+def find_marker_indices(marker_ids, to_find_marker_id):
+    res = []
+    if marker_ids is None:
+        return res
+
+    for i, marker_id in enumerate(marker_ids):
+        if marker_id == to_find_marker_id:
+            res.append(i)
+    return res
 
 
 while cap.isOpened():
@@ -85,7 +98,15 @@ while cap.isOpened():
     parameters = aruco.DetectorParameters_create()
     board_retval, board_rvec, board_tvec = detect_and_draw_board(gray, frame, parameters)
 
-    markers_rvecs, markers_tvecs = detect_and_draw_markers(gray, frame, parameters)
+    marker_ids, markers_rvecs, markers_tvecs = detect_and_draw_markers(gray, frame, parameters)
+
+    if board_retval:
+        board_rotation_matrix, _ = cv2.Rodrigues(board_rvec)
+        all_ids_of_marker_1 = find_marker_indices(marker_ids, 1)
+        if all_ids_of_marker_1:
+            id_of_marker_1 = all_ids_of_marker_1[0]
+            relative_vec_to_id_1 = np.matmul(board_rotation_matrix.transpose(), markers_tvecs[id_of_marker_1].reshape((3,1)) - board_tvec)
+            print(relative_vec_to_id_1)
 
     cv2.imshow("test", frame)
 
