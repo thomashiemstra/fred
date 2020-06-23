@@ -1,16 +1,12 @@
 import cv2
 import threading
+
+from src.camera.capture_config import CaptureConfig
+from src.camera.image_handlers import CrossDrawer
 from src.utils.decorators import synchronized_with_lock
 
 charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
 aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
-
-
-class CaptureConfig:
-    screen_width = 1920
-    screen_height = 1080
-    fps = 30
-    image_format = cv2.VideoWriter_fourcc(*'MJPG')
 
 
 class CameraCapture:
@@ -87,9 +83,6 @@ class CameraCapture:
             for image_handler in self._image_handlers:
                 image_handler.handle_frame(frame, gray)
 
-            cv2.line(frame, (self.marker_x_left, self.half__height), (self.marker_x_right, self.half__height), (0, 255, 0))
-            cv2.line(frame, (self.half_width, self.marker_y_low), (self.half_width, self.marker_y_high), (0, 255, 0))
-
             # Display the resulting frame
             cv2.imshow('frame', frame)
             cv2.waitKey(1)
@@ -105,5 +98,8 @@ class CameraCapture:
 
 
 if __name__ == '__main__':
-    capture = CameraCapture(0)
+    cross_drawer = CrossDrawer()
+    image_handlers = [cross_drawer]
+
+    capture = CameraCapture(0, image_handlers)
     capture.start_camera()
