@@ -6,6 +6,13 @@ charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
 aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
 
 
+class CaptureConfig:
+    screen_width = 1920
+    screen_height = 1080
+    fps = 30
+    image_format = cv2.VideoWriter_fourcc(*'MJPG')
+
+
 class CameraCapture:
     screen_width = 1920
     screen_height = 1080
@@ -17,7 +24,6 @@ class CameraCapture:
     marker_x_right = int(half_width + marker_size)
     marker_y_low = int(half__height - 20)
     marker_y_high = int(half__height + 20)
-    fps = 60
 
     def __init__(self, camera, image_handlers):
         self._camera = camera
@@ -38,9 +44,9 @@ class CameraCapture:
             print("no camera connected!")
             return
 
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
-        self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CaptureConfig.screen_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
+        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.image_format)
 
         thread = threading.Thread(target=self.__capture_camera)
         self._running = True
@@ -57,9 +63,9 @@ class CameraCapture:
             print("no camera connected!")
             return
 
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.screen_width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.screen_height)
-        self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CaptureConfig.screen_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
+        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.image_format)
 
         thread = threading.Thread(target=self.__capture_camera)
         self._running = True
