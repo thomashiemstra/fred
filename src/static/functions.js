@@ -83,6 +83,46 @@ function postRequestForm(url, formElement) {
         })
 }
 
+ function getJsonList(url){
+    return fetch(url,
+    {
+    	method: "GET",
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    })
+    .then((response) => response.json())
+    .then((responseData) => {
+      return responseData;
+    })
+    .catch(error => console.warn(error));
+  }
+
+
+  function populateDropDown(url, dropdownList) {
+
+    getJsonList(url)
+    .then(response => {
+        console.log(response)
+        var list = document.getElementById(dropdownList);
+        for (var i = 0; i < response.length; i++){
+            var opt = response[i];
+            var li = document.createElement("li");
+            var link = document.createElement("a");
+            var text = document.createTextNode(opt);
+            link.appendChild(text);
+            link.href = "#";
+            li.appendChild(link);
+            list.appendChild(li);
+        }
+
+    });
+
+
+
+
+}
 
 function toggleOn() {
     $('#status-button').bootstrapToggle('enable').bootstrapToggle('on').bootstrapToggle('disable')

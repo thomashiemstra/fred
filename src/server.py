@@ -1,4 +1,6 @@
-from flask import Flask, render_template, request
+import json
+
+from flask import Flask, render_template, request, Response
 
 from src import global_objects
 from src.xbox_control.xbox_control_resource import xbox_api
@@ -33,6 +35,14 @@ def get_status():
     return jsonify(status=True)
     # dynamixel_servo_controller = globals.get_robot(globals.dynamixel_robot_arm_port)
     # return jsonify(status=dynamixel_servo_controller.get_status())
+
+
+@app.route('/getJsonList', methods=['GET'])
+def getJsonList():
+    list = [
+       "one", "two", "three"
+    ]
+    return jsonify(list)
 
 
 @app.route('/test', methods=['POST'])

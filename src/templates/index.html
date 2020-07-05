@@ -67,6 +67,13 @@
                 </div>
             </div>
             <div class="col-sm-4">
+                <div class="dropdown">
+                    <button class="btn btn-secondary dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" onChange="whatsup('dropdownMenuButton')">
+                    Dynamic list
+                  </button>
+                        <ul class="dropdown-menu" id="projectSelectorDropdown">
+                        </ul>
+                </div>
             </div>
         </div>
     </div>
@@ -91,19 +98,7 @@
         }
     }
 
-    function whatsup(elementName) {
-        var myDropdown=document.getElementsByName(elementName)[0];
-
-        console.log(myDropdown.value);
-    }
-
-    function myFunction() {
-      // document.getElementById("myForm").submit();
-        var myForm = document.getElementById("myForm")
-
-
-        console.log(document.getElementById("myForm").elements.namedItem("fname").value)
-    }
+     populateDropDown('http://127.0.0.1:5000/getJsonList', 'projectSelectorDropdown')
 
     </script>
 {% endblock %}
