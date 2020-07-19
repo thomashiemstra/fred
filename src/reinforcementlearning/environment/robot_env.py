@@ -7,37 +7,28 @@ from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
-from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
     get_normalized_current_angles, get_clipped_state
-from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles, Scenario
-from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
+from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 
 class RobotEnv(py_environment.PyEnvironment):
 
-    def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
+    def __init__(self, use_gui=False, raw_obs=False):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
-        self._no_obstacles = no_obstacles
         self._hilbert_curve_iteration = 3
         self._grid_len_x = 40
         self._grid_len_y = 40
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(5,), dtype=np.float32, minimum=-1, maximum=1, name='action')
-        if no_obstacles:
-            self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
-            self.scenarios = scenarios_no_obstacles
-        else:
-            self._observation_spec = array_spec.BoundedArraySpec(
-                shape=(20 + 2 ** (2 * self._hilbert_curve_iteration),),
-                dtype=np.float32, minimum=-1, maximum=1, name='observation')
-            self.scenarios = scenarios_no_obstacles + scenarios_obstacles
+        self._observation_spec = array_spec.BoundedArraySpec(
+            shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+        self.scenarios = scenarios_no_obstacles
         self._update_step_size = 0.02
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
@@ -179,14 +170,23 @@ class RobotEnv(py_environment.PyEnvironment):
 
         observation, total_distance = self._get_observations()
         distance_covered = self._previous_distance_to_target - total_distance
-        reward = 1 if distance_covered > 0 else -0.5
         self._previous_distance_to_target = total_distance
+        reward = self._get_reward(distance_covered, total_distance, action)
 
+        self._current_time_step = self._get_current_time_step(collision, observation, total_distance, reward)
+        self._steps_taken += 1
+        return self._current_time_step
+
+    @staticmethod
+    def _get_reward(distance_covered, total_distance, action):
+        reward = 1 if distance_covered > 0 else -0.5
         effort = np.sum(action * action) * 0.2
         if reward > 0 and total_distance > 20:
             reward = np.max([reward * 0.75, reward - effort])
 
-        self._steps_taken += 1
+        return reward
+
+    def _get_current_time_step(self, collision, observation, total_distance, reward):
         if self._steps_taken > 200:
             self._done = True
             return ts.termination(np.array(observation, dtype=np.float32), reward=0)
@@ -242,13 +242,6 @@ class RobotEnv(py_environment.PyEnvironment):
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
 
         total_observation += get_normalized_current_angles(self._current_angles[1:6])
-
-        if not self._no_obstacles:
-            curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
-                                                        grid_len_y=self._grid_len_y,
-                                                        iteration=self._hilbert_curve_iteration)
-            total_observation += curve.tolist()
-
         return np.array(total_observation), total_distance
 
     def _get_normalized_vector_as_list(self, vec):
@@ -272,54 +265,8 @@ class RobotEnv(py_environment.PyEnvironment):
             for _ in range(self._simulation_steps_per_step):
                 p.stepSimulation(self._physics_client)
 
-    def show_occupancy_grid_and_curve(self):
-        if self._obstacles is None:
-            return
-        from src.reinforcementlearning.occupancy_grid_util import create_occupancy_grid_from_obstacles
+    def get_state(self):
+        return self._current_time_step
 
-        len_x = 40
-        len_y = 40
-        curve_iteration = 3
-
-        grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=4)
-        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y,
-                                                    iteration=curve_iteration)
-
-        import matplotlib.pyplot as plt
-
-        plt.set_cmap('hot')
-
-        fig = plt.figure()
-        ax1 = fig.add_subplot(2, 2, 1)
-
-        reshape = 2 ** curve_iteration
-        ax1.imshow(curve.reshape(reshape, reshape))
-        ax2 = fig.add_subplot(2, 2, 2)
-        ax2.imshow(grid)
-
-        plt.show()
-
-
-if __name__ == '__main__':
-    env = RobotEnv(use_gui=True, no_obstacles=False)
-    state = env.observation_spec()
-    print(state)
-    env.scenario = Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
-                       BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 20, 10), Pose(30, 30, 10))
-    obs = env.reset()
-    env.show_occupancy_grid_and_curve()
-    print("hoi")
-
-
-# ░░░░░░░█▐▓▓░████▄▄▄█▀▄▓▓▓▌█ Epic code
-# ░░░░░▄█▌▀▄▓▓▄▄▄▄▀▀▀▄▓▓▓▓▓▌█
-# ░░░▄█▀▀▄▓█▓▓▓▓▓▓▓▓▓▓▓▓▀░▓▌█
-# ░░█▀▄▓▓▓███▓▓▓███▓▓▓▄░░▄▓▐█▌ level is so high
-# ░█▌▓▓▓▀▀▓▓▓▓███▓▓▓▓▓▓▓▄▀▓▓▐█
-# ▐█▐██▐░▄▓▓▓▓▓▀▄░▀▓▓▓▓▓▓▓▓▓▌█▌
-# █▌███▓▓▓▓▓▓▓▓▐░░▄▓▓███▓▓▓▄▀▐█ much quality
-# █▐█▓▀░░▀▓▓▓▓▓▓▓▓▓██████▓▓▓▓▐█
-# ▌▓▄▌▀░▀░▐▀█▄▓▓██████████▓▓▓▌█▌
-# ▌▓▓▓▄▄▀▀▓▓▓▀▓▓▓▓▓▓▓▓█▓█▓█▓▓▌█▌ Wow.
-# █▐▓▓▓▓▓▓▄▄▄▓▓▓▓▓▓█▓█▓█▓█▓▓▓▐█
+    def set_state(self, state):
+        self._current_time_step = state
