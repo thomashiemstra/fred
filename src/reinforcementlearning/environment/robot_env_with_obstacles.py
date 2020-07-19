@@ -14,20 +14,26 @@ class RobotEnvWithObstacles(RobotEnv):
     def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
         super().__init__(use_gui, raw_obs)
 
-        self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(20, 2 ** (2 * self._hilbert_curve_iteration),),
-            dtype=np.float32, minimum=-1, maximum=1, name='observation')
+        self._observation_spec = (array_spec.BoundedArraySpec(
+            shape=(20,),
+            dtype=np.float32, minimum=-1, maximum=1, name='observation'),
+          array_spec.BoundedArraySpec(
+              shape=(2 ** (2 * self._hilbert_curve_iteration), ),
+              dtype=np.float32, minimum=0, maximum=1, name='hilbert curve'),
+        )
         self.scenarios = scenarios_no_obstacles + scenarios_obstacles
 
     def _get_observations(self):
-        no_obstacle_obs = super()._get_observations()
+        no_obstacle_obs, total_distance = super()._get_observations()
 
         curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                     grid_len_y=self._grid_len_y,
                                                     iteration=self._hilbert_curve_iteration)
 
-        total_observation = (no_obstacle_obs, curve.tolist())
-        return total_observation
+        total_observation = (np.array(no_obstacle_obs, dtype=np.float32),
+                             np.array(np.array(curve.tolist()), dtype=np.float32))
+
+        return total_observation, total_distance
 
     def show_occupancy_grid_and_curve(self):
         from src.reinforcementlearning.occupancy_grid_util import create_occupancy_grid_from_obstacles

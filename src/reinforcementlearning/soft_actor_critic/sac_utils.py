@@ -8,16 +8,19 @@ import time
 import imageio
 import tensorflow as tf
 from tf_agents.agents.sac import sac_agent
-from tf_agents.environments import suite_gym
+from tf_agents.environments import suite_gym, parallel_py_environment, tf_py_environment
 from tf_agents.eval import metric_utils
 from tf_agents.networks import value_network
 from tf_agents.utils import common
 
+from src.reinforcementlearning.environment.robot_env import RobotEnv
+from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.soft_actor_critic.custom_objects.actor_distribution_network_trainable import \
     ActorDistributionNetworkTrainable
 from src.reinforcementlearning.soft_actor_critic.custom_objects.custom_sac_agent import CustomSacAgent
 from src.reinforcementlearning.soft_actor_critic.custom_objects.normal_projection_network_trainable import \
     NormalProjectionNetworkTrainable
+from src.utils.os_utils import is_linux
 
 
 def normal_projection_net(action_spec,
@@ -98,6 +101,33 @@ def create_agent(env,
         train_step_counter=global_step)
     agent.initialize()
     return agent
+
+
+def create_envs(robot_env_no_obstacles, num_parallel_environments):
+    if not is_linux():  # Windows does not handle multirprocessing well
+        if robot_env_no_obstacles:
+            tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
+            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
+        else :
+            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles())
+            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles())
+
+        return tf_env, eval_tf_env
+
+    if robot_env_no_obstacles:
+        tf_env = tf_py_environment.TFPyEnvironment(
+            parallel_py_environment.ParallelPyEnvironment(
+                [lambda: RobotEnv()] * num_parallel_environments))
+
+        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
+    else:
+        tf_env = tf_py_environment.TFPyEnvironment(
+            parallel_py_environment.ParallelPyEnvironment(
+                [lambda: RobotEnvWithObstacles()] * num_parallel_environments))
+
+        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles())
+
+    return tf_env, eval_tf_env
 
 
 def compute_metrics(eval_metrics,

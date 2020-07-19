@@ -22,10 +22,11 @@ from tf_agents.utils import common
 from absl import app
 from absl import flags
 
+from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.soft_actor_critic.behavioral_cloning import fill_replay_buffer_with_gradient_descent
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
-    make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer
+    make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
 
 flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
                     'Root directory for writing logs/summaries/checkpoints.')
@@ -81,14 +82,8 @@ def train_eval(checkpoint_dir,
     global_step = tf.compat.v1.train.get_or_create_global_step()
     with tf.compat.v2.summary.record_if(
             lambda: tf.math.equal(global_step % summary_interval, 0)):
-        # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
-        # eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
 
-        tf_env = tf_py_environment.TFPyEnvironment(
-            parallel_py_environment.ParallelPyEnvironment(
-                [lambda: RobotEnv(no_obstacles=robot_env_no_obstacles)] * num_parallel_environments))
-
-        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=robot_env_no_obstacles))
+        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments)
 
         tf_agent = create_agent(tf_env, global_step)
         if checkpoint_dir_behavioral_cloning is not None:

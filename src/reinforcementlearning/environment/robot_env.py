@@ -136,7 +136,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._episode_ended = False
         self._steps_taken = 0
         self._done = False
-        return ts.restart(np.array(observation, dtype=np.float32))
+        return ts.restart(observation)
 
     @property
     def done(self):
@@ -189,17 +189,17 @@ class RobotEnv(py_environment.PyEnvironment):
     def _get_current_time_step(self, collision, observation, total_distance, reward):
         if self._steps_taken > 200:
             self._done = True
-            return ts.termination(np.array(observation, dtype=np.float32), reward=0)
+            return ts.termination(observation, reward=0)
         elif collision:
             self._done = True
-            return ts.termination(np.array(observation, dtype=np.float32), reward=-20)
+            return ts.termination(observation, reward=-20)
         elif total_distance < 10:  # target reached
             self._done = True
             done_reward = 100 + ((200 - self._steps_taken) / 2)
-            return ts.termination(np.array(observation, dtype=np.float32), reward=done_reward)
+            return ts.termination(observation, reward=done_reward)
         else:
             self._done = False
-            return ts.transition(np.array(observation, dtype=np.float32), reward=reward, discount=1.0)
+            return ts.transition(observation, reward=reward, discount=1.0)
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points
@@ -242,7 +242,10 @@ class RobotEnv(py_environment.PyEnvironment):
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
 
         total_observation += get_normalized_current_angles(self._current_angles[1:6])
-        return np.array(total_observation), total_distance
+
+        # return ts.transition(np.array(observation, dtype=np.float32), reward=reward, discount=1.0)
+
+        return np.array(np.array(total_observation), dtype=np.float32), total_distance
 
     def _get_normalized_vector_as_list(self, vec):
         if self._raw_obs:

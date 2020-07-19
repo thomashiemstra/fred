@@ -5,6 +5,7 @@ from src.reinforcementlearning.environment.robot_env import RobotEnv
 from tf_agents.environments import utils
 import numpy as np
 
+from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.environment.scenario import Scenario
 
 scenario = Scenario([], Pose(-25, 35, 10), Pose(25, 35, 10))
@@ -18,7 +19,7 @@ class TestRobotEnv(unittest.TestCase):
         utils.validate_py_environment(env, episodes=5)
 
     def test_env_obs(self):
-        env = RobotEnv(use_gui=False, no_obstacles=False)
+        env = RobotEnvWithObstacles()
         env.scenario = scenario
         utils.validate_py_environment(env, episodes=5)
 

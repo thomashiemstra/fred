@@ -83,7 +83,7 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
 def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env, total_collect_steps=10000):
     # tf_env = tf_py_environment.TFPyEnvironment(
     #     parallel_py_environment.ParallelPyEnvironment(
-    #         [lambda: RobotEnv(no_obstacles=True)] * 16))
+    #         [lambda: RobotEnv()] * 16))
 
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         data_spec=collect_data_spec,
@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
-    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(no_obstacles=True, use_gui=False))
+    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=False))
     tf_agent = create_agent(tf_env, None)
 
     replay_buffer = fill_and_get_replay_buffer(global_step, train_dir, tf_agent.collect_data_spec, tf_env,
