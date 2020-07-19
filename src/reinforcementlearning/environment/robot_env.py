@@ -30,6 +30,7 @@ class RobotEnv(py_environment.PyEnvironment):
             shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
         self.scenarios = scenarios_no_obstacles
         self._update_step_size = 0.02
+        self._max_steps_to_take_before_failure = 200
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -48,9 +49,9 @@ class RobotEnv(py_environment.PyEnvironment):
         self._attr_lines = None
         self._rep_lines = None
         self._current_scenario = None
-        self.reverse_scenario = False
+        self._reverse_scenario = False
         self._done = True
-        self.scenario = None
+        self._externally_set_scenario = None
 
     @property
     def current_angles(self):
@@ -60,12 +61,16 @@ class RobotEnv(py_environment.PyEnvironment):
     def robot_controller(self):
         return self._robot_controller
 
+    def set_scenario(self, scenario, reverse):
+        self._externally_set_scenario = scenario
+        self._reverse_scenario = reverse
+
     def _generate_obstacles_and_target_pose(self):
         if self._current_scenario is not None:
             self._current_scenario.destroy_scenario(self._physics_client)
 
-        if self.scenario is not None:
-            self._current_scenario = self.scenario
+        if self._externally_set_scenario is not None:
+            self._current_scenario = self._externally_set_scenario
         else:
             scenario_id = random.randint(0, len(self.scenarios) - 1)
             self._current_scenario = self.scenarios[scenario_id]
@@ -118,8 +123,8 @@ class RobotEnv(py_environment.PyEnvironment):
         self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
 
         # If a specific scenario is set (i.e. for evaluation) only reverse the scenario if that's explicitly requested
-        if self.scenario is not None:
-            if self.reverse_scenario:
+        if self._externally_set_scenario is not None:
+            if self._reverse_scenario:
                 self._target_pose, self._start_pose = self._start_pose, self._target_pose
         else:
             # If we are in training mode randomly flip the start and stop pose of the scenario
@@ -187,7 +192,7 @@ class RobotEnv(py_environment.PyEnvironment):
         return reward
 
     def _get_current_time_step(self, collision, observation, total_distance, reward):
-        if self._steps_taken > 200:
+        if self._steps_taken > self._max_steps_to_take_before_failure:
             self._done = True
             return ts.termination(observation, reward=0)
         elif collision:

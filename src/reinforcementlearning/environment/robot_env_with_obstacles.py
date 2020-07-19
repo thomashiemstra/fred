@@ -22,6 +22,8 @@ class RobotEnvWithObstacles(RobotEnv):
               dtype=np.float32, minimum=0, maximum=1, name='hilbert curve'),
         )
         self.scenarios = scenarios_no_obstacles + scenarios_obstacles
+        self._max_steps_to_take_before_failure = 1000
+        self._update_step_size = 0.005
 
     def _get_observations(self):
         no_obstacle_obs, total_distance = super()._get_observations()
@@ -65,9 +67,9 @@ if __name__ == '__main__':
     env = RobotEnvWithObstacles(use_gui=True)
     state = env.observation_spec()
     print(state)
-    env.scenario = Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
-                       BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
-                      Pose(-25, 20, 10), Pose(30, 30, 10))
+    env._externally_set_scenario = Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
+                                             BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
+                                            Pose(-25, 20, 10), Pose(30, 30, 10))
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")

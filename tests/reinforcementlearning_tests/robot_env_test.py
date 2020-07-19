@@ -15,12 +15,12 @@ class TestRobotEnv(unittest.TestCase):
 
     def test_env_no_obs(self):
         env = RobotEnv(use_gui=False)
-        env.scenario = scenario
+        env._externally_set_scenario = scenario
         utils.validate_py_environment(env, episodes=5)
 
     def test_env_obs(self):
         env = RobotEnvWithObstacles()
-        env.scenario = scenario
+        env._externally_set_scenario = scenario
         utils.validate_py_environment(env, episodes=5)
 
     def test_initial_observations_normalized(self):
