@@ -1,15 +1,13 @@
 import inspect
 import os
+from multiprocessing import Pool
 
-from tf_agents.agents.behavioral_cloning import behavioral_cloning_agent
-from tf_agents.environments import tf_py_environment, parallel_py_environment
-from tf_agents.eval import metric_utils
-from tf_agents.policies import actor_policy
+import numpy as np
+import tensorflow as tf
+from tf_agents.environments import tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory, policy_step
 from tf_agents.utils import common
-import tensorflow as tf
-import numpy as np
 
 from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
@@ -17,10 +15,14 @@ from src.reinforcementlearning.environment import robot_env_utils
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent
 from src.utils.decorators import timer
-from multiprocessing import Pool
 
 
-def get_forces(observation):
+def get_forces(raw_observation):
+    if isinstance(raw_observation, tuple):
+        observation = raw_observation[0]
+    else:
+        observation = raw_observation
+
     c1_attr = np.zeros(3)
     c2_attr = 2 * observation[0:3]
     c3_attr = observation[3:6]
@@ -35,10 +37,10 @@ def get_forces(observation):
     return attractive_forces + repulsive_forces
 
 
-def handle_observation(observation):
-    forces = get_forces(observation)
+def handle_observation(raw_observation):
+    forces = get_forces(raw_observation)
 
-    current_angles = robot_env_utils.get_de_normalized_current_angles(observation[15:20])
+    current_angles = robot_env_utils.get_de_normalized_current_angles(raw_observation[15:20])
 
     joint_forces = jacobian_transpose_on_f(forces, np.append([0], current_angles),
                                            global_constants.simulated_robot_config, 11.2)
