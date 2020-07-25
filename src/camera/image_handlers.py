@@ -1,8 +1,9 @@
 import threading
 from abc import ABC, abstractmethod
+
 import cv2
-from cv2 import aruco
 import numpy as np
+from cv2 import aruco
 
 from src.camera.capture_config import CaptureConfig
 from src.utils.decorators import synchronized_with_lock
@@ -50,9 +51,21 @@ class CrossDrawer(ImageHandler):
         pass
 
 
+class DetectedMarker:
+    def __init__(self, id, rvec, tvec):
+        self.id = id
+        self.rvec = rvec
+        self.tvec = tvec
+
+    def copy(self):
+        res = DetectedMarker(self.id, self.rvec, self.tvec)
+        return res
+
+
 class ArucoImageHandler(ImageHandler):
 
-    def __init__(self, board, cameraMatrix, distCoeffs, aruco_dictionary, charuco_board_dictionary, should_draw=False):
+    def __init__(self, board, cameraMatrix, distCoeffs, aruco_dictionary, charuco_board_dictionary, aruco_marker_length,
+                 should_draw=False):
         self.board = board
         self.lock = threading.RLock()
         self.parameters = aruco.DetectorParameters_create()
@@ -60,12 +73,11 @@ class ArucoImageHandler(ImageHandler):
         self.distCoeffs = distCoeffs
         self.aruco_dictionary = aruco_dictionary
         self.charuco_board_dictionary = charuco_board_dictionary
+        self.aruco_marker_length = aruco_marker_length
         self.should_draw = should_draw
         self.board_rvec = None
         self.board_tvec = None
-
-
-        # @synchronized_with_lock("lock")
+        self.detected_markers = []
 
     def handle_frame(self, frame, gray):
         retval, self.board_rvec, self.board_tvec = self.detect_board(gray, frame, self.parameters)
@@ -74,6 +86,7 @@ class ArucoImageHandler(ImageHandler):
             return
 
         ids, rvecs, tvecs, corners = self.detect_markers(gray, frame, self.parameters)
+        self.populate_detected_makers(ids, rvecs, tvecs)
 
         if self.should_draw:
             aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, self.board_rvec, self.board_tvec, length=50)
@@ -108,8 +121,19 @@ class ArucoImageHandler(ImageHandler):
                                                               parameters=detection_parameters)
         aruco.refineDetectedMarkers(gray_image, self.board, corners, ids, rejectedImgPoints)
 
-        aruco_marker_length = 2.65
-        rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, aruco_marker_length, self.cameraMatrix,
+        rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, self.aruco_marker_length, self.cameraMatrix,
                                                           self.distCoeffs)
 
         return ids, rvecs, tvecs, corners
+
+    @synchronized_with_lock("lock")
+    def populate_detected_makers(self, ids, rvecs, tvecs):
+        if ids is None:
+            return
+        self.detected_markers = []
+        for id, rvec, tvec in zip(ids, rvecs, tvecs):
+            self.detected_markers.append(DetectedMarker(id, rvec, tvec))
+
+    @synchronized_with_lock("lock")
+    def get_detected_markers(self):
+        return [detected_marker.copy() for detected_marker in self.detected_markers]
