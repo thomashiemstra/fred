@@ -22,7 +22,7 @@ class XboxPoseUpdater:
         self.workspace_limits = workspace_limits
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
-        self.steps_per_second = 10
+        self.steps_per_second = 20
         self.dt = 1.0 / self.steps_per_second
         self._maximum_speed = maximum_speed  # cm/sec
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down

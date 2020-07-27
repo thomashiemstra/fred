@@ -12,6 +12,6 @@ root_dir = None
 
 class WorkSpaceLimits:
     radius_min = 15
-    radius_max = 40
+    radius_max = 57
     y_min = 10
     z_min = 0
