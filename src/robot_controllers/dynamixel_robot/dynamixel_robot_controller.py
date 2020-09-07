@@ -1,3 +1,4 @@
+import jsonpickle
 from Arduino import Arduino
 
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
@@ -29,6 +30,7 @@ class DynamixelRobotController(AbstractRobotController):
 
     def __init__(self, port, robot_config):
         self.robot_config = robot_config
+        self.servo_config_path = ""
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
         # todo these PID and speed values should be in a file...
@@ -55,6 +57,14 @@ class DynamixelRobotController(AbstractRobotController):
         self._current_angles = self.get_current_angles()
         self.board = Arduino()
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
+
+    def get_servo_config(self):
+        try:
+            with open(self.servo_config_path, 'r') as servo_config_file:
+                string = servo_config_file.read()
+                return jsonpickle.decode(string)
+        except FileNotFoundError:
+            return None
 
     def enable_servos(self):
         self.base_servo_handler.set_torque(enable=True)

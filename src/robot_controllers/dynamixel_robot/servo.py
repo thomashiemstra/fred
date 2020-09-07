@@ -1,5 +1,56 @@
+from typing import Any, Optional, Callable, Dict, List, Tuple
+
 import numpy as np
 import logging
+import json
+from numpy import pi
+
+
+class ServoEncoder(json.JSONEncoder):
+
+    def default(self, o: Any) -> Any:
+        if isinstance(o, Servo):
+            return {
+                "min_position": o.min_position,
+                "max_position": o.max_position,
+                "max_angle": o.max_angle/pi,
+                "min_angle": o.min_angle/pi,
+                "profile_velocity": o.profile_velocity,
+                "profile_acceleration": o.profile_acceleration,
+                "p": o.p,
+                "i": o.i,
+                "d": o.d,
+                "offset": o.offset,
+                "class": "servo"
+            }
+        else:
+            return super().default(o)
+
+
+class ServoDecoder(json.JSONDecoder):
+
+    def __init__(self) -> None:
+        super().__init__(object_hook=self.dict_to_object)
+
+    # ,
+
+    @staticmethod
+    def dict_to_object(dictionary):
+        if "class" in dictionary.keys() and dictionary["class"] == "servo":
+            return Servo(
+                dictionary["min_position"],
+                dictionary["max_position"],
+                dictionary["max_angle"],
+                dictionary["min_angle"],
+                dictionary["profile_velocity"],
+                dictionary["profile_acceleration"],
+                dictionary["p"],
+                dictionary["i"],
+                dictionary["d"],
+                dictionary["offset"]
+            )
+        else:
+            return dictionary
 
 
 class Servo:
@@ -8,7 +59,8 @@ class Servo:
     target_position = 0
     current_position = -1  # set by the servo handler
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0, p=1000, i=600, d=500, offset=0):
+    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0,
+                 p=1000, i=600, d=500, offset=0):
         self.p = p
         self.i = i
         self.d = d
@@ -45,4 +97,3 @@ class Servo:
         else:
             return np.interp(position, [self.min_position, self.max_position],
                              [self.min_angle, self.max_angle])
-
