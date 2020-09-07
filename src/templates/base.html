@@ -47,7 +47,7 @@
     {%- endblock content %}
 
       <script>
-        getRobotStatus();
+        setInterval(getRobotStatus, 1000);
     </script>
   {% block scripts %}
   {% endblock %}

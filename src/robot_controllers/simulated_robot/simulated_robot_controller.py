@@ -46,6 +46,7 @@ class SimulatedRobotController(AbstractRobotController):
         self.physics_client = physics_client
         self.control_points = generate_control_points(self.body_id, self.physics_client)
         self._current_angles = self.get_current_angles()
+        self.status = False
 
     def enable_servos(self):
         pass
@@ -97,12 +98,11 @@ class SimulatedRobotController(AbstractRobotController):
     def pose_to_angles(self, pose):
         return inverse_kinematics(pose, self.robot_config)
 
-    @staticmethod
-    def get_status():
-        return True
+    def get_status(self):
+        return self.status
 
     def change_status(self, new_state):
-        pass
+        self.status = new_state
 
     def set_pid_single_servo(self, servo_id, p, i, d):
         pass

@@ -3,6 +3,8 @@ import json
 from flask import Flask, render_template, request, Response
 
 from src import global_objects
+from src.global_constants import dynamixel_robot_arm_port
+from src.global_objects import get_robot
 from src.xbox_control.xbox_control_resource import xbox_api
 
 from flask_cors import CORS
@@ -32,9 +34,9 @@ def xbox():
 
 @app.route('/robotstatus')
 def get_status():
-    return jsonify(status=True)
-    # dynamixel_servo_controller = globals.get_robot(globals.dynamixel_robot_arm_port)
-    # return jsonify(status=dynamixel_servo_controller.get_status())
+    # return jsonify(status=True)
+    dynamixel_servo_controller = get_robot(dynamixel_robot_arm_port)
+    return jsonify(status=dynamixel_servo_controller.get_status())
 
 
 @app.route('/getJsonList', methods=['GET'])
