@@ -19,6 +19,7 @@ def start_simulated_robot(use_gui=False, robot_config=global_constants.simulated
 
     if use_gui:
         p.setRealTimeSimulation(1, physicsClientId=physics_client)
+        p.resetDebugVisualizerCamera(1, -40, -40, cameraTargetPosition=[-0.2, -0.1, 0.5])
 
     start_pos = [0, 0, 0]
     start_orientation = p.getQuaternionFromEuler([0, 0, 0])
