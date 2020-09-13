@@ -1,3 +1,6 @@
+import logging
+import sys
+
 from src import global_constants
 from src.camera.capture import CameraCapture
 
@@ -15,7 +18,19 @@ def get_robot(port):
         return start_simulated_robot(use_gui=True)
     else:
         from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
-        return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
+        servo_config = get_servo_config(global_constants.servo_config_file)
+        return DynamixelRobotController(port, global_constants.dynamixel_robot_config, servo_config)
+
+
+def get_servo_config(servo_config_path):
+    import jsonpickle
+    try:
+        with open(servo_config_path, 'r') as servo_config_file:
+            string = servo_config_file.read()
+            return jsonpickle.decode(string)
+    except FileNotFoundError:
+        logging.error("error getting servo config, exiting")
+        sys.exit()
 
 
 @lru_cache(maxsize=1)
@@ -29,4 +44,8 @@ def get_xbox_robot_controller(port):
 
 @lru_cache(maxsize=1)
 def get_camera(camera):
-    return CameraCapture(camera)
+    return CameraCapture(camera, [])
+
+
+
+get_robot('whoop')

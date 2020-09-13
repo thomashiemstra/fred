@@ -32,7 +32,7 @@ class ServoDecoder(json.JSONDecoder):
     def __init__(self) -> None:
         super().__init__(object_hook=self.dict_to_object)
 
-    # ,
+
 
     @staticmethod
     def dict_to_object(dictionary):

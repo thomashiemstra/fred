@@ -1,19 +1,16 @@
-import jsonpickle
-from Arduino import Arduino
-
-from src.robot_controllers.abstract_robot_controller import AbstractRobotController
-from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
-from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
-from src.robot_controllers.dynamixel_robot.servo import Servo
-from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
-from src.kinematics.kinematics import inverse_kinematics
-from src.utils.decorators import synchronized_with_lock
 import threading
 from timeit import default_timer as timer
 
+import jsonpickle
 import numpy as np
-from numpy import pi
+from Arduino import Arduino
 
+from src.kinematics.kinematics import inverse_kinematics
+from src.robot_controllers.abstract_robot_controller import AbstractRobotController
+from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
+from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
+from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
+from src.utils.decorators import synchronized_with_lock
 # Facade for the robot as a whole, abstracting away the servo handling
 from src.utils.robot_controller_utils import get_recommended_wait_time
 
@@ -28,28 +25,30 @@ def convert_gripper_state_to_pwm(state):
 
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, port, robot_config):
-        self.robot_config = robot_config
-        self.servo_config_path = ""
+    def __init__(self, port, robot_config, servo_config):
+        """
+        :param port: a string representing the usb port the robot is connected to
+        :param robot_config: a RobotConfig object
+        :param servo_config: (dict of str:json) servo name and servo config
+        """
+        self.servo1 = servo_config["servo1"]
+        self.servo2 = servo_config["servo2"]
+        self.servo3 = servo_config["servo3"]
+        self.servo4 = servo_config["servo4"]
+        self.servo5 = servo_config["servo5"]
+        self.servo6 = servo_config["servo6"]
+
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
-        # todo these PID and speed values should be in a file...
-        self.servo1 = Servo(1024, 3072, 0, pi, 80, 30, p=800, i=0, d=2500)
-        self.servo2 = Servo(1024, 3072, 0, pi, 80, 30, p=1500, i=0, d=500)
-        self.servo3 = Servo(1024, 3072, -pi/2, pi/2, 80, 30, p=1500, i=100, d=500)
         base_servos = {1: self.servo1, 2: self.servo2, 3: self.servo3}
-
         self.base_servo_handler = ServoHandler(base_servos, cfg, port_handler,
                                                packet_handler, group_bulk_write, group_bulk_read)
 
-        self.servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
-        self.servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
-        self.servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
         wrist_servos = {4: self.servo4, 5: self.servo5, 6: self.servo6}
-
         self. wrist_servo_handler = ServoHandler(wrist_servos, cfg, port_handler,
                                                  packet_handler, group_bulk_write, group_bulk_read)
 
+        self.robot_config = robot_config
         self.set_velocity_profile()
         self.set_pid()
         self.status = False
