@@ -7,7 +7,6 @@ import time
 
 import imageio
 import tensorflow as tf
-from tf_agents.agents.sac import sac_agent
 from tf_agents.environments import suite_gym, parallel_py_environment, tf_py_environment
 from tf_agents.eval import metric_utils
 from tf_agents.networks import value_network
@@ -23,16 +22,10 @@ from src.reinforcementlearning.soft_actor_critic.custom_objects.normal_projectio
 from src.utils.os_utils import is_linux
 
 
-def normal_projection_net(action_spec,
-                          init_action_stddev=0.35,
-                          init_means_output_factor=0.1):
-    del init_action_stddev
+def normal_projection_net(action_spec):
     return NormalProjectionNetworkTrainable(
         action_spec,
         mean_transform=None,
-        state_dependent_std=True,
-        init_means_output_factor=init_means_output_factor,
-        std_transform=sac_agent.std_clip_transform,
         scale_distribution=True)
 
 
