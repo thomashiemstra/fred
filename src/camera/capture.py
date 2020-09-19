@@ -29,11 +29,15 @@ class CameraCapture:
     marker_y_low = int(half__height - 20)
     marker_y_high = int(half__height + 20)
 
-    def __init__(self, camera, image_handlers):
+    def __init__(self, camera, image_handlers=None):
+        if image_handlers is None:
+            image_handlers = []
+
         self._camera = camera
         self._cap = None
         self._running = False
         self.lock = threading.RLock()
+        self.image_handlers_lock = threading.RLock()
         self._image_handlers = image_handlers
 
     @synchronized_with_lock("lock")
@@ -87,9 +91,7 @@ class CameraCapture:
                 continue
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            for image_handler in self._image_handlers:
-                image_handler.handle_frame(frame, gray)
+            self.use_image_handlers(frame, gray)
 
             # Display the resulting frame
             cv2.imshow('frame', frame)
@@ -104,10 +106,19 @@ class CameraCapture:
         self._cap.release()
         cv2.destroyAllWindows()
 
+    @synchronized_with_lock("image_handlers_lock")
+    def use_image_handlers(self, frame, gray):
+        for image_handler in self._image_handlers:
+            image_handler.handle_frame(frame, gray)
+
+    @synchronized_with_lock("image_handlers_lock")
+    def add_image_handler(self, image_handler):
+        self._image_handlers.appen(image_handler)
+
 
 if __name__ == '__main__':
     cross_drawer = CrossDrawer()
-    image_handlers = [cross_drawer]
+    test_image_handlers = [cross_drawer]
 
-    capture = CameraCapture(0, image_handlers)
+    capture = CameraCapture(0, test_image_handlers)
     capture.start_camera()
