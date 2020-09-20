@@ -62,8 +62,6 @@ def train_eval(checkpoint_dir,
                num_parallel_environments=16):
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
-    # tf.config.experimental_run_functions_eagerly(True)
-
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train')
     eval_dir = os.path.join(root_dir, 'eval')
@@ -86,6 +84,7 @@ def train_eval(checkpoint_dir,
         tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments)
 
         tf_agent = create_agent(tf_env, global_step)
+
         if checkpoint_dir_behavioral_cloning is not None:
             restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
 
@@ -239,7 +238,7 @@ def main(_):
     # if not tf.bc.is_gpu_available():
     #     print("no point in training without a gpu, go watch the grass grow instead")
     #     sys.exit()
-
+    tf.config.experimental_run_functions_eagerly(True)
     train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir)
 
 
