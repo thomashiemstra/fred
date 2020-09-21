@@ -7,10 +7,19 @@ import tensorflow as tf
 
 class ActorDistributionNetworkTrainable(ActorDistributionNetwork):
 
-    def __init__(self, input_tensor_spec, output_tensor_spec, preprocessing_layers=None, preprocessing_combiner=None,
-                 conv_layer_params=None, fc_layer_params=(200, 100), dropout_layer_params=None,
-                 activation_fn=tf.keras.activations.relu, kernel_initializer=None, batch_squash=True, dtype=tf.float32,
-                 discrete_projection_net=_categorical_projection_net, continuous_projection_net=_normal_projection_net,
+    def __init__(self, input_tensor_spec,
+                 output_tensor_spec,
+                 preprocessing_layers=None,
+                 preprocessing_combiner=None,
+                 conv_layer_params=None,
+                 fc_layer_params=(200, 100),
+                 dropout_layer_params=None,
+                 activation_fn=tf.keras.activations.relu,
+                 kernel_initializer=None,
+                 batch_squash=True,
+                 dtype=tf.float32,
+                 discrete_projection_net=_categorical_projection_net,
+                 continuous_projection_net=_normal_projection_net,
                  name='ActorDistributionNetwork'):
         super().__init__(input_tensor_spec, output_tensor_spec, preprocessing_layers, preprocessing_combiner,
                          conv_layer_params, fc_layer_params, dropout_layer_params, activation_fn, kernel_initializer,
