@@ -2,9 +2,10 @@ import inspect
 import os
 from multiprocessing import Pool
 
+
 import numpy as np
 import tensorflow as tf
-from tf_agents.environments import tf_py_environment
+from tf_agents.environments import tf_py_environment, parallel_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory, policy_step
 from tf_agents.utils import common
@@ -13,6 +14,7 @@ from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.reinforcementlearning.environment import robot_env_utils
 from src.reinforcementlearning.environment.robot_env import RobotEnv
+from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent
 from src.utils.decorators import timer
 
@@ -53,13 +55,14 @@ def handle_observation(raw_observation):
 
 
 def gradient_descent_action(observations, pool):
-    total_action = np.array(pool.map(handle_observation, observations))
-    tf_action = tf.constant(total_action, shape=(observations.shape[0], 5), dtype=tf.float32)
+    forces_observations = [observation[0] for observation in observations]
+    total_action = np.array(pool.map(handle_observation, forces_observations))
+    tf_action = tf.constant(total_action, shape=(observations[0].shape[0], 5), dtype=tf.float32)
     return policy_step.PolicyStep(tf_action, (), ())
 
 
 @timer
-def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, rb_checkpointer=None, global_step=None):
+def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, rb_checkpointer=None):
     current_time_step = tf_env.reset()
 
     traj_array = []
@@ -76,13 +79,13 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
             current_time_step = next_time_step
 
             if rb_checkpointer is not None and replay_buffer.num_frames().numpy() % 1000 == 0:
-                rb_checkpointer.save(global_step)
+                rb_checkpointer.save(replay_buffer.num_frames().numpy())
                 print("saved")
 
     return traj_array
 
 
-def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env, total_collect_steps=10000):
+def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, total_collect_steps=10000):
     # tf_env = tf_py_environment.TFPyEnvironment(
     #     parallel_py_environment.ParallelPyEnvironment(
     #         [lambda: RobotEnv()] * 16))
@@ -100,9 +103,9 @@ def fill_and_get_replay_buffer(global_step, train_dir, collect_data_spec, tf_env
     replay_buffer_checkpointer.initialize_or_restore()
 
     if replay_buffer.num_frames().numpy() < total_collect_steps:
-        fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, replay_buffer_checkpointer,
-                                                 global_step)
-        replay_buffer_checkpointer.save(global_step)
+        fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, replay_buffer_checkpointer)
+    else:
+        print("got a full buffer from the checkpoint")
 
     print("done filling buffer")
     print(replay_buffer.num_frames().numpy())
@@ -134,20 +137,23 @@ def train_agent(tf_agent, replay_buffer, train_steps):
 
 if __name__ == '__main__':
     tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'bc/'
+    checkpoint_dir = 'behavioral_cloning_obstacles/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
     total_collect_steps = 100000
     batch_size = 256
-    train_steps = 500
+    train_steps = 1500
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
-    tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=False))
+    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
+
+    tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True, raw_obs=True))
     tf_agent = create_agent(tf_env, None)
 
-    replay_buffer = fill_and_get_replay_buffer(global_step, train_dir, tf_agent.collect_data_spec, tf_env,
+    with tf.device('/CPU:0'):
+        replay_buffer = fill_and_get_replay_buffer(train_dir, tf_agent.collect_data_spec, tf_env,
                                                total_collect_steps=total_collect_steps)
 
     train_checkpointer = common.Checkpointer(
