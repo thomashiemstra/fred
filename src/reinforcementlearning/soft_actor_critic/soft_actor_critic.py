@@ -2,15 +2,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
 import inspect
 import os
 import time
 
+import gin
 import tensorflow as tf
+from absl import app
+from absl import flags
 from absl import logging
 from tf_agents.drivers import dynamic_step_driver
-from tf_agents.environments import parallel_py_environment
-from tf_agents.environments import tf_py_environment
 from tf_agents.metrics import py_metrics
 from tf_agents.metrics import tf_metrics
 from tf_agents.metrics import tf_py_metric
@@ -18,13 +20,9 @@ from tf_agents.policies import greedy_policy
 from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
+from tf_agents.system import system_multiprocessing as multiprocessing
 
-from absl import app
-from absl import flags
-
-from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.soft_actor_critic.behavioral_cloning import fill_replay_buffer_with_gradient_descent
-from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
     make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
 
@@ -32,6 +30,9 @@ flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
                     'Root directory for writing logs/summaries/checkpoints.')
 flags.DEFINE_string('behavioral_cloning_checkpoint_dir', None,
                     'Directory in the root dir where the results for the behavioral cloning are saved')
+
+flags.DEFINE_multi_string('gin_file', None, 'Path to the trainer config files.')
+flags.DEFINE_multi_string('gin_param', None, 'Gin binding to pass through.')
 
 FLAGS = flags.FLAGS
 
@@ -83,7 +84,7 @@ def train_eval(checkpoint_dir,
 
         tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments)
 
-        tf_agent = create_agent(tf_env, global_step)
+        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles)
 
         if checkpoint_dir_behavioral_cloning is not None:
             restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
@@ -230,6 +231,7 @@ def restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral
 def main(_):
     tf.compat.v1.enable_v2_behavior()
     logging.set_verbosity(logging.INFO)
+    gin.parse_config_files_and_bindings(FLAGS.gin_file, FLAGS.gin_param)
 
     print("GPU Available: ", tf.test.is_gpu_available())
 
@@ -238,11 +240,11 @@ def main(_):
     # if not tf.bc.is_gpu_available():
     #     print("no point in training without a gpu, go watch the grass grow instead")
     #     sys.exit()
-    tf.config.experimental_run_functions_eagerly(True)
+    # tf.config.experimental_run_functions_eagerly(True)
     train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir)
 
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
 if __name__ == '__main__':
     flags.mark_flag_as_required('root_dir')
-    app.run(main)
+    multiprocessing.handle_main(functools.partial(app.run, main))

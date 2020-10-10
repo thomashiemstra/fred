@@ -31,6 +31,7 @@ def normal_projection_net(action_spec):
 
 def create_agent(env,
                  global_step,
+                 robot_env_no_obstacles,
                  actor_fc_layers=(32,),
                  critic_fc_layers=(128,),
                  target_update_tau=0.005,
@@ -47,7 +48,7 @@ def create_agent(env,
     observation_spec = time_step_spec.observation
     action_spec = env.action_spec()
 
-    actor_preprocessing_layer, preprocessing_combiner = get_actor_preprocessing_layer_and_combiner(env)
+    actor_preprocessing_layer, preprocessing_combiner = get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles)
     actor_net = ActorDistributionNetworkTrainable(
         observation_spec,
         action_spec,
@@ -56,7 +57,7 @@ def create_agent(env,
         fc_layer_params=actor_fc_layers,
         continuous_projection_net=normal_projection_net)
 
-    critic_input_spec, critic_preprocessing_layer = get_cirit_input_spec_and_preprocessing_layer(env, observation_spec,
+    critic_input_spec, critic_preprocessing_layer = get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observation_spec,
                                                                                                  action_spec)
     critic_net = value_network.ValueNetwork(
         critic_input_spec,
@@ -91,43 +92,34 @@ def create_agent(env,
     return agent
 
 
-def get_actor_preprocessing_layer_and_combiner(env):
-    python_env = env.pyenv.envs[0]
-
-    if isinstance(python_env, RobotEnvWithObstacles):
-        preprocessing_layer = (
-            tf.keras.layers.Dense(16),  tf.keras.layers.Dense(32)
-        )
-        return preprocessing_layer, tf.keras.layers.Concatenate(axis=-1)
-
-    if isinstance(python_env, RobotEnv):
+def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles):
+    if robot_env_no_obstacles:
         preprocessing_layer = (
             tf.keras.layers.Dense(16)
         )
         return preprocessing_layer, None
+    else:
+        preprocessing_layer = (
+            tf.keras.layers.Dense(16), tf.keras.layers.Dense(32)
+        )
+        return preprocessing_layer, tf.keras.layers.Concatenate(axis=-1)
 
 
-def get_cirit_input_spec_and_preprocessing_layer(env, observation_spec, action_spec):
-    python_env = env.pyenv.envs[0]
-
-    if isinstance(python_env, RobotEnvWithObstacles):
+def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observation_spec, action_spec):
+    if robot_env_no_obstacles:
+        input_spec = (observation_spec,) + (action_spec,)
+        preprocessing_layer = (
+            # 20 observations               5 actions
+            tf.keras.layers.Dense(32), tf.keras.layers.Dense(16)
+        )
+        return input_spec, preprocessing_layer
+    else:
         input_spec = observation_spec + (action_spec,)
         preprocessing_layer = (
             # 20 normal observations   64 hilbert curve observations    5 actions
             tf.keras.layers.Dense(32), tf.keras.layers.Dense(128),      tf.keras.layers.Dense(16)
         )
         return input_spec, preprocessing_layer
-
-    if isinstance(python_env, RobotEnv):
-        input_spec = (observation_spec,) + (action_spec,)
-        preprocessing_layer = (
-            # 20 observations               5 actions
-            tf.keras.layers.Dense(32),      tf.keras.layers.Dense(16)
-        )
-        return input_spec, preprocessing_layer
-
-
-    raise ValueError("got an unknown env type", python_env)
 
 
 def create_envs(robot_env_no_obstacles, num_parallel_environments):

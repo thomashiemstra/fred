@@ -8,7 +8,7 @@ from tf_agents.trajectories import policy_step
 
 from src.reinforcementlearning.environment import scenario
 from src.reinforcementlearning.environment.robot_env import RobotEnv
-from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, make_video, \
+from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
 
 checkpoint_dir = 'bc'
