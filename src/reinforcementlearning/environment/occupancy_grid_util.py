@@ -3,6 +3,7 @@ from hilbertcurve.hilbertcurve import HilbertCurve
 
 max_height = 40
 
+
 def is_point_in_obstacle(point_location, obstacle_location, obstacle_half_extends, obstacle_alpha):
     obstacle_to_point = point_location[0:2] - obstacle_location[0:2]
 

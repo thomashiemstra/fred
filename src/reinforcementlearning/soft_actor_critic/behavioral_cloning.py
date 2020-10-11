@@ -55,8 +55,7 @@ def handle_observation(raw_observation):
 
 
 def gradient_descent_action(observations, pool):
-    forces_observations = [observation[0] for observation in observations]
-    total_action = np.array(pool.map(handle_observation, forces_observations))
+    total_action = np.array(pool.map(handle_observation, observations[0]))
     tf_action = tf.constant(total_action, shape=(observations[0].shape[0], 5), dtype=tf.float32)
     return policy_step.PolicyStep(tf_action, (), ())
 
@@ -149,7 +148,7 @@ if __name__ == '__main__':
 
     # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
 
-    tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True, raw_obs=True))
+    tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=False, raw_obs=True))
     tf_agent = create_agent(tf_env, None)
 
     with tf.device('/CPU:0'):

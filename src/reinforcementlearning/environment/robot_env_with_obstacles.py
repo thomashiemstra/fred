@@ -5,7 +5,7 @@ from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles, Scenario
 import numpy as np
 
-from src.reinforcementlearning.occupancy_grid_util import create_hilbert_curve_from_obstacles
+from src.reinforcementlearning.environment.occupancy_grid_util import create_hilbert_curve_from_obstacles
 from src.utils.obstacle import BoxObstacle
 
 
@@ -38,7 +38,7 @@ class RobotEnvWithObstacles(RobotEnv):
         return total_observation, total_distance
 
     def show_occupancy_grid_and_curve(self):
-        from src.reinforcementlearning.occupancy_grid_util import create_occupancy_grid_from_obstacles
+        from src.reinforcementlearning.environment.occupancy_grid_util import create_occupancy_grid_from_obstacles
 
         len_x = 40
         len_y = 40

@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from src.reinforcementlearning.occupancy_grid_util import is_point_in_obstacle, get_height_tallest_obstacle, \
+from src.reinforcementlearning.environment.occupancy_grid_util import is_point_in_obstacle, get_height_tallest_obstacle, \
     create_hilbert_curve_from_obstacles
 from src.utils.obstacle import BoxObstacle
 
