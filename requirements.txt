@@ -1,0 +1,5 @@
+tf-agents==0.6.0
+imageio==2.9.0
+gym==0.17.3
+hilbertcurve==1.0.3
+pybullet==3.0.6
