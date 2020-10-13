@@ -2,10 +2,8 @@ import inspect
 import os
 from multiprocessing import Pool
 
-
 import numpy as np
 import tensorflow as tf
-from tf_agents.environments import tf_py_environment, parallel_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory, policy_step
 from tf_agents.utils import common
@@ -13,10 +11,11 @@ from tf_agents.utils import common
 from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.reinforcementlearning.environment import robot_env_utils
-from src.reinforcementlearning.environment.robot_env import RobotEnv
-from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent
+from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, create_envs
 from src.utils.decorators import timer
+from absl import app
+import functools
+from tf_agents.system import system_multiprocessing
 
 
 def get_forces(raw_observation):
@@ -54,21 +53,27 @@ def handle_observation(raw_observation):
     return action_[1:6]
 
 
-def gradient_descent_action(observations, pool):
-    total_action = np.array(pool.map(handle_observation, observations[0]))
-    tf_action = tf.constant(total_action, shape=(observations[0].shape[0], 5), dtype=tf.float32)
+def gradient_descent_action(raw_observations, pool, robot_env_no_obstacles):
+    if robot_env_no_obstacles:
+        observations = raw_observations
+    else:
+        observations = raw_observations[0]
+
+    total_action = np.array(pool.map(handle_observation, observations))
+    tf_action = tf.constant(total_action, shape=(observations.shape[0], 5), dtype=tf.float32)
     return policy_step.PolicyStep(tf_action, (), ())
 
 
 @timer
-def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, rb_checkpointer=None):
+def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, robot_env_no_obstacles,
+                                             rb_checkpointer=None):
     current_time_step = tf_env.reset()
 
     traj_array = []
 
     with Pool(tf_env.batch_size) as pool:
         while replay_buffer.num_frames().numpy() < total_collect_steps:
-            action_step = gradient_descent_action(current_time_step.observation, pool)
+            action_step = gradient_descent_action(current_time_step.observation, pool, robot_env_no_obstacles)
 
             next_time_step = tf_env.step(action_step.action)
 
@@ -84,11 +89,7 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
     return traj_array
 
 
-def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, total_collect_steps=10000):
-    # tf_env = tf_py_environment.TFPyEnvironment(
-    #     parallel_py_environment.ParallelPyEnvironment(
-    #         [lambda: RobotEnv()] * 16))
-
+def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, robot_env_no_obstacles, total_collect_steps=10000):
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         data_spec=collect_data_spec,
         batch_size=tf_env.batch_size,
@@ -101,8 +102,11 @@ def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, total_colle
 
     replay_buffer_checkpointer.initialize_or_restore()
 
+    print("replay buffer size: {}".format(replay_buffer.num_frames().numpy()))
+
     if replay_buffer.num_frames().numpy() < total_collect_steps:
-        fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, replay_buffer_checkpointer)
+        fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, robot_env_no_obstacles,
+                                                 replay_buffer_checkpointer)
     else:
         print("got a full buffer from the checkpoint")
 
@@ -112,7 +116,7 @@ def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, total_colle
     return replay_buffer
 
 
-def train_agent(tf_agent, replay_buffer, train_steps):
+def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpointer, global_step):
     dataset = replay_buffer.as_dataset(
         sample_batch_size=batch_size,
         num_steps=2).unbatch().batch(batch_size).prefetch(5)
@@ -134,26 +138,28 @@ def train_agent(tf_agent, replay_buffer, train_steps):
     print("done training")
 
 
-if __name__ == '__main__':
+def main(_):
     tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'behavioral_cloning_obstacles/'
+    checkpoint_dir = 'behavioral_cloning_no_obstacles/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
-    total_collect_steps = 100000
+    total_collect_steps = 10000
     batch_size = 256
     train_steps = 1500
+    robot_env_no_obstacles = True
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
     # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
 
-    tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=False, raw_obs=True))
-    tf_agent = create_agent(tf_env, None)
+    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 12)
+
+    tf_agent = create_agent(tf_env, None, robot_env_no_obstacles)
 
     with tf.device('/CPU:0'):
         replay_buffer = fill_and_get_replay_buffer(train_dir, tf_agent.collect_data_spec, tf_env,
-                                               total_collect_steps=total_collect_steps)
+                                                   robot_env_no_obstacles, total_collect_steps=total_collect_steps)
 
     train_checkpointer = common.Checkpointer(
         ckpt_dir=train_dir,
@@ -162,5 +168,8 @@ if __name__ == '__main__':
 
     train_checkpointer.initialize_or_restore()
 
-    train_agent(tf_agent, replay_buffer, train_steps)
+    train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpointer, global_step)
 
+
+if __name__ == '__main__':
+    system_multiprocessing.handle_main(functools.partial(app.run, main))
