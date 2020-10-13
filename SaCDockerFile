@@ -1,0 +1,26 @@
+FROM tensorflow/tensorflow:latest-gpu
+
+WORKDIR /tf
+
+# Set desired Python version
+ENV python_version 3.8
+
+# copy the dependencies file to the working directory
+COPY requirements.txt .
+
+# install dependencies
+RUN pip install -r requirements.txt
+
+# add src to pythonpath
+ENV PYTHONPATH "${PYTHONPATH}:/src"
+
+## copy the content of the local softActorCritic directory to the working directory
+#COPY src/ src/
+
+### command to run on container start
+#ENTRYPOINT [ "python", "./src/reinforcementlearning/softActorCritic/softActorCritic.py"]
+
+# Run with:
+# docker run -it --gpus all --rm -v /home/thomas/PycharmProjects/fred/src:/tf/src   thomas137/sac
+# python src/reinforcementlearning/softActorCritic/soft_actor_critic.py --root_dir=test
+
