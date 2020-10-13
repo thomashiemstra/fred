@@ -21,9 +21,10 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
 from tf_agents.system import system_multiprocessing as multiprocessing
+import multiprocessing as mp
 
-from src.reinforcementlearning.soft_actor_critic.behavioral_cloning import fill_replay_buffer_with_gradient_descent
-from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
+from src.reinforcementlearning.softActorCritic.behavioral_cloning import fill_replay_buffer_with_gradient_descent
+from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
     make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
 
 flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
@@ -121,6 +122,8 @@ def train_eval(checkpoint_dir,
                                                                                                     replay_buffer,
                                                                                                     train_metrics)
 
+        print("replay buffer size: {}".format(replay_buffer.num_frames().numpy()))
+
         initial_collect_driver = dynamic_step_driver.DynamicStepDriver(
             tf_env,
             initial_collect_policy,
@@ -145,7 +148,7 @@ def train_eval(checkpoint_dir,
                 'a random policy.', initial_collect_steps)
             # initial_collect_driver.run()
             with tf.device('/CPU:0'):
-                fill_replay_buffer_with_gradient_descent(tf_env, initial_collect_steps, replay_buffer)
+                fill_replay_buffer_with_gradient_descent(tf_env, initial_collect_steps, robot_env_no_obstacles, replay_buffer)
         else:
             logging.info("skipping initial collect because we already have data")
 
@@ -236,6 +239,8 @@ def main(_):
     print("GPU Available: ", tf.test.is_gpu_available())
 
     print("eager is on: {}".format(tf.executing_eagerly()))
+
+    print("Cores available: {}".format(mp.cpu_count()))
 
     # if not tf.bc.is_gpu_available():
     #     print("no point in training without a gpu, go watch the grass grow instead")

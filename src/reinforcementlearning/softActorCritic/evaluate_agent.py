@@ -8,14 +8,12 @@ from tf_agents.trajectories import policy_step
 
 from src.reinforcementlearning.environment import scenario
 from src.reinforcementlearning.environment.robot_env import RobotEnv
-from src.reinforcementlearning.soft_actor_critic.sac_utils import create_agent, \
+from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
 
-checkpoint_dir = 'bc'
+checkpoint_dir = 'test'
 
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-
-# root_dir = os.path.expanduser('/home/thomas/PycharmProjects/fred/src/reinforcementlearning/checkpoints/trained_no_obstacles')
 root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
 
 train_dir = os.path.join(root_dir, 'train')
@@ -25,11 +23,10 @@ global_step = tf.compat.v1.train.create_global_step()
 eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
 
 with tf.compat.v2.summary.record_if(False):
-    tf_agent = create_agent(eval_py_env, None)
+    tf_agent = create_agent(eval_py_env, None, True)
     initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
 
 num_episodes = 100
-
 
 
 # eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[3]

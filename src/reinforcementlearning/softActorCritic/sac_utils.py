@@ -14,10 +14,10 @@ from tf_agents.utils import common
 
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.soft_actor_critic.custom_objects.actor_distribution_network_trainable import \
+from src.reinforcementlearning.softActorCritic.custom_objects.actor_distribution_network_trainable import \
     ActorDistributionNetworkTrainable
-from src.reinforcementlearning.soft_actor_critic.custom_objects.custom_sac_agent import CustomSacAgent
-from src.reinforcementlearning.soft_actor_critic.custom_objects.normal_projection_network_trainable import \
+from src.reinforcementlearning.softActorCritic.custom_objects.custom_sac_agent import CustomSacAgent
+from src.reinforcementlearning.softActorCritic.custom_objects.normal_projection_network_trainable import \
     NormalProjectionNetworkTrainable
 from src.utils.os_utils import is_linux
 
