@@ -53,6 +53,10 @@
                 <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/findcenter')">Engage</button>
                 <br>
                 <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/clearcenter')">Clear center</button>
+                <br>
+                <div class="col-sm-4">
+                  <h1>Streaming</h1>
+                <img src="{{ url_for('xbox_api.video_feed') }}">
             </div>
              <div class="col-sm-4">
                  <h2>Save moves to file:</h2>

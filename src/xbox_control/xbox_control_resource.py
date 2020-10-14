@@ -8,7 +8,14 @@ from flask import jsonify
 import src.global_constants
 from src.kinematics.kinematics_utils import Pose
 import src.global_objects as global_objects
+import numpy as np
+import cv2
+import pybullet as p
+from flask import Response
 
+from src.simulation.simulation_utils import start_simulated_robot
+from src.utils.decorators import timer
+import time
 
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
@@ -127,6 +134,11 @@ def set_speed():
     return jsonify(success=True)
 
 
+@xbox_api.route('/video_feed')
+def video_feed():
+    return Response(get_image(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 def get_filename():
     try:
         return request.get_json()['filename'] + '.json'
@@ -139,3 +151,54 @@ def get_parameter(param_name):
         return request.get_json()[param_name]
     except KeyError:
         return None
+
+@timer
+def get_image():
+    while True:
+        width = 320
+        height = 240
+
+        fov = 60
+        aspect = width / height
+        near = 0.02
+        far = 10
+
+        camTargetPos = [-0.2, 0.3, 0.4]
+        # camTargetPos=[0, 0, 0]
+        camDistance = 0.5
+        yaw = -60.0
+        pitch = -40.0
+        roll = 0
+        upAxisIndex = 2
+
+        viewMatrix = p.computeViewMatrixFromYawPitchRoll(camTargetPos,
+                                                         camDistance,
+                                                         yaw,
+                                                         pitch,
+                                                         roll,
+                                                         upAxisIndex)
+
+        projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near, far)
+
+        # Get depth values using the OpenGL renderer
+        width, height, rgbImg, depthImg, segImg = p.getCameraImage(width,
+                                                                   height,
+                                                                   viewMatrix,
+                                                                   projection_matrix,
+                                                                   renderer=p.ER_BULLET_HARDWARE_OPENGL)
+        # ER_TINY_RENDERER
+
+        img = np.array(rgbImg)[:, :, :3]
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        frame = cv2.imencode('.jpg', img)[1].tobytes()
+
+        return b'--frame\r\n'b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
+        # yield (b'--frame\r\n'b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+#
+#
+robot = start_simulated_robot(use_gui=False)
+
+
+for _ in range(100):
+    get_image()
