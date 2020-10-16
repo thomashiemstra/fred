@@ -107,6 +107,7 @@ def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, robot_env_n
     if replay_buffer.num_frames().numpy() < total_collect_steps:
         fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, robot_env_no_obstacles,
                                                  replay_buffer_checkpointer)
+        replay_buffer_checkpointer.save(replay_buffer.num_frames().numpy())
     else:
         print("got a full buffer from the checkpoint")
 
@@ -139,19 +140,17 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
 
 def main(_):
-    tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'behavioral_cloning_no_obstacles/'
+    # tf.config.experimental_run_functions_eagerly(True)
+    checkpoint_dir = 'behavioral_cloning_obstacles/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
-    total_collect_steps = 10000
+    total_collect_steps = 500000
     batch_size = 256
     train_steps = 1500
-    robot_env_no_obstacles = True
+    robot_env_no_obstacles = False
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
-
-    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
 
     tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 12)
 
@@ -164,6 +163,7 @@ def main(_):
     train_checkpointer = common.Checkpointer(
         ckpt_dir=train_dir,
         agent=tf_agent,
+        max_to_keep=5,
         global_step=global_step)
 
     train_checkpointer.initialize_or_restore()

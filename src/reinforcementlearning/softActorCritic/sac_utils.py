@@ -107,17 +107,17 @@ def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles):
 
 def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observation_spec, action_spec):
     if robot_env_no_obstacles:
-        input_spec = (observation_spec,) + (action_spec,)
+        input_spec = (observation_spec, action_spec)
         preprocessing_layer = (
             # 20 observations               5 actions
             tf.keras.layers.Dense(32), tf.keras.layers.Dense(16)
         )
         return input_spec, preprocessing_layer
     else:
-        input_spec = observation_spec + (action_spec,)
+        input_spec = (observation_spec, action_spec)
         preprocessing_layer = (
             # 20 normal observations   64 hilbert curve observations    5 actions
-            tf.keras.layers.Dense(32), tf.keras.layers.Dense(128),      tf.keras.layers.Dense(16)
+            (tf.keras.layers.Dense(32), tf.keras.layers.Dense(128)),      tf.keras.layers.Dense(16)
         )
         return input_spec, preprocessing_layer
 
