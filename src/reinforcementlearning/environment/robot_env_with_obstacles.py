@@ -11,7 +11,7 @@ from src.utils.obstacle import BoxObstacle
 
 class RobotEnvWithObstacles(RobotEnv):
 
-    def __init__(self, use_gui=False, raw_obs=False, no_obstacles=True):
+    def __init__(self, use_gui=False, raw_obs=False):
         super().__init__(use_gui, raw_obs)
 
         self._observation_spec = (array_spec.BoundedArraySpec(
