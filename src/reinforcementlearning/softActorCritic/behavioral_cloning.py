@@ -66,7 +66,7 @@ def gradient_descent_action(raw_observations, pool, robot_env_no_obstacles):
 
 @timer
 def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, robot_env_no_obstacles,
-                                             rb_checkpointer=None):
+                                             rb_checkpointer):
     current_time_step = tf_env.reset()
 
     traj_array = []
@@ -82,7 +82,7 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
 
             current_time_step = next_time_step
 
-            if rb_checkpointer is not None and replay_buffer.num_frames().numpy() % 1000 == 0:
+            if replay_buffer.num_frames().numpy() % 1000 == 0:
                 rb_checkpointer.save(replay_buffer.num_frames().numpy())
                 print("saved")
 
@@ -140,19 +140,21 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
 
 def main(_):
-    # tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'behavioral_cloning_obstacles/'
+    tf.config.experimental_run_functions_eagerly(True)
+    checkpoint_dir = 'behavioral_cloning_no_obstacles/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
-    total_collect_steps = 500000
+    total_collect_steps = 10000
     batch_size = 256
     train_steps = 1500
-    robot_env_no_obstacles = False
+    robot_env_no_obstacles = True
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
-    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 12)
+    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
+
+    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 10)
 
     tf_agent = create_agent(tf_env, None, robot_env_no_obstacles)
 
@@ -163,7 +165,6 @@ def main(_):
     train_checkpointer = common.Checkpointer(
         ckpt_dir=train_dir,
         agent=tf_agent,
-        max_to_keep=5,
         global_step=global_step)
 
     train_checkpointer.initialize_or_restore()
