@@ -31,9 +31,9 @@ class ControlPoint:
 
 
 def generate_control_points(body_id, physics_client):
-    c1 = ControlPoint(8, 4, body_id, physics_client)  # in between frame 3 and the wrist
-    c2 = ControlPoint(7, 6, body_id, physics_client)  # wrist (frame 4)
-    c3 = ControlPoint(6, 5, body_id, physics_client)  # tip of the gripper
+    c1 = ControlPoint(8, 6, body_id, physics_client)   # in between frame 3 and the wrist
+    c2 = ControlPoint(7, 6, body_id, physics_client, weight=2)  # wrist (frame 4)
+    c3 = ControlPoint(6, 4, body_id, physics_client)  # tip of the gripper
     return c1, c2, c3
 
 
