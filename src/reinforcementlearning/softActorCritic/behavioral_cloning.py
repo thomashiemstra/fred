@@ -68,7 +68,7 @@ def gradient_descent_action(raw_observations, pool, robot_env_no_obstacles):
 
 @timer
 def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, robot_env_no_obstacles,
-                                             rb_checkpointer=None):
+                                             rb_checkpointer):
     current_time_step = tf_env.reset()
 
     traj_array = []
@@ -84,7 +84,7 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
 
             current_time_step = next_time_step
 
-            if rb_checkpointer is not None and replay_buffer.num_frames().numpy() % 1000 == 0:
+            if replay_buffer.num_frames().numpy() % 1000 == 0:
                 rb_checkpointer.save(replay_buffer.num_frames().numpy())
                 print("saved")
 

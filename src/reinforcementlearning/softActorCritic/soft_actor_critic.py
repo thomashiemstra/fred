@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import functools
 import inspect
+import multiprocessing as mp
 import os
 import time
 
@@ -19,11 +20,9 @@ from tf_agents.metrics import tf_py_metric
 from tf_agents.policies import greedy_policy
 from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.utils import common
 from tf_agents.system import system_multiprocessing as multiprocessing
-import multiprocessing as mp
+from tf_agents.utils import common
 
-from src.reinforcementlearning.softActorCritic.behavioral_cloning import fill_replay_buffer_with_gradient_descent
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
     make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
 
@@ -87,9 +86,6 @@ def train_eval(checkpoint_dir,
 
         tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles)
 
-        if checkpoint_dir_behavioral_cloning is not None:
-            restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
-
         environment_steps_metric = tf_metrics.EnvironmentSteps()
         step_metrics = [
             tf_metrics.NumberOfEpisodes(),
@@ -141,19 +137,21 @@ def train_eval(checkpoint_dir,
             collect_driver.run = common.function(collect_driver.run)
             tf_agent.train = common.function(tf_agent.train)
 
-        if global_step.numpy() == 0:
+        if checkpoint_dir_behavioral_cloning is not None and global_step.numpy() == 0:
+            logging.info("restoring agent from the behavioral cloning run")
+            restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
+            logging.info('Initializing replay buffer by collecting experience for %d steps with '
+                         'the behavioral cloning policy.', initial_collect_steps)
+            for _ in range(int(initial_collect_steps / collect_steps_per_iteration)):
+                collect_driver.run()
+        elif global_step.numpy() == 0:
             # Collect initial replay data.
             logging.info(
                 'Initializing replay buffer by collecting experience for %d steps with '
                 'a random policy.', initial_collect_steps)
-            # initial_collect_driver.run()
-            with tf.device('/CPU:0'):
-                fill_replay_buffer_with_gradient_descent(tf_env, initial_collect_steps, robot_env_no_obstacles, replay_buffer)
+            initial_collect_driver.run()
         else:
             logging.info("skipping initial collect because we already have data")
-
-        # For debugging
-        # tf.config.experimental_run_functions_eagerly(False)
 
         compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step, eval_summary_writer)
 
@@ -184,7 +182,7 @@ def train_eval(checkpoint_dir,
             start_time = time.time()
 
             for _ in range(train_steps_per_iteration):
-                 train_loss = train_step()
+                train_loss = train_step()
 
             time_step, policy_state = collect_driver.run(
                 time_step=time_step,
@@ -225,7 +223,6 @@ def train_eval(checkpoint_dir,
 
 
 def restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step):
-    print("restoring agent from the behavioral cloning run")
     root_dir_behavioral_cloning = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir_behavioral_cloning)
     train_dir_behavioral_cloning = os.path.join(root_dir_behavioral_cloning, 'train')
     initialize_and_restore_train_checkpointer(train_dir_behavioral_cloning, tf_agent, global_step)
@@ -242,9 +239,7 @@ def main(_):
 
     print("Cores available: {}".format(mp.cpu_count()))
 
-    # if not tf.bc.is_gpu_available():
-    #     print("no point in training without a gpu, go watch the grass grow instead")
-    #     sys.exit()
+    # for debugging
     # tf.config.experimental_run_functions_eagerly(True)
     train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir)
 
