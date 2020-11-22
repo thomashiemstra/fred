@@ -4,6 +4,7 @@ from multiprocessing import Pool
 
 import numpy as np
 import tensorflow as tf
+from tf_agents.environments import tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory, policy_step
 from tf_agents.utils import common
@@ -11,6 +12,7 @@ from tf_agents.utils import common
 from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.reinforcementlearning.environment import robot_env_utils
+from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, create_envs
 from src.utils.decorators import timer
 from absl import app
@@ -25,12 +27,12 @@ def get_forces(raw_observation):
         observation = raw_observation
 
     c1_attr = np.zeros(3)
-    c2_attr = 2 * observation[0:3]
+    c2_attr = observation[0:3]
     c3_attr = observation[3:6]
 
-    c1_rep = observation[6:9]
-    c2_rep = observation[9:12]
-    c3_rep = observation[12:15]
+    c1_rep = 2 * observation[6:9]
+    c2_rep = 2 * observation[9:12]
+    c3_rep = 2 * observation[12:15]
 
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
@@ -93,7 +95,7 @@ def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, robot_env_n
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         data_spec=collect_data_spec,
         batch_size=tf_env.batch_size,
-        max_length=1000000)
+        max_length=total_collect_steps)
 
     replay_buffer_checkpointer = common.Checkpointer(
         ckpt_dir=os.path.join(train_dir, 'replay_buffer'),
@@ -141,18 +143,19 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
 def main(_):
     # tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'behavioral_cloning_obstacles/'
+    checkpoint_dir = 'behavioral_cloning_obstacles_v2/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
-    total_collect_steps = 500000
+    total_collect_steps = 100000
     batch_size = 256
-    train_steps = 1500
+    train_steps = 2500
     robot_env_no_obstacles = False
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
-    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 12)
+    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 10)
+    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True, raw_obs=True))
 
     tf_agent = create_agent(tf_env, None, robot_env_no_obstacles)
 
