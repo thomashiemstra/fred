@@ -1,17 +1,17 @@
 import inspect
 import os
-import random
 
-from tf_agents.environments import tf_py_environment, suite_gym
 import tensorflow as tf
+from tf_agents.environments import tf_py_environment
 from tf_agents.trajectories import policy_step
 
-from src.reinforcementlearning.environment import scenario
 from src.reinforcementlearning.environment.robot_env import RobotEnv
+from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
 
-checkpoint_dir = 'test'
+checkpoint_dir = 'behavioral_cloning_obstacles_v2'
+robot_env_no_obstacles = False
 
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
@@ -20,10 +20,13 @@ train_dir = os.path.join(root_dir, 'train')
 tf.compat.v1.enable_v2_behavior()
 global_step = tf.compat.v1.train.create_global_step()
 
-eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
+if robot_env_no_obstacles:
+    eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
+else:
+    eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True))
 
 with tf.compat.v2.summary.record_if(False):
-    tf_agent = create_agent(eval_py_env, None, True)
+    tf_agent = create_agent(eval_py_env, None, robot_env_no_obstacles)
     initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
 
 num_episodes = 100
