@@ -48,7 +48,8 @@ def create_agent(env,
     observation_spec = time_step_spec.observation
     action_spec = env.action_spec()
 
-    actor_preprocessing_layer, preprocessing_combiner = get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles)
+    actor_preprocessing_layer, preprocessing_combiner = get_actor_preprocessing_layer_and_combiner(
+        robot_env_no_obstacles)
     actor_net = ActorDistributionNetworkTrainable(
         observation_spec,
         action_spec,
@@ -57,7 +58,8 @@ def create_agent(env,
         fc_layer_params=actor_fc_layers,
         continuous_projection_net=normal_projection_net)
 
-    critic_input_spec, critic_preprocessing_layer = get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observation_spec,
+    critic_input_spec, critic_preprocessing_layer = get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
+                                                                                                 observation_spec,
                                                                                                  action_spec)
     critic_net = value_network.ValueNetwork(
         critic_input_spec,
@@ -117,13 +119,13 @@ def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observa
         input_spec = (observation_spec, action_spec)
         preprocessing_layer = (
             # 20 normal observations   64 hilbert curve observations    5 actions
-            (tf.keras.layers.Dense(32), tf.keras.layers.Dense(128)),      tf.keras.layers.Dense(16)
+            (tf.keras.layers.Dense(32), tf.keras.layers.Dense(64)), tf.keras.layers.Dense(16)
         )
         return input_spec, preprocessing_layer
 
 
 def create_envs(robot_env_no_obstacles, num_parallel_environments):
-    if not is_linux():  # Windows does not handle multiprocessing well
+    if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
         if robot_env_no_obstacles:
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
