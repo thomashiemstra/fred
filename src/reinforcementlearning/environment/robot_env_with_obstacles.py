@@ -13,24 +13,28 @@ class RobotEnvWithObstacles(RobotEnv):
 
     def __init__(self, use_gui=False, raw_obs=False):
         super().__init__(use_gui, raw_obs)
-
+        self._hilbert_curve_iteration = 3
+        self._grid_len_x = 40
+        self._grid_len_y = 40
         self._observation_spec = (array_spec.BoundedArraySpec(
             shape=(20,),
             dtype=np.float32, minimum=-1, maximum=1, name='observation'),
-          array_spec.BoundedArraySpec(
-              shape=(2 ** (2 * self._hilbert_curve_iteration), ),
-              dtype=np.float32, minimum=0, maximum=1, name='hilbert curve'),
+                                  array_spec.BoundedArraySpec(
+                                      shape=(2 ** (2 * self._hilbert_curve_iteration),),
+                                      dtype=np.float32, minimum=0, maximum=1, name='hilbert curve'),
         )
         self.scenarios = scenarios_no_obstacles + scenarios_obstacles
-        self._max_steps_to_take_before_failure = 1000
-        self._update_step_size = 0.005
+        # self.scenarios = scenarios_obstacles
+        self._max_steps_to_take_before_failure = 1500
+        self._update_step_size = 0.01
+        self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                          grid_len_y=self._grid_len_y,
+                                                          iteration=self._hilbert_curve_iteration)
 
     def _get_observations(self):
         no_obstacle_obs, total_distance = super()._get_observations()
 
-        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
-                                                    grid_len_y=self._grid_len_y,
-                                                    iteration=self._hilbert_curve_iteration)
+        curve = self._curve
 
         total_observation = (np.array(no_obstacle_obs, dtype=np.float32),
                              np.array(np.array(curve.tolist()), dtype=np.float32))
@@ -73,7 +77,6 @@ if __name__ == '__main__':
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")
-
 
 # ░░░░░░░█▐▓▓░████▄▄▄█▀▄▓▓▓▌█ Epic code
 # ░░░░░▄█▌▀▄▓▓▄▄▄▄▀▀▀▄▓▓▓▓▓▌█

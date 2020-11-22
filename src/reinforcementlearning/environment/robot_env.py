@@ -21,9 +21,6 @@ class RobotEnv(py_environment.PyEnvironment):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
-        self._hilbert_curve_iteration = 3
-        self._grid_len_x = 40
-        self._grid_len_y = 40
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(5,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
@@ -228,7 +225,7 @@ class RobotEnv(py_environment.PyEnvironment):
         repulsive_forces = get_repulsive_forces_world(self._robot_body_id, np.array([c1, c2, c3]),
                                                       obstacle_ids, self._physics_client,
                                                       repulsive_cutoff_distance=repulsive_cutoff_distance,
-                                                      clip_force=2)
+                                                      clip_force=6)
 
         if self._use_gui:
             self._attr_lines, self._rep_lines = draw_debug_lines(self._physics_client, np.array([c1, c2, c3]),
