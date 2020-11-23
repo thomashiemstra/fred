@@ -76,6 +76,9 @@ def create_hilbert_curve_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40,
     grid_size_y = grid_len_y / curve_side_len
 
     res = np.zeros(curve_total_len)
+    if obstacles is None:
+        return res
+
     for i in range(curve_total_len):
         coords = hilbert_curve.coordinates_from_distance(i)
         x_h_coord, y_h_coord = coords[0], coords[1]

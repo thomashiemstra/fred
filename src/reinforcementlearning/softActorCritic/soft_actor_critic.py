@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import functools
 import inspect
+import math
 import multiprocessing as mp
 import os
 import time
@@ -23,6 +24,7 @@ from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.system import system_multiprocessing as multiprocessing
 from tf_agents.utils import common
 
+from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
     make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
 
@@ -59,8 +61,8 @@ def train_eval(checkpoint_dir,
                log_interval=5000,
                summary_interval=1000,
                summaries_flush_secs=10,
-               robot_env_no_obstacles=True,
-               num_parallel_environments=16):
+               robot_env_no_obstacles=False,
+               num_parallel_environments=15):
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
@@ -118,7 +120,7 @@ def train_eval(checkpoint_dir,
                                                                                                     replay_buffer,
                                                                                                     train_metrics)
 
-        print("replay buffer size: {}".format(replay_buffer.num_frames().numpy()))
+        logging.info("replay buffer size: {}".format(replay_buffer.num_frames().numpy()))
 
         initial_collect_driver = dynamic_step_driver.DynamicStepDriver(
             tf_env,
@@ -176,6 +178,9 @@ def train_eval(checkpoint_dir,
         time_before_training = time.time()
 
         steps_taken_in_prev_round = global_step.numpy()  # From a previous training round
+
+        log_interval_manager = IntervalManager(log_interval)
+        eval_interval_keeper = IntervalManager(log_interval)
         while global_step.numpy() < total_train_steps:
             global_steps_taken = global_step.numpy()
 
@@ -191,7 +196,7 @@ def train_eval(checkpoint_dir,
 
             time_acc += time.time() - start_time
 
-            if global_steps_taken % log_interval == 0:
+            if log_interval_manager.should_trigger(global_steps_taken):
                 logging.info('step = %d, loss = %f', global_steps_taken,
                              train_loss.loss)
                 steps_per_sec = (global_step.numpy() - timed_at_step) / time_acc
@@ -209,7 +214,7 @@ def train_eval(checkpoint_dir,
                 train_metric.tf_summaries(
                     train_step=global_step, step_metrics=train_metrics[:2])
 
-            if global_steps_taken % eval_interval == 0:
+            if eval_interval_keeper.should_trigger(global_steps_taken):
                 compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step,
                                 eval_summary_writer)
 
@@ -230,7 +235,7 @@ def restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral
 
 def main(_):
     tf.compat.v1.enable_v2_behavior()
-    logging.set_verbosity(logging.INFO)
+    logging.set_verbosity(logging.DEBUG)
     gin.parse_config_files_and_bindings(FLAGS.gin_file, FLAGS.gin_param)
 
     print("GPU Available: ", tf.test.is_gpu_available())

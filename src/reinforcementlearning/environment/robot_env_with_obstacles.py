@@ -4,6 +4,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles, Scenario
 import numpy as np
+from tf_agents.trajectories import time_step as ts
 
 from src.reinforcementlearning.environment.occupancy_grid_util import create_hilbert_curve_from_obstacles
 from src.utils.obstacle import BoxObstacle
@@ -21,7 +22,7 @@ class RobotEnvWithObstacles(RobotEnv):
             dtype=np.float32, minimum=-1, maximum=1, name='observation'),
                                   array_spec.BoundedArraySpec(
                                       shape=(2 ** (2 * self._hilbert_curve_iteration),),
-                                      dtype=np.float32, minimum=0, maximum=1, name='hilbert curve'),
+                                      dtype=np.float32, minimum=0, maximum=1, name='hilbert_curve'),
         )
         self.scenarios = scenarios_no_obstacles + scenarios_obstacles
         # self.scenarios = scenarios_obstacles
@@ -30,6 +31,14 @@ class RobotEnvWithObstacles(RobotEnv):
         self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y,
                                                           iteration=self._hilbert_curve_iteration)
+
+    def _reset(self):
+        super(RobotEnvWithObstacles, self)._reset()
+        self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                          grid_len_y=self._grid_len_y,
+                                                          iteration=self._hilbert_curve_iteration)
+        observation, _ = self._get_observations()
+        return ts.restart(observation)
 
     def _get_observations(self):
         no_obstacle_obs, total_distance = super()._get_observations()
