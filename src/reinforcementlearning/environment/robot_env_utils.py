@@ -86,10 +86,16 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
 
 
 def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id, repulsive_cutoff_distance):
-    _, _, _, _, _, _, _, normal_on_b, d, *x = p.getClosestPoints(bodyA=robot_body_id, bodyB=obstacle_id,
-                                                                 linkIndexA=control_point_id,
-                                                                 distance=repulsive_cutoff_distance,
-                                                                 physicsClientId=physics_client_id)[0]
+    res = p.getClosestPoints(bodyA=robot_body_id,
+                             bodyB=obstacle_id,
+                             linkIndexA=control_point_id,
+                             distance=repulsive_cutoff_distance,
+                             physicsClientId=physics_client_id)
+
+    if res == ():
+        return [0, 0, 1], 10000000
+
+    _, _, _, _, _, _, _, normal_on_b, d, *x = res[0]
     return normal_on_b, d * 100
 
 
