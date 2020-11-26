@@ -49,6 +49,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._reverse_scenario = False
         self._done = True
         self._externally_set_scenario = None
+        self._traveled_distances = []
 
     @property
     def current_angles(self):
@@ -137,6 +138,7 @@ class RobotEnv(py_environment.PyEnvironment):
         observation, self._previous_distance_to_target = self._get_observations()
         self._episode_ended = False
         self._steps_taken = 0
+        self._traveled_distances = []
         self._done = False
         return ts.restart(observation)
 
@@ -171,37 +173,46 @@ class RobotEnv(py_environment.PyEnvironment):
         # print("collision: {}".format(collision))
 
         observation, total_distance = self._get_observations()
+        self._traveled_distances.append(total_distance)
+        stuck = self._is_stuck(total_distance, self._traveled_distances)
+
         distance_covered = self._previous_distance_to_target - total_distance
         self._previous_distance_to_target = total_distance
         reward = self._get_reward(distance_covered, total_distance, action)
 
-        self._current_time_step = self._get_current_time_step(collision, observation, total_distance, reward)
+        self._current_time_step = self._get_current_time_step(collision, observation, total_distance, reward, stuck)
         self._steps_taken += 1
         return self._current_time_step
 
     @staticmethod
     def _get_reward(distance_covered, total_distance, action):
-        reward = 1 if distance_covered > 0 else -0.5
-        effort = np.sum(action * action) * 0.2
-        if reward > 0 and total_distance > 20:
-            reward = np.max([reward * 0.75, reward - effort])
+        return distance_covered*4
+        # effort = np.sum(action * action) * 0.02
+        # reward = distance_covered - effort
+        # return reward
 
-        return reward
-
-    def _get_current_time_step(self, collision, observation, total_distance, reward):
+    def _get_current_time_step(self, collision, observation, total_distance, reward, stuck):
         if self._steps_taken > self._max_steps_to_take_before_failure:
             self._done = True
             return ts.termination(observation, reward=0)
         elif collision:
             self._done = True
             return ts.termination(observation, reward=-20)
-        elif total_distance < 10:  # target reached
+        if stuck:
             self._done = True
-            done_reward = 100 + ((200 - self._steps_taken) / 2)
-            return ts.termination(observation, reward=done_reward)
+            return ts.termination(observation, reward=0)
+        elif total_distance < 20:  # target reached
+            self._done = True
+            return ts.termination(observation, reward=20)
         else:
             self._done = False
             return ts.transition(observation, reward=reward, discount=1.0)
+
+    @staticmethod
+    def _is_stuck(total_distance, traveled_distances):
+        if len(traveled_distances) > 200:
+            return abs(traveled_distances[-150] - traveled_distances[-1]) < 0.5
+        return False
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points
