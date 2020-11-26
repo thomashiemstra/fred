@@ -32,37 +32,43 @@ flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
                     'Root directory for writing logs/summaries/checkpoints.')
 flags.DEFINE_string('behavioral_cloning_checkpoint_dir', None,
                     'Directory in the root dir where the results for the behavioral cloning are saved')
+flags.DEFINE_float('reward_scaling', None, 'reward scaling')
 
 flags.DEFINE_multi_string('gin_file', None, 'Path to the trainer config files.')
 flags.DEFINE_multi_string('gin_param', None, 'Gin binding to pass through.')
 
 FLAGS = flags.FLAGS
-
+# time python src/reinforcementlearning/softActorCritic/soft_actor_critic.py --root_dir=bc_obstacles_15envs --behavioral_cloning_checkpoint_dir=behavioral_cloning_obstacles
 
 def train_eval(checkpoint_dir,
                checkpoint_dir_behavioral_cloning=None,
-               total_train_steps=2000000,
+               total_train_steps=50000,
                # Params for collect,
                initial_collect_steps=10000,
-               collect_steps_per_iteration=150,
-               replay_buffer_capacity=1000000,
+               collect_steps_per_iteration=1,
+               replay_buffer_capacity=500000,
                # Params for target update,
                # Params for train,
-               train_steps_per_iteration=150,
+               train_steps_per_iteration=1,
                batch_size=256,
                use_tf_functions=True,
                # Params for eval,
-               num_eval_episodes=1,
-               eval_interval=2500,
+               num_eval_episodes=10,
+               eval_interval=2000,
                # Params for summaries and logging,
                train_checkpoint_interval=5000,
                policy_checkpoint_interval=5000,
                rb_checkpoint_interval=50000,
-               log_interval=5000,
+               log_interval=2000,
                summary_interval=1000,
                summaries_flush_secs=10,
-               robot_env_no_obstacles=False,
-               num_parallel_environments=15):
+               robot_env_no_obstacles=True,
+               num_parallel_environments=5,
+               reward_scaling=1.0):
+    train_checkpoint_interval_manager = IntervalManager(train_checkpoint_interval)
+    policy_checkpoint_interval_manager = IntervalManager(policy_checkpoint_interval)
+    rb_checkpoint_interval_manager = IntervalManager(rb_checkpoint_interval)
+
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
@@ -86,7 +92,7 @@ def train_eval(checkpoint_dir,
 
         tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments)
 
-        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles)
+        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles, reward_scale_factor=reward_scaling)
 
         environment_steps_metric = tf_metrics.EnvironmentSteps()
         step_metrics = [
@@ -139,7 +145,8 @@ def train_eval(checkpoint_dir,
             collect_driver.run = common.function(collect_driver.run)
             tf_agent.train = common.function(tf_agent.train)
 
-        if checkpoint_dir_behavioral_cloning is not None and global_step.numpy() == 0:
+        restore_from_behavioral_cloning = checkpoint_dir_behavioral_cloning is not None and global_step.numpy() == 0
+        if restore_from_behavioral_cloning:
             logging.info("restoring agent from the behavioral cloning run")
             restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
             logging.info('Initializing replay buffer by collecting experience for %d steps with '
@@ -180,7 +187,9 @@ def train_eval(checkpoint_dir,
         steps_taken_in_prev_round = global_step.numpy()  # From a previous training round
 
         log_interval_manager = IntervalManager(log_interval)
-        eval_interval_keeper = IntervalManager(log_interval)
+        eval_interval_keeper = IntervalManager(eval_interval)
+
+        logging.info("training")
         while global_step.numpy() < total_train_steps:
             global_steps_taken = global_step.numpy()
 
@@ -218,8 +227,11 @@ def train_eval(checkpoint_dir,
                 compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step,
                                 eval_summary_writer)
 
-            save_checkpoints(global_steps_taken, train_checkpoint_interval, policy_checkpoint_interval,
-                             rb_checkpoint_interval, train_checkpointer, policy_checkpointer, rb_checkpointer)
+            save_checkpoints(global_steps_taken,
+                             train_checkpoint_interval_manager,
+                             policy_checkpoint_interval_manager,
+                             rb_checkpoint_interval_manager,
+                             train_checkpointer, policy_checkpointer, rb_checkpointer)
 
         time_after_trianing = time.time()
 
@@ -246,7 +258,11 @@ def main(_):
 
     # for debugging
     # tf.config.experimental_run_functions_eagerly(True)
-    train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir)
+    reward_scaling = FLAGS.reward_scaling
+    if reward_scaling is None:
+        reward_scaling = 1.0
+
+    train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir, reward_scaling=reward_scaling)
 
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64

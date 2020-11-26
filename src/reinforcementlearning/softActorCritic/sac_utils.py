@@ -21,6 +21,8 @@ from src.reinforcementlearning.softActorCritic.custom_objects.normal_projection_
     NormalProjectionNetworkTrainable
 from src.utils.os_utils import is_linux
 
+from tf_agents.agents.ddpg import critic_network
+
 
 def normal_projection_net(action_spec):
     return NormalProjectionNetworkTrainable(
@@ -32,18 +34,19 @@ def normal_projection_net(action_spec):
 def create_agent(env,
                  global_step,
                  robot_env_no_obstacles,
-                 actor_fc_layers=(32,),
-                 critic_fc_layers=(128,),
+                 actor_fc_layers=(64, 32),
+                 critic_fc_layers=(64, 32),
                  target_update_tau=0.005,
                  target_update_period=1,
                  actor_learning_rate=3e-4,
                  critic_learning_rate=3e-4,
                  alpha_learning_rate=3e-4,
                  gamma=0.99,
-                 reward_scale_factor=0.1,
+                 reward_scale_factor=5.0,
                  gradient_clipping=None,
                  debug_summaries=False,
                  summarize_grads_and_vars=False):
+    print("reward scale = {}".format(reward_scale_factor))
     time_step_spec = env.time_step_spec()
     observation_spec = time_step_spec.observation
     action_spec = env.action_spec()
@@ -171,20 +174,20 @@ def compute_metrics(eval_metrics,
 
 
 def save_checkpoints(global_step_val,
-                     train_checkpoint_interval,
-                     policy_checkpoint_interval,
-                     rb_checkpoint_interval,
+                     train_checkpoint_interval_manager,
+                     policy_checkpoint_interval_manager,
+                     rb_checkpoint_interval_manager,
                      train_checkpointer,
                      policy_checkpointer,
                      rb_checkpointer
                      ):
-    if global_step_val % train_checkpoint_interval == 0:
+    if train_checkpoint_interval_manager.should_trigger(global_step_val):
         train_checkpointer.save(global_step=global_step_val)
 
-    if global_step_val % policy_checkpoint_interval == 0:
+    if policy_checkpoint_interval_manager.should_trigger(global_step_val):
         policy_checkpointer.save(global_step=global_step_val)
 
-    if global_step_val % rb_checkpoint_interval == 0:
+    if rb_checkpoint_interval_manager.should_trigger(global_step_val):
         rb_checkpointer.save(global_step=global_step_val)
 
 
