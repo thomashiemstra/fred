@@ -13,6 +13,7 @@ from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.reinforcementlearning.environment import robot_env_utils
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
+from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, create_envs
 from src.utils.decorators import timer
 from absl import app
@@ -30,9 +31,9 @@ def get_forces(raw_observation):
     c2_attr = observation[0:3]
     c3_attr = observation[3:6]
 
-    c1_rep = 2 * observation[6:9]
-    c2_rep = 2 * observation[9:12]
-    c3_rep = 2 * observation[12:15]
+    c1_rep = 3 * observation[6:9]
+    c2_rep = 3 * observation[9:12]
+    c3_rep = 3 * observation[12:15]
 
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
@@ -73,6 +74,8 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
 
     traj_array = []
 
+    replay_buffer_interval_manager = IntervalManager(1000)
+
     with Pool(tf_env.batch_size) as pool:
         while replay_buffer.num_frames().numpy() < total_collect_steps:
             action_step = gradient_descent_action(current_time_step.observation, pool, robot_env_no_obstacles)
@@ -84,7 +87,7 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
 
             current_time_step = next_time_step
 
-            if replay_buffer.num_frames().numpy() % 1000 == 0:
+            if replay_buffer_interval_manager.should_trigger(replay_buffer.num_frames().numpy()):
                 rb_checkpointer.save(replay_buffer.num_frames().numpy())
                 print("saved")
 
@@ -133,9 +136,9 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
     print("training")
     for step in range(train_steps):
-        train_loss, actor_loss, critic_loss = train_step()
+        train_loss, actor_loss = train_step()
         if step % 50 == 0:
-            print("train loss {}, actor_loss {}, critic_loss {}".format(train_loss, actor_loss, critic_loss))
+            print("train loss {}, actor_loss {}".format(train_loss, actor_loss))
             train_checkpointer.save(global_step)
 
     print("done training")
@@ -143,19 +146,19 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
 def main(_):
     # tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'behavioral_cloning_obstacles_v2/'
+    checkpoint_dir = 'behavioral_cloning_obstacles/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
     total_collect_steps = 100000
     batch_size = 256
-    train_steps = 2500
+    train_steps = 1500
     robot_env_no_obstacles = False
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
-    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 10)
-    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True, raw_obs=True))
+    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 20)
+    # tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True))
 
     tf_agent = create_agent(tf_env, None, robot_env_no_obstacles)
 
