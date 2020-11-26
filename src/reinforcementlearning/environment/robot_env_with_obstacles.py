@@ -24,10 +24,10 @@ class RobotEnvWithObstacles(RobotEnv):
                                       shape=(2 ** (2 * self._hilbert_curve_iteration),),
                                       dtype=np.float32, minimum=0, maximum=1, name='hilbert_curve'),
         )
-        self.scenarios = scenarios_no_obstacles + scenarios_obstacles
-        # self.scenarios = scenarios_obstacles
+
+        self.scenarios = scenarios_obstacles
         self._max_steps_to_take_before_failure = 800
-        self._update_step_size = 0.02
+        self._update_step_size = 0.01
         self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y,
                                                           iteration=self._hilbert_curve_iteration)
@@ -45,8 +45,8 @@ class RobotEnvWithObstacles(RobotEnv):
 
         curve = self._curve
 
-        total_observation = (np.array(no_obstacle_obs, dtype=np.float32),
-                             np.array(np.array(curve.tolist()), dtype=np.float32))
+        total_observation = [np.array(no_obstacle_obs, dtype=np.float32),
+                             np.array(np.array(curve.tolist()), dtype=np.float32)]
 
         return total_observation, total_distance
 
