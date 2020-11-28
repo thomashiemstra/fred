@@ -33,23 +33,26 @@ flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
 flags.DEFINE_string('behavioral_cloning_checkpoint_dir', None,
                     'Directory in the root dir where the results for the behavioral cloning are saved')
 flags.DEFINE_float('reward_scaling', None, 'reward scaling')
+flags.DEFINE_float('entropy_target', None, 'entropy target')
 
 flags.DEFINE_multi_string('gin_file', None, 'Path to the trainer config files.')
 flags.DEFINE_multi_string('gin_param', None, 'Gin binding to pass through.')
 
 FLAGS = flags.FLAGS
-# time python src/reinforcementlearning/softActorCritic/soft_actor_critic.py --root_dir=bc_obstacles_15envs --behavioral_cloning_checkpoint_dir=behavioral_cloning_obstacles
+
+NUM_PARALLEL = 10
+
 
 def train_eval(checkpoint_dir,
                checkpoint_dir_behavioral_cloning=None,
-               total_train_steps=50000,
+               total_train_steps=4000000,
                # Params for collect,
                initial_collect_steps=10000,
-               collect_steps_per_iteration=1,
-               replay_buffer_capacity=500000,
+               collect_steps_per_iteration=NUM_PARALLEL,
+               replay_buffer_capacity=1000000,
                # Params for target update,
                # Params for train,
-               train_steps_per_iteration=1,
+               train_steps_per_iteration=NUM_PARALLEL,
                batch_size=256,
                use_tf_functions=True,
                # Params for eval,
@@ -58,17 +61,14 @@ def train_eval(checkpoint_dir,
                # Params for summaries and logging,
                train_checkpoint_interval=5000,
                policy_checkpoint_interval=5000,
-               rb_checkpoint_interval=50000,
-               log_interval=2000,
+               rb_checkpoint_interval=5000,
+               log_interval=5000,
                summary_interval=1000,
                summaries_flush_secs=10,
-               robot_env_no_obstacles=True,
-               num_parallel_environments=5,
-               reward_scaling=1.0):
-    train_checkpoint_interval_manager = IntervalManager(train_checkpoint_interval)
-    policy_checkpoint_interval_manager = IntervalManager(policy_checkpoint_interval)
-    rb_checkpoint_interval_manager = IntervalManager(rb_checkpoint_interval)
-
+               robot_env_no_obstacles=False,
+               num_parallel_environments=NUM_PARALLEL,
+               reward_scaling=1.0,
+               entropy=None):
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
@@ -92,7 +92,8 @@ def train_eval(checkpoint_dir,
 
         tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments)
 
-        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles, reward_scale_factor=reward_scaling)
+        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles, reward_scale_factor=reward_scaling,
+                                entropy=entropy)
 
         environment_steps_metric = tf_metrics.EnvironmentSteps()
         step_metrics = [
@@ -186,11 +187,15 @@ def train_eval(checkpoint_dir,
 
         steps_taken_in_prev_round = global_step.numpy()  # From a previous training round
 
-        log_interval_manager = IntervalManager(log_interval)
-        eval_interval_keeper = IntervalManager(eval_interval)
+        log_interval_manager = IntervalManager(log_interval, steps_taken_in_prev_round)
+        eval_interval_keeper = IntervalManager(eval_interval, steps_taken_in_prev_round)
+
+        train_checkpoint_interval_manager = IntervalManager(train_checkpoint_interval, steps_taken_in_prev_round)
+        policy_checkpoint_interval_manager = IntervalManager(policy_checkpoint_interval, steps_taken_in_prev_round)
+        rb_checkpoint_interval_manager = IntervalManager(rb_checkpoint_interval, steps_taken_in_prev_round)
 
         logging.info("training")
-        while global_step.numpy() < total_train_steps:
+        while global_step.numpy() <= total_train_steps:
             global_steps_taken = global_step.numpy()
 
             start_time = time.time()
@@ -262,7 +267,8 @@ def main(_):
     if reward_scaling is None:
         reward_scaling = 1.0
 
-    train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir, reward_scaling=reward_scaling)
+    train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir, reward_scaling=reward_scaling,
+               entropy=FLAGS.entropy_target)
 
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
