@@ -179,8 +179,8 @@ def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces,
 def get_clipped_state(angles):
     res = np.zeros(len(angles), dtype=np.float64)
     res[1] = np.clip(angles[1], 0, pi)
-    res[2] = np.clip(angles[2], 0, pi)
-    res[3] = np.clip(angles[3], -pi / 3, 2 * pi / 3)
+    res[2] = np.clip(angles[2], 0, 0.7 * pi)
+    res[3] = np.clip(angles[3], -pi / 3, 0.3 * pi)
     res[4] = np.clip(angles[4], -pi, pi)
     res[5] = np.clip(angles[5], -3 * pi / 4, 3 * pi / 4)
     res[6] = np.clip(angles[6], -pi, pi)
@@ -196,7 +196,7 @@ def get_normalized_current_angles(angles):
     if array_length > 0:
         res.append((2 * angles[0] - pi) / pi)
     if array_length > 1:
-        res.append((2 * angles[1] - pi) / pi)
+        res.append(((2/0.7) * angles[1] - pi) / pi)
     if array_length > 2:
         res.append(((2 / pi) * angles[2]) - (1 / 3))
     if array_length > 3:
@@ -216,7 +216,7 @@ def get_de_normalized_current_angles(normalized_angles):
     if array_length > 0:
         res.append((pi / 2) * (normalized_angles[0] + 1))
     if array_length > 1:
-        res.append((pi / 2) * (normalized_angles[1] + 1))
+        res.append((0.7 * pi / 2) * (normalized_angles[1] + 1))
     if array_length > 2:
         res.append((pi / 2) * (normalized_angles[2] + (1 / 3)))
     if array_length > 3:
