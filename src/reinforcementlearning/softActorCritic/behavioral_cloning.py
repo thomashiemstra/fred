@@ -1,24 +1,22 @@
+import functools
 import inspect
 import os
 from multiprocessing import Pool
 
 import numpy as np
 import tensorflow as tf
-from tf_agents.environments import tf_py_environment
+from absl import app
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.system import system_multiprocessing
 from tf_agents.trajectories import trajectory, policy_step
 from tf_agents.utils import common
 
 from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.reinforcementlearning.environment import robot_env_utils
-from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, create_envs
 from src.utils.decorators import timer
-from absl import app
-import functools
-from tf_agents.system import system_multiprocessing
 
 
 def get_forces(raw_observation):
