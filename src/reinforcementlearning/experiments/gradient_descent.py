@@ -4,7 +4,7 @@ from src.reinforcementlearning.environment.robot_env import RobotEnv
 import numpy as np
 
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.environment.scenario import Scenario
+from src.reinforcementlearning.environment.scenario import Scenario, easy_scenarios
 from src.utils.obstacle import BoxObstacle
 
 control_point_1_position = 11.2
@@ -17,16 +17,18 @@ def reset_to_scenario(env, scenario, reverse=False):
 
 
 env = RobotEnvWithObstacles(use_gui=True)
-reset_to_scenario(env,
-                  Scenario([
-                      BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
-                      BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4),
-                      BoxObstacle([10, 10, 40], [0, 35, 0], alpha=np.pi / 4),
-                      BoxObstacle([10, 40, 20], [-20, 30, 0])
-                  ],
-                      Pose(-35, 15, 10), Pose(25, 30, 20)),
-                  True
-                  )
+# reset_to_scenario(env,
+#                   Scenario([
+#                       BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
+#                       BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4),
+#                       BoxObstacle([10, 10, 40], [0, 35, 0], alpha=np.pi / 4),
+#                       BoxObstacle([10, 40, 20], [-20, 30, 0])
+#                   ],
+#                       Pose(-35, 15, 10), Pose(25, 30, 20)),
+#                   True
+#                   )
+
+reset_to_scenario(env, easy_scenarios[2])
 
 steps_taken = 0
 

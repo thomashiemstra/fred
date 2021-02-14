@@ -140,6 +140,39 @@ scenarios_obstacles = [
         Pose(-35, 15, 10), Pose(30, 30, 15))
 ]
 
+easy_scenarios = [
+    Scenario([BoxObstacle([10, 40, 10], [0, 35, 0])],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+    Scenario([BoxObstacle([10, 40, 10], [0, 40, 0], alpha=np.pi / 4)],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+    Scenario([BoxObstacle([10, 40, 10], [0, 40, 0], alpha=-np.pi / 8)],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+]
+
+medium_scenarios = [
+    Scenario([BoxObstacle([10, 40, 15], [0, 35, 0])],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+    Scenario([BoxObstacle([10, 40, 15], [0, 40, 0], alpha=np.pi / 4)],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+    Scenario([BoxObstacle([10, 40, 15], [0, 40, 0], alpha=-np.pi / 8)],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+]
+
+hard_scenarios = [
+    Scenario([BoxObstacle([10, 40, 25], [0, 35, 0])],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+    Scenario([BoxObstacle([10, 40, 25], [0, 40, 0], alpha=np.pi / 4)],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+
+    Scenario([BoxObstacle([10, 40, 25], [0, 40, 0], alpha=-np.pi / 8)],
+             Pose(-30, 25, 10), Pose(30, 25, 10)),
+]
+
 if __name__ == '__main__':
     scenarios = [Scenario([BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4),
                            BoxObstacle([10, 10, 20], [0, 35, 0], alpha=np.pi / 4)],
