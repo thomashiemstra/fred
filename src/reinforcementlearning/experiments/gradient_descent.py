@@ -4,7 +4,7 @@ from src.reinforcementlearning.environment.robot_env import RobotEnv
 import numpy as np
 
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.environment.scenario import Scenario, easy_scenarios
+from src.reinforcementlearning.environment.scenario import Scenario, easy_scenarios, medium_scenarios, hard_scenarios
 from src.utils.obstacle import BoxObstacle
 
 control_point_1_position = 11.2
@@ -28,7 +28,11 @@ env = RobotEnvWithObstacles(use_gui=True)
 #                   True
 #                   )
 
-reset_to_scenario(env, easy_scenarios[2])
+scenario_id = 8
+
+reset_to_scenario(env, easy_scenarios[scenario_id])
+# reset_to_scenario(env, medium_scenarios[scenario_id])
+# reset_to_scenario(env, hard_scenarios[scenario_id])
 
 steps_taken = 0
 
@@ -42,8 +46,12 @@ while True:
     print(observation[15:20])
 
     c1_attr = np.zeros(3)
-    c2_attr = observation[0:3]  # + [0, 0, 0.5]
-    c3_attr = observation[3:6]  # + [0, 0, 0.5]
+    c2_attr = observation[0:3]
+    c3_attr = observation[3:6]
+
+    # if steps_taken < 15:
+    #     c2_attr += [0, 0, 0.5]
+    #     c3_attr += [0, 0, 0.5]
 
     c1_rep = 3 * observation[6:9]
     c2_rep = 3 * observation[9:12]

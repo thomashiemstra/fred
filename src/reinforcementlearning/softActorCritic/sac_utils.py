@@ -127,14 +127,14 @@ def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observa
         return input_spec, preprocessing_layer
 
 
-def create_envs(robot_env_no_obstacles, num_parallel_environments):
+def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=None):
     if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
         if robot_env_no_obstacles:
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
         else:
-            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles())
-            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles())
+            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios))
+            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios))
 
         return tf_env, eval_tf_env
 

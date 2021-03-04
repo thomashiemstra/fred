@@ -23,6 +23,7 @@ from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.system import system_multiprocessing as multiprocessing
 from tf_agents.utils import common
 
+from src.reinforcementlearning.environment.scenario import easy_scenarios, medium_scenarios, hard_scenarios
 from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
     make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
@@ -89,7 +90,9 @@ def train_eval(checkpoint_dir,
     with tf.compat.v2.summary.record_if(
             lambda: tf.math.equal(global_step % summary_interval, 0)):
 
-        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments)
+        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=easy_scenarios)
+        # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
+        # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=hard_scenarios)
 
         tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles, reward_scale_factor=reward_scaling,
                                 entropy=entropy)
