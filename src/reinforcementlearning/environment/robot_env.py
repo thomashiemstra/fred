@@ -34,7 +34,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._robot_controller = start_simulated_robot(use_gui)
         self._physics_client = self._robot_controller.physics_client
         self._start_pose = None
-        self._previous_distance_to_target = 0
+        self._closest_distance_so_far = None
         self._robot_body_id = self._robot_controller.body_id
         self._target_pose = None
         self._steps_taken = 0
@@ -52,6 +52,8 @@ class RobotEnv(py_environment.PyEnvironment):
         self._traveled_distances = []
         self._current_scenario_id = 0
         self._times_current_scenario_payed = 0
+        self.rewards = []
+        self.distance = []
 
     @property
     def current_angles(self):
@@ -132,7 +134,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._advance_simulation()
 
         self._current_angles = self._robot_controller.get_current_angles()
-        observation, self._previous_distance_to_target = self._get_observations()
+        observation, self._closest_distance_so_far = self._get_observations()
         self._episode_ended = False
         self._steps_taken = 0
         self._traveled_distances = []
@@ -173,23 +175,29 @@ class RobotEnv(py_environment.PyEnvironment):
         self._traveled_distances.append(total_distance)
         stuck = self._is_stuck(total_distance, self._traveled_distances)
 
-        distance_covered = self._previous_distance_to_target - total_distance
-        self._previous_distance_to_target = total_distance
-        reward = self._get_reward(distance_covered, total_distance, action)
+        extra_distance_closed_this_step = 0
+        if total_distance < self._closest_distance_so_far:
+            extra_distance_closed_this_step = self._closest_distance_so_far - total_distance
+            self._closest_distance_so_far = total_distance
+
+        reward = self._get_reward(extra_distance_closed_this_step, total_distance, action)
+
+        print(reward, total_distance)
+        self.rewards.append(reward)
+        self.distance.append(total_distance)
 
         self._current_time_step = self._get_current_time_step(collision, observation, total_distance, reward, stuck)
         self._steps_taken += 1
         return self._current_time_step
 
     @staticmethod
-    def _get_reward(distance_covered, total_distance, action):
-        reward = distance_covered
-        if abs(distance_covered) < 0.1 and total_distance > 35:
-            reward -= 0.5
+    def _get_reward(extra_distance_closed_this_step, total_distance, action):
+        reward = extra_distance_closed_this_step
+
+        effort = np.sum(action * action) * 0.02
+        reward -= effort
+
         return reward
-        # effort = np.sum(action * action) * 0.02
-        # reward = distance_covered - effort
-        # return reward
 
     def _get_current_time_step(self, collision, observation, total_distance, reward, stuck):
         if self._steps_taken > self._max_steps_to_take_before_failure:
@@ -197,17 +205,17 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.termination(observation, reward=0)
         elif collision:
             self._done = True
-            return ts.termination(observation, reward=-100)
+            return ts.termination(observation, reward=-10)
         if stuck:
             self._done = True
             return ts.termination(observation, reward=0)
         elif total_distance < 15:  # target reached
             self._done = True
-            max_speed_bonus = 50
+            max_speed_bonus = 5
             speed_bonus = (-max_speed_bonus / self._max_steps_to_take_before_failure) * self._steps_taken \
                           + max_speed_bonus
 
-            total_reward = 100 + speed_bonus
+            total_reward = 10 + speed_bonus
 
             return ts.termination(observation, reward=total_reward)
         else:
