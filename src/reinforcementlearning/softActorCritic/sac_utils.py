@@ -34,15 +34,20 @@ def normal_projection_net(action_spec):
 def create_agent(env,
                  global_step,
                  robot_env_no_obstacles,
-                 actor_fc_layers=(64, 32),
-                 critic_fc_layers=(64, 32),
+                 actor_fc_layers=(128, 64),
+                 actor_preprocessing_layer=128,
+                 actor_preprocessing_layer_curve=256,
+                 critic_preprocessing_layer=128,
+                 critic_preprocessing_layer_curve=256,
+                 critic_preprocessing_layer_action=32,
+                 critic_fc_layers=(128, 64),
                  target_update_tau=0.005,
                  target_update_period=1,
                  actor_learning_rate=3e-4,
                  critic_learning_rate=3e-4,
                  alpha_learning_rate=3e-4,
                  gamma=0.99,
-                 reward_scale_factor=5.0,
+                 reward_scale_factor=1.0,
                  gradient_clipping=None,
                  debug_summaries=False,
                  summarize_grads_and_vars=False):
@@ -52,7 +57,10 @@ def create_agent(env,
     action_spec = env.action_spec()
 
     actor_preprocessing_layer, preprocessing_combiner = get_actor_preprocessing_layer_and_combiner(
-        robot_env_no_obstacles)
+        robot_env_no_obstacles,
+        actor_preprocessing_layer,
+        actor_preprocessing_layer_curve)
+
     actor_net = ActorDistributionNetworkTrainable(
         observation_spec,
         action_spec,
@@ -61,9 +69,12 @@ def create_agent(env,
         fc_layer_params=actor_fc_layers,
         continuous_projection_net=normal_projection_net)
 
-    critic_input_spec, critic_preprocessing_layer = get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
-                                                                                                 observation_spec,
-                                                                                                 action_spec)
+    critic_preprocessing_layer = get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
+                                                                              critic_preprocessing_layer,
+                                                                              critic_preprocessing_layer_curve,
+                                                                              critic_preprocessing_layer_action)
+
+    critic_input_spec = (observation_spec, action_spec)
     critic_net = value_network.ValueNetwork(
         critic_input_spec,
         preprocessing_layers=critic_preprocessing_layer,
@@ -97,34 +108,38 @@ def create_agent(env,
     return agent
 
 
-def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles):
+def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles,
+                                               actor_preprocessing_layer,
+                                               actor_preprocessing_layer_curve):
     if robot_env_no_obstacles:
         preprocessing_layer = (
-            tf.keras.layers.Dense(16)
+            tf.keras.layers.Dense(actor_preprocessing_layer)
         )
         return preprocessing_layer, None
     else:
         preprocessing_layer = (
-            tf.keras.layers.Dense(16), tf.keras.layers.Dense(32)
+            tf.keras.layers.Dense(actor_preprocessing_layer), tf.keras.layers.Dense(actor_preprocessing_layer_curve)
         )
         return preprocessing_layer, tf.keras.layers.Concatenate(axis=-1)
 
 
-def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles, observation_spec, action_spec):
+def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
+                                                 critic_preprocessing_layer,
+                                                 critic_preprocessing_layer_curve,
+                                                 critic_preprocessing_layer_action):
     if robot_env_no_obstacles:
-        input_spec = (observation_spec, action_spec)
         preprocessing_layer = (
-            # 20 observations               5 actions
-            tf.keras.layers.Dense(32), tf.keras.layers.Dense(16)
+            tf.keras.layers.Dense(critic_preprocessing_layer),          # 20 observations
+            tf.keras.layers.Dense(critic_preprocessing_layer_action)    # 5 actions
         )
-        return input_spec, preprocessing_layer
+        return preprocessing_layer
     else:
-        input_spec = (observation_spec, action_spec)
         preprocessing_layer = (
-            # 20 normal observations   64 hilbert curve observations    5 actions
-            (tf.keras.layers.Dense(32), tf.keras.layers.Dense(64)), tf.keras.layers.Dense(16)
+            (tf.keras.layers.Dense(critic_preprocessing_layer),         # 20 normal observations
+             tf.keras.layers.Dense(critic_preprocessing_layer_curve)),  # 64 hilbert curve observations
+            tf.keras.layers.Dense(critic_preprocessing_layer_action)    # 5 actions
         )
-        return input_spec, preprocessing_layer
+        return preprocessing_layer
 
 
 def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=None):
