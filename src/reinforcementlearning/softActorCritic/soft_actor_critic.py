@@ -40,7 +40,7 @@ flags.DEFINE_multi_string('gin_param', None, 'Gin binding to pass through.')
 
 FLAGS = flags.FLAGS
 
-NUM_PARALLEL = 10
+NUM_PARALLEL = 1
 
 
 def train_eval(checkpoint_dir,
@@ -83,7 +83,8 @@ def train_eval(checkpoint_dir,
         eval_dir, flush_millis=summaries_flush_secs * 1000)
     eval_metrics = [
         tf_metrics.AverageReturnMetric(buffer_size=num_eval_episodes),
-        tf_metrics.AverageEpisodeLengthMetric(buffer_size=num_eval_episodes)
+        tf_metrics.AverageEpisodeLengthMetric(buffer_size=num_eval_episodes),
+        tf_metrics.MinReturnMetric(buffer_size=num_eval_episodes)
     ]
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
