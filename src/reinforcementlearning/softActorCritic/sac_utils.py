@@ -5,7 +5,6 @@ from __future__ import print_function
 import os
 import time
 
-import imageio
 import tensorflow as tf
 from tf_agents.environments import suite_gym, parallel_py_environment, tf_py_environment
 from tf_agents.eval import metric_utils
@@ -50,7 +49,8 @@ def create_agent(env,
                  reward_scale_factor=1.0,
                  gradient_clipping=None,
                  debug_summaries=False,
-                 summarize_grads_and_vars=False):
+                 summarize_grads_and_vars=False,
+                 entropy=None):
     print("reward scale = {}".format(reward_scale_factor))
     time_step_spec = env.time_step_spec()
     observation_spec = time_step_spec.observation
@@ -98,7 +98,7 @@ def create_agent(env,
         target_update_period=target_update_period,
         # td_errors_loss_fn=td_errors_loss_fn,
         gamma=gamma,
-        # target_entropy=-6,
+        target_entropy=entropy,
         reward_scale_factor=reward_scale_factor,
         gradient_clipping=gradient_clipping,
         debug_summaries=debug_summaries,
@@ -242,6 +242,8 @@ def initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step):
 
 
 def make_video(env_name, tf_agent, video_filename='test'):
+    import imageio
+
     video_filename += '.mp4'
     eval_py_env = suite_gym.load(env_name)
     num_episodes = 3
