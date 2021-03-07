@@ -84,27 +84,27 @@ class CustomSacAgent(SacAgent):
             trajectory.experience_to_transitions(experience, squeeze_time_dim))
         actions = policy_steps.action
 
-        # trainable_critic_variables = (
-        #         self._critic_network_1.trainable_variables +
-        #         self._critic_network_2.trainable_variables)
-        # with tf.GradientTape(watch_accessed_variables=False) as tape:
-        #     assert trainable_critic_variables, ('No trainable critic variables to '
-        #                                         'optimize.')
-        #     tape.watch(trainable_critic_variables)
-        #     critic_loss = self._critic_loss_weight * self.critic_loss(
-        #         time_steps,
-        #         actions,
-        #         next_time_steps,
-        #         td_errors_loss_fn=self._td_errors_loss_fn,
-        #         gamma=self._gamma,
-        #         reward_scale_factor=self._reward_scale_factor,
-        #         weights=weights,
-        #         training=True)
-        #
-        # tf.debugging.check_numerics(critic_loss, 'Critic loss is inf or nan.')
-        # critic_grads = tape.gradient(critic_loss, trainable_critic_variables)
-        # self._apply_gradients(critic_grads, trainable_critic_variables,
-        #                       self._critic_optimizer)
+        trainable_critic_variables = (
+                self._critic_network_1.trainable_variables +
+                self._critic_network_2.trainable_variables)
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            assert trainable_critic_variables, ('No trainable critic variables to '
+                                                'optimize.')
+            tape.watch(trainable_critic_variables)
+            critic_loss = self._critic_loss_weight * self.critic_loss(
+                time_steps,
+                actions,
+                next_time_steps,
+                td_errors_loss_fn=self._td_errors_loss_fn,
+                gamma=self._gamma,
+                reward_scale_factor=self._reward_scale_factor,
+                weights=weights,
+                training=True)
+
+        tf.debugging.check_numerics(critic_loss, 'Critic loss is inf or nan.')
+        critic_grads = tape.gradient(critic_loss, trainable_critic_variables)
+        self._apply_gradients(critic_grads, trainable_critic_variables,
+                              self._critic_optimizer)
 
         trainable_actor_variables = self._actor_network.trainable_variables
         with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -119,8 +119,8 @@ class CustomSacAgent(SacAgent):
                               self._actor_optimizer)
 
         with tf.name_scope('Losses'):
-            # tf.compat.v2.summary.scalar(
-            #     name='critic_loss', data=critic_loss, step=self.train_step_counter)
+            tf.compat.v2.summary.scalar(
+                name='critic_loss', data=critic_loss, step=self.train_step_counter)
             tf.compat.v2.summary.scalar(
                 name='actor_loss', data=actor_loss, step=self.train_step_counter)
 
@@ -128,6 +128,6 @@ class CustomSacAgent(SacAgent):
         self._update_target()
 
         total_loss = actor_loss
-        # total_loss = critic_loss + actor_loss
+        total_loss = critic_loss + actor_loss
 
-        return tf_agent.LossInfo(loss=total_loss, extra=None), actor_loss  # , critic_loss
+        return tf_agent.LossInfo(loss=total_loss, extra=None), actor_loss , critic_loss
