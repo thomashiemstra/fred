@@ -16,7 +16,17 @@ def reset_to_scenario(env, scenario, reverse=False):
     env.reset()
 
 
+
+
 env = RobotEnvWithObstacles(use_gui=True)
+# reset_to_scenario(env,
+#                   Scenario([BoxObstacle([10, 30, 20], [15, 35, 0], alpha=0),
+#                             BoxObstacle([10, 30, 20], [-15, 35, 0], alpha=np.pi / 2),
+#                             BoxObstacle([10, 10, 40], [5, 30, 0], alpha=np.pi / 2)],
+#                            Pose(-30, 15, 10), Pose(30, 25, 10))
+#                   )
+
+
 # reset_to_scenario(env,
 #                   Scenario([
 #                       BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
@@ -40,10 +50,13 @@ state = env.reset()
 
 total_reward = 0
 
-while True:
-    raw_observation = state.observation
-    observation = raw_observation[0]
-    print(observation[15:20])
+for i in range(len(scenarios_obstacles)):
+    reset_to_scenario(env, scenarios_obstacles[20])
+    print("Scenario: {}".format(i))
+    while True:
+        raw_observation = state.observation
+        observation = raw_observation[0]
+
 
     c1_attr = np.zeros(3)
     c2_attr = observation[0:3]
@@ -53,9 +66,9 @@ while True:
     #     c2_attr += [0, 0, 0.5]
     #     c3_attr += [0, 0, 0.5]
 
-    c1_rep = 3 * observation[6:9]
-    c2_rep = 3 * observation[9:12]
-    c3_rep = 3 * observation[12:15]
+    c1_rep = 4 * observation[3:6]
+    c2_rep = 4 * observation[6:9]
+    c3_rep = 4 * observation[9:12]
 
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
@@ -74,7 +87,7 @@ while True:
     action = (joint_forces / absolute_force)
 
     state = env.step(action[1:6])
-    print(state.reward)
+    # print(state.reward)
     total_reward = total_reward + state.reward
 
     if state.step_type == 2:
