@@ -1,6 +1,7 @@
 from abc import ABC
 import pybullet as p
 import numpy as np
+from absl import logging
 
 
 class Obstacle(ABC):
@@ -9,7 +10,13 @@ class Obstacle(ABC):
         self.obstacle_id = None
 
     def build(self, physics_client):
-        pass
+        raise NotImplementedError("obstacle should have a build function")
+
+    def destroy(self, physics_client):
+        raise NotImplementedError("obstacle should have a destroy function")
+
+    def copy(self):
+        raise NotImplementedError("obstacle should have a copy function")
 
 
 class BoxObstacle(Obstacle):
@@ -34,6 +41,7 @@ class BoxObstacle(Obstacle):
         self.base_center_position = base_center_position
         self.base_center_position[2] += dimensions[2] / 2
         self.color = color
+        self.obstacle_id = None
 
     def build(self, physics_client):
 
@@ -51,7 +59,13 @@ class BoxObstacle(Obstacle):
             p.changeVisualShape(self.obstacle_id, -1, rgbaColor=self.color, physicsClientId=physics_client)
 
     def destroy(self, physics_client):
+        if self.obstacle_id is None:
+            logging.warn("no obstacle to destroy, call build() first")
+            return
         p.removeBody(self.obstacle_id, physicsClientId=physics_client)
+
+    def copy(self):
+        return BoxObstacle(self.dimensions, self.base_center_position, alpha=self.alpha, color=self.color)
 
 
 class SphereObstacle(Obstacle):
@@ -61,6 +75,7 @@ class SphereObstacle(Obstacle):
         self.radius = radius
         self.center_position = center_position
         self.color = color
+        self.obstacle_id = None
 
     def build(self, physics_client):
         collision_spere_id = p.createCollisionShape(p.GEOM_SPHERE, radius=self.radius/100,
@@ -74,6 +89,15 @@ class SphereObstacle(Obstacle):
         if self.color is not None:
             p.changeVisualShape(self.obstacle_id, -1, rgbaColor=self.color, physicsClientId=physics_client)
 
+
+    def destroy(self, physics_client):
+        if self.obstacle_id is None:
+            logging.warn("no obstacle to destroy, call build() first")
+            return
+        p.removeBody(self.obstacle_id, physicsClientId=physics_client)
+
+    def copy(self):
+        return SphereObstacle(self.radius, self.center_position, color=self.color)
 
 if __name__ == '__main__':
     physics_client = p.connect(p.GUI)

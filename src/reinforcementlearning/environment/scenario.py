@@ -20,6 +20,10 @@ class Scenario:
         for obstacle in self.obstacles:
             obstacle.destroy(physics_client)
 
+    def copy(self):
+        obstacles_copy = [obstacle.copy() for obstacle in self.obstacles]
+        return Scenario(obstacles_copy, self.start_pose, self.target_pose)
+
 
 scenarios_no_obstacles = [
     Scenario([],

@@ -62,7 +62,7 @@ class RobotEnv(py_environment.PyEnvironment):
     def robot_controller(self):
         return self._robot_controller
 
-    def set_scenario(self, scenario, reverse):
+    def set_scenario(self, scenario):
         self._externally_set_scenario = scenario
 
     def _generate_obstacles_and_target_pose(self):
@@ -73,7 +73,7 @@ class RobotEnv(py_environment.PyEnvironment):
             self._current_scenario = self._externally_set_scenario
         else:
             scenario_id = random.randint(0, len(self.scenarios) - 1)
-            self._current_scenario = self.scenarios[scenario_id]
+            self._current_scenario = self.scenarios[scenario_id].copy()
 
         self._current_scenario.build_scenario(self._physics_client)
         return self._current_scenario.obstacles, self._current_scenario.target_pose, self._current_scenario.start_pose
@@ -234,7 +234,7 @@ class RobotEnv(py_environment.PyEnvironment):
         attractive_cutoff_dis = 10
         attractive_forces, total_distance = get_attractive_force_world(
             np.array([c1.position, c2.position, c3.position]),
-            np.array([None, target_point_2, target_point_3]),
+            np.array([None, target_point_2, target_point_3], dtype=object),
             attractive_cutoff_distance=attractive_cutoff_dis)
 
         # now the attractive foces will go from 1 down to 0 when the robot is within attractive_cutoff_dis of the target
