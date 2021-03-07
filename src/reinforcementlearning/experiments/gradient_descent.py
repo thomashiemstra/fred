@@ -19,26 +19,7 @@ def reset_to_scenario(env, scenario, reverse=False):
 
 
 env = RobotEnvWithObstacles(use_gui=True)
-# reset_to_scenario(env,
-#                   Scenario([BoxObstacle([10, 30, 20], [15, 35, 0], alpha=0),
-#                             BoxObstacle([10, 30, 20], [-15, 35, 0], alpha=np.pi / 2),
-#                             BoxObstacle([10, 10, 40], [5, 30, 0], alpha=np.pi / 2)],
-#                            Pose(-30, 15, 10), Pose(30, 25, 10))
-#                   )
-
-
-# reset_to_scenario(env,
-#                   Scenario([
-#                       BoxObstacle([10, 40, 20], [10, 40, 0], alpha=-np.pi / 4),
-#                       BoxObstacle([10, 40, 20], [-10, 40, 0], alpha=np.pi / 4),
-#                       BoxObstacle([10, 10, 40], [0, 35, 0], alpha=np.pi / 4),
-#                       BoxObstacle([10, 40, 20], [-20, 30, 0])
-#                   ],
-#                       Pose(-35, 15, 10), Pose(25, 30, 20)),
-#                   True
-#                   )
-
-scenario_id = 8
+scenario_id = 1
 
 reset_to_scenario(env, easy_scenarios[scenario_id])
 # reset_to_scenario(env, medium_scenarios[scenario_id])
@@ -50,13 +31,10 @@ state = env.reset()
 
 total_reward = 0
 
-for i in range(len(scenarios_obstacles)):
-    reset_to_scenario(env, scenarios_obstacles[20])
-    print("Scenario: {}".format(i))
-    while True:
-        raw_observation = state.observation
-        observation = raw_observation[0]
 
+while True:
+    raw_observation = state.observation
+    observation = raw_observation[0]
 
     c1_attr = np.zeros(3)
     c2_attr = observation[0:3]
@@ -66,9 +44,9 @@ for i in range(len(scenarios_obstacles)):
     #     c2_attr += [0, 0, 0.5]
     #     c3_attr += [0, 0, 0.5]
 
-    c1_rep = 4 * observation[3:6]
-    c2_rep = 4 * observation[6:9]
-    c3_rep = 4 * observation[9:12]
+    c1_rep = 3 * observation[6:9]
+    c2_rep = 3 * observation[9:12]
+    c3_rep = 3 * observation[12:15]
 
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
