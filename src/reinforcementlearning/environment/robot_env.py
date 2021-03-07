@@ -46,7 +46,6 @@ class RobotEnv(py_environment.PyEnvironment):
         self._attr_lines = None
         self._rep_lines = None
         self._current_scenario = None
-        self._reverse_scenario = False
         self._done = True
         self._externally_set_scenario = None
         self._traveled_distances = []
@@ -65,7 +64,6 @@ class RobotEnv(py_environment.PyEnvironment):
 
     def set_scenario(self, scenario, reverse):
         self._externally_set_scenario = scenario
-        self._reverse_scenario = reverse
 
     def _generate_obstacles_and_target_pose(self):
         if self._current_scenario is not None:

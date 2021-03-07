@@ -10,16 +10,15 @@ from src.utils.obstacle import BoxObstacle
 control_point_1_position = 11.2
 
 
-def reset_to_scenario(env, scenario, reverse=False):
+def reset_to_scenario(env, scenario):
     env.set_scenario(scenario, reverse)
-    env._reverse_scenario = True
     env.reset()
 
 
 
 
 env = RobotEnvWithObstacles(use_gui=True)
-scenario_id = 1
+scenario_id = 6
 
 reset_to_scenario(env, easy_scenarios[scenario_id])
 # reset_to_scenario(env, medium_scenarios[scenario_id])
