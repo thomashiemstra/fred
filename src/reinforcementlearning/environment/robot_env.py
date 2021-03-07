@@ -182,7 +182,6 @@ class RobotEnv(py_environment.PyEnvironment):
 
         reward = self._get_reward(extra_distance_closed_this_step, total_distance, action)
 
-        print(reward, total_distance)
         self.rewards.append(reward)
         self.distance.append(total_distance)
 
