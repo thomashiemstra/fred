@@ -48,6 +48,7 @@ def train_eval(checkpoint_dir,
                total_train_steps=4000000,
                # Params for collect,
                initial_collect_steps=10000,
+               initial_bc_collect_steps=100000,
                collect_steps_per_iteration=NUM_PARALLEL,
                replay_buffer_capacity=1000000,
                # Params for target update,
@@ -153,8 +154,8 @@ def train_eval(checkpoint_dir,
             logging.info("restoring agent from the behavioral cloning run")
             restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
             logging.info('Initializing replay buffer by collecting experience for %d steps with '
-                         'the behavioral cloning policy.', initial_collect_steps)
-            for _ in range(int(initial_collect_steps / collect_steps_per_iteration)):
+                         'the behavioral cloning policy.', initial_bc_collect_steps)
+            for _ in range(int(initial_bc_collect_steps / collect_steps_per_iteration)):
                 collect_driver.run()
         elif global_step.numpy() == 0:
             # Collect initial replay data.
@@ -241,6 +242,12 @@ def train_eval(checkpoint_dir,
                              train_checkpointer, policy_checkpointer, rb_checkpointer)
 
         time_after_trianing = time.time()
+
+        save_checkpoints(global_steps_taken,
+                         train_checkpoint_interval_manager,
+                         policy_checkpoint_interval_manager,
+                         rb_checkpoint_interval_manager,
+                         train_checkpointer, policy_checkpointer, rb_checkpointer)
 
         elapsed_time = time_after_trianing - time_before_training
         print(time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
