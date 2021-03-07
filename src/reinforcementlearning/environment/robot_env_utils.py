@@ -178,7 +178,7 @@ def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces,
 
 def get_clipped_state(angles):
     res = np.zeros(len(angles), dtype=np.float64)
-    res[1] = np.clip(angles[1], 0, pi)
+    res[1] = np.clip(angles[1], 0.1, 0.9 * pi)
     res[2] = np.clip(angles[2], 0, 0.7 * pi)
     res[3] = np.clip(angles[3], -pi / 3, 0.3 * pi)
     res[4] = np.clip(angles[4], -pi, pi)
