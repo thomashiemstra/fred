@@ -26,12 +26,12 @@ def get_forces(raw_observation):
         observation = raw_observation
 
     c1_attr = np.zeros(3)
-    c2_attr = observation[0:3]
-    c3_attr = observation[3:6]
+    c2_attr = np.zeros(3)
+    c3_attr = observation[0:3]
 
-    c1_rep = 3 * observation[6:9]
-    c2_rep = 3 * observation[9:12]
-    c3_rep = 3 * observation[12:15]
+    c1_rep = 3 * observation[3:6]
+    c2_rep = 3 * observation[6:9]
+    c3_rep = 3 * observation[9:12]
 
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
@@ -42,7 +42,7 @@ def get_forces(raw_observation):
 def handle_observation(raw_observation):
     forces = get_forces(raw_observation)
 
-    current_angles = robot_env_utils.get_de_normalized_current_angles(raw_observation[15:20])
+    current_angles = robot_env_utils.get_de_normalized_current_angles(raw_observation[12:17])
 
     joint_forces = jacobian_transpose_on_f(forces, np.append([0], current_angles),
                                            global_constants.simulated_robot_config, 11.2)
@@ -134,9 +134,9 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
     print("training")
     for step in range(train_steps):
-        train_loss, actor_loss = train_step()
+        train_loss, actor_loss, critic_loss = train_step()
         if step % 50 == 0:
-            print("train loss {}, actor_loss {}".format(train_loss, actor_loss))
+            print("train loss {}, actor_loss {}, critic_loss {}".format(train_loss, actor_loss, critic_loss))
             train_checkpointer.save(global_step)
 
     print("done training")
@@ -144,13 +144,13 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
 
 def main(_):
     # tf.config.experimental_run_functions_eagerly(True)
-    checkpoint_dir = 'behavioral_cloning_obstacles/'
+    checkpoint_dir = 'behavioral_cloning_obstacles_sparse/'
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
     total_collect_steps = 100000
     batch_size = 256
-    train_steps = 1500
+    train_steps = 3000
     robot_env_no_obstacles = False
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
