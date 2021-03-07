@@ -96,7 +96,8 @@ def train_eval(checkpoint_dir,
         # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
         # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=hard_scenarios)
 
-        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles, reward_scale_factor=reward_scaling)
+        tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles,
+                                reward_scale_factor=reward_scaling, entropy=entropy)
 
         environment_steps_metric = tf_metrics.EnvironmentSteps()
         step_metrics = [
