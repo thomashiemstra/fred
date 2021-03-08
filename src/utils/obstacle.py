@@ -25,21 +25,24 @@ class BoxObstacle(Obstacle):
     The obstacle will be placed with it's base at the given z height
     """
 
-    def __init__(self, dimensions, base_center_position, alpha=0, color=None):
+    def __init__(self, dimensions, raw_base_center_position, alpha=0, color=None):
         """
 
         Args:
             physics_client: id of the pybullet physics client
             dimensions: array of length, width, height of the obstacle
-            base_center_position: array of the x,y,z coordinates of the center of the base of the obstacle
+            raw_base_center_position: array of the x,y,z coordinates of the center of the base of the obstacle
             alpha: angle by which to rotate the body around the z-axis
         """
         super().__init__()
         self.alpha = alpha
         self.dimensions = dimensions
         self.half_extends = [i/2 for i in dimensions]  # Half extends in centimeters
-        self.base_center_position = base_center_position
-        self.base_center_position[2] += dimensions[2] / 2
+        self.raw_base_center_position = raw_base_center_position
+
+        self.base_center_position = [self.raw_base_center_position[0],
+                                     self.raw_base_center_position[1],
+                                     self.raw_base_center_position[2] + dimensions[2] / 2]
         self.color = color
         self.obstacle_id = None
 
@@ -65,7 +68,7 @@ class BoxObstacle(Obstacle):
         p.removeBody(self.obstacle_id, physicsClientId=physics_client)
 
     def copy(self):
-        return BoxObstacle(self.dimensions, self.base_center_position, alpha=self.alpha, color=self.color)
+        return BoxObstacle(self.dimensions, self.raw_base_center_position, alpha=self.alpha, color=self.color)
 
 
 class SphereObstacle(Obstacle):
