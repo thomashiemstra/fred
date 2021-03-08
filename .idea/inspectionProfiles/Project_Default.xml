@@ -74,6 +74,7 @@
       <option name="ignoredIdentifiers">
         <list>
           <option value="src.reinforcementlearning.soft_actor_critic.custom_policy.*" />
+          <option value="list.*" />
         </list>
       </option>
     </inspection_tool>
