@@ -22,6 +22,7 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.system import system_multiprocessing as multiprocessing
 from tf_agents.utils import common
+import numpy as np
 
 from src.reinforcementlearning.environment.scenario import easy_scenarios, medium_scenarios, hard_scenarios
 from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
@@ -57,7 +58,7 @@ def train_eval(checkpoint_dir,
                batch_size=256,
                use_tf_functions=True,
                # Params for eval,
-               num_eval_episodes=10,
+               num_eval_episodes=20,
                eval_interval=2000,
                # Params for summaries and logging,
                train_checkpoint_interval=5000,
@@ -92,8 +93,8 @@ def train_eval(checkpoint_dir,
     with tf.compat.v2.summary.record_if(
             lambda: tf.math.equal(global_step % summary_interval, 0)):
 
-        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=easy_scenarios)
-        # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
+        # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=easy_scenarios)
+        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
         # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=hard_scenarios)
 
         tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles,
@@ -115,6 +116,7 @@ def train_eval(checkpoint_dir,
         train_metrics = step_metrics + [
             tf_metrics.NumberOfEpisodes(),
             tf_metrics.EnvironmentSteps(),
+            tf_metrics.MinReturnMetric(buffer_size=num_eval_episodes),
             tf_py_metric.TFPyMetric(py_metrics.AverageReturnMetric(batch_size=tf_env.batch_size)),
             tf_py_metric.TFPyMetric(py_metrics.AverageEpisodeLengthMetric(batch_size=tf_env.batch_size)),
         ]
@@ -158,12 +160,19 @@ def train_eval(checkpoint_dir,
                          'the behavioral cloning policy.', initial_bc_collect_steps)
             for _ in range(int(initial_bc_collect_steps / collect_steps_per_iteration)):
                 collect_driver.run()
-        elif global_step.numpy() == 0:
-            # Collect initial replay data.
-            logging.info(
-                'Initializing replay buffer by collecting experience for %d steps with '
-                'a random policy.', initial_collect_steps)
-            initial_collect_driver.run()
+        elif replay_buffer.num_frames().numpy() == 0:
+            if global_step.numpy() == 0:
+                # Collect initial replay data.
+                logging.info(
+                    'Initializing replay buffer by collecting experience for %d steps with '
+                    'a random policy.', initial_collect_steps)
+                initial_collect_driver.run()
+            else:
+                logging.info(
+                    'Initializing replay buffer by collecting experience with initialized agent for %d steps with '
+                    'the trained agent\'s policy.', initial_collect_steps)
+                for i in range(int(initial_collect_steps / collect_steps_per_iteration)):
+                    collect_driver.run()
         else:
             logging.info("skipping initial collect because we already have data")
 
@@ -233,14 +242,15 @@ def train_eval(checkpoint_dir,
                     train_step=global_step, step_metrics=train_metrics[:2])
 
             if eval_interval_keeper.should_trigger(global_steps_taken):
-                compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step,
+                results = compute_metrics(eval_metrics, eval_tf_env, eval_policy, num_eval_episodes, global_step,
                                 eval_summary_writer)
+                # results['MinReturn'].numpy()
 
             save_checkpoints(global_steps_taken,
                              train_checkpoint_interval_manager,
                              policy_checkpoint_interval_manager,
                              rb_checkpoint_interval_manager,
-                             train_checkpointer, policy_checkpointer, rb_checkpointer)
+                             train_checkpointer, policy_checkpointer, rb_checkpointer, global_step)
 
         time_after_trianing = time.time()
 
@@ -248,7 +258,7 @@ def train_eval(checkpoint_dir,
                          train_checkpoint_interval_manager,
                          policy_checkpoint_interval_manager,
                          rb_checkpoint_interval_manager,
-                         train_checkpointer, policy_checkpointer, rb_checkpointer)
+                         train_checkpointer, policy_checkpointer, rb_checkpointer, global_step)
 
         elapsed_time = time_after_trianing - time_before_training
         print(time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
