@@ -35,9 +35,9 @@ def create_agent(env,
                  robot_env_no_obstacles,
                  actor_fc_layers=(128, 64),
                  actor_preprocessing_layer=128,
-                 actor_preprocessing_layer_curve=256,
+                 actor_preprocessing_layer_curve=128,
                  critic_preprocessing_layer=128,
-                 critic_preprocessing_layer_curve=256,
+                 critic_preprocessing_layer_curve=128,
                  critic_preprocessing_layer_action=32,
                  critic_fc_layers=(128, 64),
                  target_update_tau=0.005,
@@ -146,10 +146,10 @@ def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=Non
     if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
         if robot_env_no_obstacles:
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
-            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
+            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
         else:
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios))
-            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios))
+            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios, is_eval=True))
 
         return tf_env, eval_tf_env
 
@@ -158,13 +158,13 @@ def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=Non
             parallel_py_environment.ParallelPyEnvironment(
                 [lambda: RobotEnv()] * num_parallel_environments))
 
-        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
+        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
     else:
         tf_env = tf_py_environment.TFPyEnvironment(
             parallel_py_environment.ParallelPyEnvironment(
                 [lambda: RobotEnvWithObstacles()] * num_parallel_environments))
 
-        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles())
+        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(is_eval=True))
 
     return tf_env, eval_tf_env
 
@@ -188,22 +188,17 @@ def compute_metrics(eval_metrics,
     return results
 
 
-def save_checkpoints(global_step_val,
-                     train_checkpoint_interval_manager,
-                     policy_checkpoint_interval_manager,
-                     rb_checkpoint_interval_manager,
-                     train_checkpointer,
-                     policy_checkpointer,
-                     rb_checkpointer
-                     ):
+def save_checkpoints(global_step_val, train_checkpoint_interval_manager, policy_checkpoint_interval_manager,
+                     rb_checkpoint_interval_manager, train_checkpointer, policy_checkpointer, rb_checkpointer,
+                     global_step):
     if train_checkpoint_interval_manager.should_trigger(global_step_val):
-        train_checkpointer.save(global_step=global_step_val)
+        train_checkpointer.save(global_step=global_step)
 
     if policy_checkpoint_interval_manager.should_trigger(global_step_val):
-        policy_checkpointer.save(global_step=global_step_val)
+        policy_checkpointer.save(global_step=global_step)
 
     if rb_checkpoint_interval_manager.should_trigger(global_step_val):
-        rb_checkpointer.save(global_step=global_step_val)
+        rb_checkpointer.save(global_step=global_step)
 
 
 def make_and_initialze_checkpointers(train_dir,
