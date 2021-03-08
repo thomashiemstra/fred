@@ -6,6 +6,8 @@ import pybullet as p
 from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
+import random
+from absl import logging
 
 from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
     get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
@@ -17,7 +19,7 @@ from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 class RobotEnv(py_environment.PyEnvironment):
 
-    def __init__(self, use_gui=False, raw_obs=False):
+    def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
@@ -25,7 +27,16 @@ class RobotEnv(py_environment.PyEnvironment):
             shape=(5,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
             shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
-        self.scenarios = scenarios_no_obstacles
+
+        scenarios = scenarios_no_obstacles if scenarios is None else scenarios
+
+        self._non_completed_scenarios = [scenario.copy() for scenario in scenarios]
+        self._completed_scenarios = []
+        self._current_scenario_id = 0
+        self._doing_already_completed_scenario = False
+
+        self._is_eval = is_eval
+
         self._update_step_size = 0.02
         self._max_steps_to_take_before_failure = 200
         self._simulation_steps_per_step = 1
@@ -49,7 +60,6 @@ class RobotEnv(py_environment.PyEnvironment):
         self._done = True
         self._externally_set_scenario = None
         self._traveled_distances = []
-        self._current_scenario_id = 0
         self._times_current_scenario_payed = 0
         self.rewards = []
         self.distance = []
@@ -65,6 +75,34 @@ class RobotEnv(py_environment.PyEnvironment):
     def set_scenario(self, scenario):
         self._externally_set_scenario = scenario
 
+    @staticmethod
+    def get_random_id(max_range):
+        return random.randint(0, max_range - 1)
+
+    def _pick_scenario(self):
+        non_completed_scenarios = len(self._non_completed_scenarios)
+        completed_scenarios = len(self._completed_scenarios)
+
+        self._doing_already_completed_scenario = False
+
+        if completed_scenarios == 0:
+            scenario_id = self.get_random_id(non_completed_scenarios)
+            return scenario_id, self._non_completed_scenarios[scenario_id]
+
+        if non_completed_scenarios == 0:
+            self._doing_already_completed_scenario = True
+            scenario_id = self.get_random_id(completed_scenarios)
+            return scenario_id, self._completed_scenarios[scenario_id]
+
+        # pick unsolved scenarios 80% of the time, only train on the completed scenarios in 20% of the time
+        if random.random() < 0.8:
+            scenario_id = self.get_random_id(non_completed_scenarios)
+            return scenario_id, self._non_completed_scenarios[scenario_id]
+        else:
+            self._doing_already_completed_scenario = True
+            scenario_id = self.get_random_id(completed_scenarios)
+            return scenario_id, self._completed_scenarios[scenario_id]
+
     def _generate_obstacles_and_target_pose(self):
         if self._current_scenario is not None:
             self._current_scenario.destroy_scenario(self._physics_client)
@@ -72,8 +110,7 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._externally_set_scenario is not None:
             self._current_scenario = self._externally_set_scenario
         else:
-            scenario_id = random.randint(0, len(self.scenarios) - 1)
-            self._current_scenario = self.scenarios[scenario_id].copy()
+            self._current_scenario_id, self._current_scenario = self._pick_scenario()
 
         self._current_scenario.build_scenario(self._physics_client)
         return self._current_scenario.obstacles, self._current_scenario.target_pose, self._current_scenario.start_pose
@@ -202,7 +239,7 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.termination(observation, reward=0)
         elif collision:
             self._done = True
-            return ts.termination(observation, reward=-10)
+            return ts.termination(observation, reward=-30)
         if stuck:
             self._done = True
             return ts.termination(observation, reward=0)
@@ -214,15 +251,23 @@ class RobotEnv(py_environment.PyEnvironment):
 
             total_reward = 10 + speed_bonus
 
+            self._switch_current_scenario_to_done()
             return ts.termination(observation, reward=total_reward)
         else:
             self._done = False
             return ts.transition(observation, reward=reward, discount=1.0)
 
+    def _switch_current_scenario_to_done(self):
+        if self._is_eval or self._doing_already_completed_scenario:
+            return
+        logging.info("completed a scenario!")
+        del self._non_completed_scenarios[self._current_scenario_id]
+        self._completed_scenarios.append(self._current_scenario)
+
     @staticmethod
     def _is_stuck(total_distance, traveled_distances):
         if len(traveled_distances) > 250:
-            return abs(traveled_distances[-200] - traveled_distances[-1]) < 0.5
+            return abs(traveled_distances[-200] - traveled_distances[-1]) < 1
         return False
 
     def _get_observations(self):
@@ -243,7 +288,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
-        repulsive_cutoff_distance = 4
+        repulsive_cutoff_distance = 6
         repulsive_forces = get_repulsive_forces_world(self._robot_body_id, np.array([c1, c2, c3]),
                                                       obstacle_ids, self._physics_client,
                                                       repulsive_cutoff_distance=repulsive_cutoff_distance,
