@@ -9,8 +9,10 @@ from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
+from src.reinforcementlearning.environment.scenario import easy_scenarios, medium_scenarios, hard_scenarios, \
+    super_easy_scenarios
 
-checkpoint_dir = 'behavioral_cloning_obstacles_v2'
+checkpoint_dir = 'rs_01_tweaked_reward_easy_run'
 robot_env_no_obstacles = False
 
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -23,7 +25,7 @@ global_step = tf.compat.v1.train.create_global_step()
 if robot_env_no_obstacles:
     eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=True))
 else:
-    eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True))
+    eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True, scenarios=medium_scenarios))
 
 with tf.compat.v2.summary.record_if(False):
     tf_agent = create_agent(eval_py_env, None, robot_env_no_obstacles)
@@ -33,11 +35,12 @@ num_episodes = 100
 
 
 # eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[3]
-for i in range(num_episodes):
+for i in range(len(medium_scenarios)):
     # eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[i % 10]
     # eval_py_env.pyenv.envs[0].reverse_scenario = random.choice([True, False])
     reward = 0
 
+    eval_py_env.pyenv.envs[0].set_scenario(super_easy_scenarios[0])
     time_step = eval_py_env.reset()
     while not time_step.is_last():
         action_step = tf_agent.policy.action(time_step)
@@ -50,5 +53,7 @@ for i in range(num_episodes):
         time_step = eval_py_env.step(action_step.action)
         reward += time_step.reward
     print("reward for this episode = {}".format(reward))
+
+print("whoop")
 
 # make_video(env_name, tf_agent, video_filename='eval')
