@@ -13,7 +13,10 @@ from src.utils.obstacle import BoxObstacle
 class RobotEnvWithObstacles(RobotEnv):
 
     def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False):
-        super().__init__(use_gui, raw_obs, is_eval=is_eval)
+        if scenarios is None:
+            raise ValueError("RobotEnvWithObstacles should be initialized with scenarios, "
+                             "otherwise we would default to no obstacle scenarios!")
+        super().__init__(use_gui, raw_obs, is_eval=is_eval, scenarios=scenarios)
         self._hilbert_curve_iteration = 3
         self._grid_len_x = 40
         self._grid_len_y = 40
@@ -24,8 +27,6 @@ class RobotEnvWithObstacles(RobotEnv):
                                       shape=(2 ** (2 * self._hilbert_curve_iteration),),
                                       dtype=np.float32, minimum=0, maximum=1, name='hilbert_curve'),
         )
-
-        self.scenarios = scenarios_obstacles if scenarios is None else scenarios
         self._max_steps_to_take_before_failure = 800
         self._update_step_size = 0.03
         self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
