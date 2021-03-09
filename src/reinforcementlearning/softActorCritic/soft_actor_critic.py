@@ -33,6 +33,11 @@ flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
                     'Root directory for writing logs/summaries/checkpoints.')
 flags.DEFINE_string('behavioral_cloning_checkpoint_dir', None,
                     'Directory in the root dir where the results for the behavioral cloning are saved')
+
+flags.DEFINE_string('difficulty', None,
+                    'Difficulty to start at')
+
+
 flags.DEFINE_float('reward_scaling', None, 'reward scaling')
 flags.DEFINE_float('entropy_target', None, 'entropy target')
 
@@ -46,7 +51,7 @@ NUM_PARALLEL = 1
 
 def train_eval(checkpoint_dir,
                checkpoint_dir_behavioral_cloning=None,
-               total_train_steps=4000000,
+               total_train_steps=1000000,
                # Params for collect,
                initial_collect_steps=10000,
                initial_bc_collect_steps=100000,
@@ -58,7 +63,7 @@ def train_eval(checkpoint_dir,
                batch_size=256,
                use_tf_functions=True,
                # Params for eval,
-               num_eval_episodes=20,
+               num_eval_episodes=10,
                eval_interval=2000,
                # Params for summaries and logging,
                train_checkpoint_interval=5000,
@@ -70,7 +75,8 @@ def train_eval(checkpoint_dir,
                robot_env_no_obstacles=False,
                num_parallel_environments=NUM_PARALLEL,
                reward_scaling=1.0,
-               entropy=None):
+               entropy=None,
+               difficulty=None):
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
@@ -94,8 +100,14 @@ def train_eval(checkpoint_dir,
             lambda: tf.math.equal(global_step % summary_interval, 0)):
 
         # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=easy_scenarios)
-        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
-        # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=hard_scenarios)
+
+        logging.info("difficulty = {}".format(difficulty))
+        if difficulty == 'med':
+            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
+        elif difficulty == 'hard':
+            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=hard_scenarios)
+            logging.info("yeah, like whatever man.")
+            total_train_steps += total_train_steps
 
         tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles,
                                 reward_scale_factor=reward_scaling, entropy=entropy)
@@ -284,11 +296,12 @@ def main(_):
     # for debugging
     # tf.config.experimental_run_functions_eagerly(True)
     reward_scaling = FLAGS.reward_scaling
+    difficulty = FLAGS.difficulty
     if reward_scaling is None:
         reward_scaling = 1.0
 
     train_eval(FLAGS.root_dir, FLAGS.behavioral_cloning_checkpoint_dir, reward_scaling=reward_scaling,
-               entropy=FLAGS.entropy_target)
+               entropy=FLAGS.entropy_target, difficulty=difficulty)
 
 
 # PYTHONUNBUFFERED=1;LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64
