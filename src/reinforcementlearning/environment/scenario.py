@@ -147,88 +147,74 @@ scenarios_obstacles = [
 start_pose = Pose(-30, 25, 10)
 end_pose = Pose(30, 25, 10)
 
+super_easy_scenarios = [
+    Scenario([],
+             start_pose, end_pose),
+]
+
 easy_scenarios = [
     Scenario([BoxObstacle([10, 40, 10], [0, 35, 0])],
-             start_pose, end_pose),
-
-    Scenario([BoxObstacle([10, 40, 10], [10, 35, 0])],
-             start_pose, end_pose),
-
-    Scenario([BoxObstacle([10, 40, 10], [-10, 35, 0])],
              start_pose, end_pose),
 
     Scenario([BoxObstacle([10, 40, 10], [0, 40, 0], alpha=np.pi / 4)],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 40, 10], [0, 40, 0], alpha=-np.pi / 8)],
-             start_pose, end_pose),
-
     Scenario([BoxObstacle([20, 20, 40], [0, 50, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 30, 10], [0, 30, 0]), BoxObstacle([10, 10, 30], [0, 40, 0])],
+    Scenario([BoxObstacle([10, 30, 10], [0, 32, 0]), BoxObstacle([10, 10, 30], [0, 40, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 40, 10], [0, 50, 0], alpha=np.pi/4),
-              BoxObstacle([10, 40, 10], [0, 50, 0], alpha=-np.pi/4),
-              BoxObstacle([10, 10, 20], [0, 50, 0], alpha=-np.pi/4)],
+    Scenario([BoxObstacle([10, 40, 10], [0, 32, 0], alpha=np.pi / 4),
+              BoxObstacle([10, 40, 10], [0, 32, 0], alpha=-np.pi / 4),
+              BoxObstacle([10, 10, 40], [0, 32, 0], alpha=-np.pi / 4)],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 30, 10], [-10, 30, 0]), BoxObstacle([10, 10, 20], [0, 30, 0], alpha=np.pi/4)],
+    Scenario([BoxObstacle([10, 30, 10], [-10, 30, 0]), BoxObstacle([10, 10, 40], [0, 30, 0], alpha=np.pi/4)],
              start_pose, end_pose),
+
+    Scenario([BoxObstacle([10, 10, 40], [0, 25, 0], alpha=np.pi/4), BoxObstacle([10, 40, 10], [0, 30, 0]), BoxObstacle([40, 10, 10], [0, 25, 0])],
+             start_pose, end_pose)
 ]
 
 medium_scenarios = [
     Scenario([BoxObstacle([10, 40, 15], [0, 35, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 40, 15], [8, 35, 0])],
-             start_pose, end_pose),
-
-    Scenario([BoxObstacle([10, 40, 15], [-8, 35, 0])],
-             start_pose, end_pose),
-
     Scenario([BoxObstacle([10, 40, 15], [0, 40, 0], alpha=np.pi / 4)],
-             start_pose, end_pose),
-
-    Scenario([BoxObstacle([10, 40, 15], [0, 40, 0], alpha=-np.pi / 8)],
              start_pose, end_pose),
 
     Scenario([BoxObstacle([20, 20, 40], [0, 40, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 30, 20], [0, 30, 0]), BoxObstacle([10, 10, 30], [0, 40, 0])],
+    Scenario([BoxObstacle([10, 30, 20], [0, 32, 0]), BoxObstacle([10, 10, 30], [0, 40, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 40, 15], [0, 45, 0], alpha=np.pi / 4),
-              BoxObstacle([10, 40, 15], [0, 45, 0], alpha=-np.pi / 4),
-              BoxObstacle([10, 10, 30], [0, 45, 0], alpha=-np.pi / 4)],
+    Scenario([BoxObstacle([10, 40, 15], [0, 32, 0], alpha=np.pi / 4),
+              BoxObstacle([10, 40, 15], [0, 32, 0], alpha=-np.pi / 4),
+              BoxObstacle([10, 10, 40], [0, 32, 0], alpha=-np.pi / 4)],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 30, 15], [-10, 30, 0]), BoxObstacle([10, 10, 30], [0, 30, 0], alpha=np.pi/4)],
+    Scenario([BoxObstacle([10, 30, 15], [-10, 30, 0]), BoxObstacle([10, 10, 40], [0, 30, 0], alpha=np.pi/4)],
              start_pose, end_pose),
+
+    Scenario([BoxObstacle([10, 10, 40], [0, 25, 0], alpha=np.pi / 4),
+              BoxObstacle([10, 40, 15], [0, 30, 0]),
+              BoxObstacle([40, 10, 15], [0, 25, 0])],
+             start_pose, end_pose)
 ]
 
 hard_scenarios = [
     Scenario([BoxObstacle([10, 40, 25], [0, 35, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 40, 25], [10, 35, 0])],
-             start_pose, end_pose),
-
-    Scenario([BoxObstacle([10, 40, 25], [-10, 35, 0])],
-             start_pose, end_pose),
-
     Scenario([BoxObstacle([10, 40, 25], [0, 40, 0], alpha=np.pi / 4)],
-             start_pose, end_pose),
-
-    Scenario([BoxObstacle([10, 40, 25], [0, 35, 0], alpha=-np.pi / 8)],
              start_pose, end_pose),
 
     Scenario([BoxObstacle([20, 20, 40], [0, 35, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 30, 30], [0, 30, 0]), BoxObstacle([10, 10, 60], [0, 40, 0])],
+    Scenario([BoxObstacle([10, 30, 30], [0, 32, 0]), BoxObstacle([10, 10, 40], [0, 40, 0])],
              start_pose, end_pose),
 
     Scenario([BoxObstacle([10, 40, 20], [0, 32, 0], alpha=np.pi / 4),
@@ -236,8 +222,13 @@ hard_scenarios = [
               BoxObstacle([10, 10, 40], [0, 32, 0], alpha=-np.pi / 4)],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 30, 20], [-10, 30, 0]), BoxObstacle([10, 10, 40], [0, 30, 0], alpha=np.pi/4)],
+    Scenario([BoxObstacle([10, 30, 20], [-5, 30, 0]), BoxObstacle([10, 10, 40], [0, 30, 0], alpha=np.pi/4)],
              start_pose, end_pose),
+
+    Scenario([BoxObstacle([10, 10, 40], [0, 25, 0], alpha=np.pi / 4),
+              BoxObstacle([10, 40, 20], [0, 30, 0]),
+              BoxObstacle([40, 10, 20], [0, 25, 0])],
+             start_pose, end_pose)
 ]
 
 if __name__ == '__main__':
