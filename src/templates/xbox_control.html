@@ -86,6 +86,14 @@
                      </label><br>
                   <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/xbox/setSpeed', '#speedInput'); document.getElementById('newSpeed').value = ''" value="Submit">
                 </form>
+                  <h2>Set scenario id:</h2>
+                 <form id="scenario_id" action=#>
+                     scenario id:<br>
+                     <label>
+                         <input type="text" name="scenario_id" id="newscenario_id">
+                     </label><br>
+                  <input type="button" onclick="postRequestForm('http://127.0.0.1:5000/xbox/setScenarioId', '#scenario_id'); document.getElementById('newscenario_id').value = ''" value="Submit">
+                </form>
              </div>
         </div>
     </div>

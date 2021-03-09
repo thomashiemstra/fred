@@ -127,6 +127,16 @@ def set_speed():
     return jsonify(success=True)
 
 
+@xbox_api.route('/setScenarioId', methods=['POST'])
+def set_scenario():
+    scenario_id = get_parameter('scenario_id')
+    if scenario_id is None:
+        return jsonify(success=False
+                       )
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
+    success = xbox_robot_controller.set_scenario(int(scenario_id))
+    return jsonify(success=success)
+
 # @xbox_api.route('/video_feed')
 # def video_feed():
 #     return Response(get_image(), mimetype='multipart/x-mixed-replace; boundary=frame')

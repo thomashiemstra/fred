@@ -6,6 +6,7 @@ from copy import copy
 
 import jsonpickle
 import numpy as np
+from reinforcementlearning.environment.scenario import medium_scenarios
 
 from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics_utils import Pose
@@ -38,6 +39,9 @@ class XboxRobotController:
         self.move_speed = 10
         self.recorded_moves = []
         self.gripper_state = 0
+        self.current_scenario_id = None
+        # dependency inject?
+        self.scenarios = medium_scenarios
 
     @synchronized_with_lock("lock")
     def is_done(self):
@@ -212,6 +216,21 @@ class XboxRobotController:
     @synchronized_with_lock("lock")
     def set_maximum_speed(self, new_maximum_speed):
         self.pose_updater.maximum_speed = new_maximum_speed
+
+    @synchronized_with_lock("lock")
+    def set_scenario(self, scneario_id):
+        if scneario_id < 0 or scneario_id > len(self.scenarios):
+            return False
+
+        physics_client = self.servo_controller.physics_client
+
+        if self.current_scenario_id is not None:
+            self.scenarios[self.current_scenario_id].destroy_scenario(physics_client)
+
+        self.current_scenario_id = scneario_id
+        self.scenarios[self.current_scenario_id].build_scenario(physics_client)
+
+        return True
 
     def playback_recorded_moves(self, recorded_moves):
         recorded_moves[0].go_to_start_of_move(self.servo_controller)
