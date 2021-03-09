@@ -127,9 +127,9 @@ def set_speed():
     return jsonify(success=True)
 
 
-@xbox_api.route('/video_feed')
-def video_feed():
-    return Response(get_image(), mimetype='multipart/x-mixed-replace; boundary=frame')
+# @xbox_api.route('/video_feed')
+# def video_feed():
+#     return Response(get_image(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def get_filename():
