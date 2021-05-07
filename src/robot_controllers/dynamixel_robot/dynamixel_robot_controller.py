@@ -57,14 +57,6 @@ class DynamixelRobotController(AbstractRobotController):
         self.board = Arduino()
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
 
-    def get_servo_config(self):
-        try:
-            with open(self.servo_config_path, 'r') as servo_config_file:
-                string = servo_config_file.read()
-                return jsonpickle.decode(string)
-        except FileNotFoundError:
-            return None
-
     def enable_servos(self):
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
