@@ -1,5 +1,5 @@
 # Handler for dynamixel X servos
-import dynamixel_sdk as dynamixel
+import src.robot_controllers.dynamixel_robot.dynamixel_sdk as dynamixel
 import src.robot_controllers.dynamixel_robot.dynamixel_utils as utils
 
 
@@ -59,6 +59,26 @@ class ServoHandler(object):
 
             self.__add_to_write(self.config.ADDR_PROFILE_ACCELERATION,
                                 self.config.LEN_PROFILE_ACCELERATION, servo_id, servo.profile_acceleration)
+
+        self.__write_and_clear()
+
+    def set_configured_goal_current(self):
+        self.group_bulk_write.clearParam()
+
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+            self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
+                                self.config.LEN_GOAL_POSITION, servo_id, servo.goal_current)
+
+        self.__write_and_clear()
+
+    def set_goal_current(self, val):
+        self.group_bulk_write.clearParam()
+
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+            self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
+                                self.config.LEN_GOAL_POSITION, servo_id, val)
 
         self.__write_and_clear()
 

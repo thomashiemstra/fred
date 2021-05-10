@@ -37,6 +37,7 @@ class DynamixelRobotController(AbstractRobotController):
         self.servo4 = servo_config["servo4"]
         self.servo5 = servo_config["servo5"]
         self.servo6 = servo_config["servo6"]
+        self.servo7 = servo_config["servo7"]
 
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
@@ -45,8 +46,12 @@ class DynamixelRobotController(AbstractRobotController):
                                                packet_handler, group_bulk_write, group_bulk_read)
 
         wrist_servos = {4: self.servo4, 5: self.servo5, 6: self.servo6}
-        self. wrist_servo_handler = ServoHandler(wrist_servos, cfg, port_handler,
-                                                 packet_handler, group_bulk_write, group_bulk_read)
+        self.wrist_servo_handler = ServoHandler(wrist_servos, cfg, port_handler,
+                                                packet_handler, group_bulk_write, group_bulk_read)
+
+        gripper_servos = {7: self.servo7}
+        self.gripper_servo_handler = ServoHandler(gripper_servos, cfg, port_handler,
+                                                  packet_handler, group_bulk_write, group_bulk_read)
 
         self.robot_config = robot_config
         self.set_velocity_profile()
@@ -60,12 +65,12 @@ class DynamixelRobotController(AbstractRobotController):
     def enable_servos(self):
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
-        self.board.Servos.attach(gripper_servo_pin, min=720, max=1240)
+        self.gripper_servo_handler.set_torque(enable=True)
 
     def disable_servos(self):
         self.base_servo_handler.set_torque(enable=False)
         self.wrist_servo_handler.set_torque(enable=False)
-        self.board.Servos.detach(9)
+        self.gripper_servo_handler.set_torque(enable=False)
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
@@ -92,21 +97,29 @@ class DynamixelRobotController(AbstractRobotController):
         end = timer()
         return end - start
 
+    # TODO used brain to convert gripper state to servo command
     def set_gripper(self, new_gripper_state):
-        pwm = convert_gripper_state_to_pwm(new_gripper_state)
-        self.board.Servos.write(gripper_servo_pin, pwm)
-        self.gripper_state = new_gripper_state
+        """
+        directly control the gripper on the robot
+        :param new_gripper_state: value between 0 and 100 0 being fully closed 100 fully open
+        :return:
+        """
+        self.gripper_servo_handler.set_angle(7, new_gripper_state)
 
     def set_velocity_profile(self):
         self.base_servo_handler.set_profile_velocity_and_acceleration()
         self.wrist_servo_handler.set_profile_velocity_and_acceleration()
+        self.gripper_servo_handler.set_profile_velocity_and_acceleration()
+
+    def set_goal_current(self):
+        self.base_servo_handler.set_configured_goal_current()
+        self.wrist_servo_handler.set_configured_goal_current()
+        self.gripper_servo_handler.set_configured_goal_current()
 
     def set_pid(self):
         self.base_servo_handler.set_pid()
         self.wrist_servo_handler.set_pid()
-
-    def set_servo_torque(self, servo_id, enable):
-        self.wrist_servo_handler.set_servo_torque(servo_id, enable)
+        self.gripper_servo_handler.set_pid()
 
     # debug function to control single servo
     def move_servo(self, servo_id, angle):

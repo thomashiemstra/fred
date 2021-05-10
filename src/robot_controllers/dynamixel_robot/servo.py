@@ -59,8 +59,8 @@ class Servo:
     target_position = 0
     current_position = -1  # set by the servo handler
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=0, profile_acceleration=0,
-                 p=1000, i=600, d=500, offset=0):
+    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=100, profile_acceleration=50,
+                 p=1000, i=600, d=500, offset=0, goal_current=300):
         self.p = p
         self.i = i
         self.d = d
@@ -71,6 +71,7 @@ class Servo:
         self.profile_velocity = profile_velocity
         self.profile_acceleration = profile_acceleration
         self.offset = offset
+        self.goal_current = goal_current
 
     # updates the target position of this servo
     def set_target_position_from_angle(self, angle):

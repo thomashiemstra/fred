@@ -10,6 +10,7 @@ ADDR_PRESENT_POSITION   = 132
 ADDR_P                  = 84
 ADDR_I                  = 82
 ADDR_D                  = 80
+ADDR_GOAL_CURRENT       = 102
 
 # Data Byte Length
 LEN_LED_RED             = 1
@@ -18,6 +19,7 @@ LEN_PROFILE_VELOCITY    = 4
 LEN_GOAL_POSITION       = 4
 LEN_PRESENT_POSITION    = 4
 LEN_PID                 = 2
+LEN_GOAL_CURRENT        = 2
 
 # Protocol version
 PROTOCOL_VERSION            = 2.0               # See which protocol version is used in the Dynamixel
