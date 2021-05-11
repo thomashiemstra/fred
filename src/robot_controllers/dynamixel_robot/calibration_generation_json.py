@@ -5,6 +5,7 @@ import jsonpickle
 from src.robot_controllers.dynamixel_robot.servo import Servo, ServoEncoder, ServoDecoder
 from numpy import pi
 
+# TODO fix values for new fancy robot
 servo1 = Servo(1024, 3072, 0, pi, 80, 30, p=800, i=0, d=2500)
 servo2 = Servo(1024, 3072, 0, pi, 80, 30, p=1500, i=0, d=500)
 servo3 = Servo(1024, 3072, -pi/2, pi/2, 80, 30, p=1500, i=100, d=500)

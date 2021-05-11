@@ -62,6 +62,26 @@ class ServoHandler(object):
 
         self.__write_and_clear()
 
+    def set_profile_velocity_percentage(self, percentage):
+        """
+        set the profile velocity as percentage of the maximum configured
+        :param percentage: a value between 0 and 100
+        :return:
+        """
+        if not (0 < percentage <= 100):
+            raise ValueError("A percentage outside the range (0,100]!? I don't think so!")
+
+        self.group_bulk_write.clearParam()
+
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+            val = (servo.profile_velocity / 100) * percentage
+
+            self.__add_to_write(self.config.ADDR_PROFILE_VELOCITY,
+                                self.config.LEN_PROFILE_VELOCITY, servo_id, val)
+
+        self.__write_and_clear()
+
     def set_configured_goal_current(self):
         self.group_bulk_write.clearParam()
 

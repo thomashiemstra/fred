@@ -30,18 +30,14 @@
               </div>
           </div>
         </div>
-        <div class="col-sm-4">
-            <div class="container">
-                <h2>Camera controlls</h2>
-                <div class="btn-group">
-                    <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/startcamera')">On</button>
-                    <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/stopcamera')">Off</button>
-              </div>
+            <div class="col-sm-4">
+                <h2>Set (real) robot speed:</h2>
+                <button type="button" class="btn btn-success" onclick="postRequest('http://127.0.0.1:5000/xbox/speed', {'percentage':'10'})">10%</button>
                 <br>
+                <button type="button" class="btn btn-success" onclick="postRequest('http://127.0.0.1:5000/xbox/speed', {'percentage':'50'})">50%</button>
                 <br>
-                <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/startcameraRecording')">Record</button>
+                <button type="button" class="btn btn-success" onclick="postRequest('http://127.0.0.1:5000/xbox/speed', {'percentage':'100'})">100%</button>
             </div>
-        </div>
       </div>
     </div>
 
@@ -73,7 +69,6 @@
                   </form>
                   <h2>Clear all recorded moves and positions:</h2>
                  <form id="clearAll" action=#>
-                     File name:<br>
                      <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/xbox/clearAll')">clear all</button>
                   </form>
              </div>
@@ -98,9 +93,22 @@
         </div>
     </div>
 
-    <!--<script>-->
-        <!--getRobotStatus();-->
-    <!--</script>-->
+
+    <div class="container">
+        <div class="col-sm-4">
+            <div class="container">
+                <h2>Camera controlls</h2>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/startcamera')">On</button>
+                    <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/stopcamera')">Off</button>
+              </div>
+                <br>
+                <br>
+                <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/startcameraRecording')">Record</button>
+            </div>
+        </div>
+    </div>
+
 {% endblock %}
 
 

@@ -112,14 +112,20 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler.set_profile_velocity_and_acceleration()
 
     def set_goal_current(self):
-        self.base_servo_handler.set_configured_goal_current()
-        self.wrist_servo_handler.set_configured_goal_current()
+        # Only the gripper uses current based position control
+        # self.base_servo_handler.set_configured_goal_current()
+        # self.wrist_servo_handler.set_configured_goal_current()
         self.gripper_servo_handler.set_configured_goal_current()
 
     def set_pid(self):
         self.base_servo_handler.set_pid()
         self.wrist_servo_handler.set_pid()
         self.gripper_servo_handler.set_pid()
+
+    def set_profile_velocity_percentage(self, percentage):
+        self.base_servo_handler.set_profile_velocity_percentage(percentage)
+        self.wrist_servo_handler.set_profile_velocity_percentage(percentage)
+        self.gripper_servo_handler.set_profile_velocity_percentage(percentage)
 
     # debug function to control single servo
     def move_servo(self, servo_id, angle):

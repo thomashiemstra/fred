@@ -137,6 +137,21 @@ def set_scenario():
     success = xbox_robot_controller.set_scenario(int(scenario_id))
     return jsonify(success=success)
 
+
+@xbox_api.route('/speed', methods=['POST'])
+def speed():
+    raw_percentage = get_parameter("percentage")
+    if raw_percentage is None:
+        return jsonify(success=False)
+    percentage = int(raw_percentage)
+    if not (0 < percentage <= 100):
+        return jsonify(success=False)
+
+    xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
+    xbox_robot_controller.set_profile_velocity_percentage(percentage)
+    resp = jsonify(success=True)
+    return resp
+
 # @xbox_api.route('/video_feed')
 # def video_feed():
 #     return Response(get_image(), mimetype='multipart/x-mixed-replace; boundary=frame')

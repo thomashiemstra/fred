@@ -1,4 +1,4 @@
-import dynamixel_sdk as dynamixel
+import src.robot_controllers.dynamixel_robot.dynamixel_sdk as dynamixel
 
 
 def set_torque(packet_handler, port_handler, config, servo_id, enable):

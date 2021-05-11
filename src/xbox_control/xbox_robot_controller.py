@@ -6,7 +6,7 @@ from copy import copy
 
 import jsonpickle
 import numpy as np
-from reinforcementlearning.environment.scenario import medium_scenarios
+from src.reinforcementlearning.environment.scenario import medium_scenarios
 
 from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics_utils import Pose
@@ -78,6 +78,10 @@ class XboxRobotController:
     @synchronized_with_lock("lock")
     def clear_center(self):
         self.center = None
+
+    @synchronized_with_lock("lock")
+    def set_profile_velocity_percentage(self, percentage):
+        self.servo_controller.set_profile_velocity_percentage(percentage)
 
     @synchronized_with_lock("lock")
     def start(self):
