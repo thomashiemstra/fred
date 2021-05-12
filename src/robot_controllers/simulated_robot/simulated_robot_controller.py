@@ -3,6 +3,7 @@ import pybullet as p
 import numpy as np
 
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
+from src.utils.decorators import timer
 from src.utils.robot_controller_utils import get_recommended_wait_time
 
 
@@ -54,6 +55,9 @@ class SimulatedRobotController(AbstractRobotController):
     def disable_servos(self):
         pass
 
+    def set_profile_velocity_percentage(self, val):
+        pass
+
     def reset_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
         self.reset_servos(angles)
@@ -67,7 +71,7 @@ class SimulatedRobotController(AbstractRobotController):
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
-        recommended_time = get_recommended_wait_time(self._current_angles, angles)
+        recommended_time = 0 #get_recommended_wait_time(self._current_angles, angles)
         self.move_servos(angles)
         return recommended_time, 0
 
