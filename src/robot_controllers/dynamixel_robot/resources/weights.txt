@@ -1,0 +1,4 @@
+4 screws: 9 gr
+arm: 143 gr
+joint3: 1036 gr
+wrist: 360 gr
