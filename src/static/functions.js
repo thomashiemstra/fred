@@ -12,21 +12,6 @@ function getAPI(){
         })
 }
 
-
-function getRobotStatus(){
-    fetch('http://127.0.0.1:5000/robotstatus')
-        .then((res) => {return res.json()})
-        .then((data) => {
-            console.log(data);
-            if (data.status) {
-                toggleOn()
-            } else {
-                toggleOff()
-            }
-        })
-}
-
-
 function emptyPostRequest(url) {
     fetch(url, {
                 method: 'post',
