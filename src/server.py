@@ -31,14 +31,6 @@ def index():
 def xbox():
     return render_template('xbox_control.html')
 
-
-@app.route('/robotstatus')
-def get_status():
-    # return jsonify(status=True)
-    dynamixel_servo_controller = get_robot(dynamixel_robot_arm_port)
-    return jsonify(status=dynamixel_servo_controller.get_status())
-
-
 @app.route('/getJsonList', methods=['GET'])
 def getJsonList():
     list = [
