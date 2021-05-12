@@ -1,18 +1,14 @@
 import json
-
-import jsonpickle
-
 from src.robot_controllers.dynamixel_robot.servo import Servo, ServoEncoder, ServoDecoder
 from numpy import pi
 
-# TODO fix values for new fancy robot
-servo1 = Servo(1024, 3072, 0, pi, 80, 30, p=800, i=0, d=2500)
-servo2 = Servo(1024, 3072, 0, pi, 80, 30, p=1500, i=0, d=500)
-servo3 = Servo(1024, 3072, -pi/2, pi/2, 80, 30, p=1500, i=100, d=500)
-servo4 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
-servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
-servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
-servo7 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=3500)
+servo1 = Servo(0, 6144, 0, pi, 100, 20, p=1500, i=0, d=1500)
+servo2 = Servo(0, 6144, 0, pi, 50, 10, p=1500, i=100, d=1500)
+servo3 = Servo(6144, 0, -pi/2, pi/2, 100, 20, p=1500, i=0, d=1500)
+servo4 = Servo(0, 4095, -pi, pi, 400, 80, p=1000, i=0, d=200)
+servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=500)
+servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=1500, i=0, d=500)
+servo7 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=500)
 
 servos = {
     "servo1": servo1,
@@ -26,7 +22,10 @@ servos = {
 
 json_string = json.dumps(servos, cls=ServoEncoder,  indent=4)
 
-print(json_string)
+# print(json_string)
+
+with open("resources/servo_config.json", "w") as outfile:
+    outfile.write(json_string)
 
 decoded_servo = ServoDecoder().decode(json_string)
 
