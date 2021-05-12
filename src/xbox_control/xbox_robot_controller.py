@@ -10,18 +10,17 @@ from src.reinforcementlearning.environment.scenario import medium_scenarios
 
 from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics_utils import Pose
-from src.utils.decorators import synchronized_with_lock
+from src.utils.decorators import synchronized_with_lock, timer
 from src.utils.linalg_utils import get_center
 from src.utils.movement import PoseToPoseMovement, SplineMovement
 from src.utils.movement_exception import MovementException
 from src.utils.movement_utils import pose_to_pose, from_current_angles_to_pose
 from time import sleep
 import logging as log
-from timeit import default_timer as timer
 
 
 class XboxRobotController:
-    start_pose = Pose(-26, 21.0, 6)
+    start_pose = Pose(21, 21.0, 5)
 
     def __init__(self, dynamixel_robot_config, servo_controller, pose_updater):
         self.pose_updater = pose_updater
@@ -98,34 +97,27 @@ class XboxRobotController:
             return False
 
     def __start_internal(self):
+        self.servo_controller.set_profile_velocity_percentage(10)
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
+
         from_current_angles_to_pose(self.current_pose, self.servo_controller, 1)
         self.servo_controller.set_gripper(self.gripper_state)
+
         # self.current_pose = pose_to_pose(self.current_pose, Pose(0, 25, 10), self.servo_controller, 2)
-        self.pose_updater.reset_buttons()
 
         pose_update_sleep_time = self.pose_updater.dt
-        steps_to_take_without_pose_update = 4
-        steps_taken_since_pose_update = 0
-        default_sleep_time = pose_update_sleep_time / steps_to_take_without_pose_update
 
         while True:
             if self.is_done():
                 break
 
-            recommended_time, time_taken = 0, 0
-            if steps_taken_since_pose_update == steps_to_take_without_pose_update - 1:
-                self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
-                                                                                       self.find_center_mode, self.center)
-                recommended_time, time_taken = self.servo_controller.move_to_pose(self.current_pose)
-                steps_taken_since_pose_update = 0
-            else:
-                steps_taken_since_pose_update += 1
-
+            self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
+                                                                                   self.find_center_mode, self.center)
+            recommended_time, time_taken = self.servo_controller.move_to_pose(self.current_pose)
             self.handle_buttons()
 
-            time_to_sleep = np.maximum(np.maximum(recommended_time, default_sleep_time) - time_taken, 0)
+            time_to_sleep = np.maximum(np.maximum(recommended_time, pose_update_sleep_time) - time_taken, 0)
             sleep(time_to_sleep)
 
         self.stop_robot()
@@ -135,7 +127,7 @@ class XboxRobotController:
         self.servo_controller.disable_servos()
 
     def handle_buttons(self):
-        buttons = self.pose_updater.controller_state_manager.get_buttons()
+        buttons = self.pose_updater.controller.get_buttons()
         if buttons.start:
             if len(self.recorded_moves) < 1:
                 return
@@ -165,9 +157,13 @@ class XboxRobotController:
                 self.store_move_or_go_back(move)
             else:
                 print("not enough positions for a movement")
-        elif buttons.pad_ud != 0:
+        elif buttons.pad_up:
             old_speed = self.pose_updater.maximum_speed
-            new_speed = np.clip(old_speed + buttons.pad_ud * 5, 5, 50)
+            new_speed = np.clip(old_speed +5, 5, 50)
+            self.pose_updater.maximum_speed = new_speed
+        elif buttons.pad_down:
+            old_speed = self.pose_updater.maximum_speed
+            new_speed = np.clip(old_speed -5, 5, 50)
             self.pose_updater.maximum_speed = new_speed
 
     def has_enough_recorded_positions(self):

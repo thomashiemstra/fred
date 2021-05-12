@@ -3,12 +3,12 @@ from timeit import default_timer as timer
 
 import jsonpickle
 import numpy as np
-from Arduino import Arduino
 
-from src.kinematics.kinematics import inverse_kinematics
+from src.kinematics.kinematics import inverse_kinematics, forward_position_kinematics
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
+from src.robot_controllers.dynamixel_robot.servo import ServoDecoder
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 # Facade for the robot as a whole, abstracting away the servo handling
@@ -31,13 +31,16 @@ class DynamixelRobotController(AbstractRobotController):
         :param robot_config: a RobotConfig object
         :param servo_config: (dict of str:json) servo name and servo config
         """
-        self.servo1 = servo_config["servo1"]
-        self.servo2 = servo_config["servo2"]
-        self.servo3 = servo_config["servo3"]
-        self.servo4 = servo_config["servo4"]
-        self.servo5 = servo_config["servo5"]
-        self.servo6 = servo_config["servo6"]
-        self.servo7 = servo_config["servo7"]
+
+        decodes_servos = ServoDecoder().decode(servo_config)
+
+        self.servo1 = decodes_servos["servo1"]
+        self.servo2 = decodes_servos["servo2"]
+        self.servo3 = decodes_servos["servo3"]
+        self.servo4 = decodes_servos["servo4"]
+        self.servo5 = decodes_servos["servo5"]
+        self.servo6 = decodes_servos["servo6"]
+        self.servo7 = decodes_servos["servo7"]
 
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
@@ -59,7 +62,6 @@ class DynamixelRobotController(AbstractRobotController):
         self.status = False
         self.lock = threading.RLock()
         self._current_angles = self.get_current_angles()
-        self.board = Arduino()
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
 
     def enable_servos(self):
@@ -77,6 +79,11 @@ class DynamixelRobotController(AbstractRobotController):
         recommended_time = get_recommended_wait_time(self._current_angles, angles)
         time_taken = self.move_servos(angles)
         return recommended_time, time_taken
+
+    def get_current_gripper_position(self):
+        angles = self.get_current_angles()
+        _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)
+        return p6
 
     # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
@@ -104,7 +111,8 @@ class DynamixelRobotController(AbstractRobotController):
         :param new_gripper_state: value between 0 and 100 0 being fully closed 100 fully open
         :return:
         """
-        self.gripper_servo_handler.set_angle(7, new_gripper_state)
+        pass
+        # self.gripper_servo_handler.set_angle(7, new_gripper_state)
 
     def set_velocity_profile(self):
         self.base_servo_handler.set_profile_velocity_and_acceleration()

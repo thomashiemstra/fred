@@ -10,14 +10,14 @@ from src.global_constants import WorkSpaceLimits
 
 # class used to update a pose using the inputs from the xbox360 controller
 # i.e. move the pose (and thus robot) with the xbox360 controller
-from src.utils.decorators import synchronized_with_lock
+from src.utils.decorators import synchronized_with_lock, timer
 from src.utils.movement_utils import get_angles_center
 from src.utils.os_utils import is_linux
 
 
 class XboxPoseUpdater:
 
-    def __init__(self, controller_state_manager, maximum_speed=15.0, ramp_up_time=0.1,
+    def __init__(self, controller, maximum_speed=15.0, ramp_up_time=0.1,
                  workspace_limits=WorkSpaceLimits):
         self.workspace_limits = workspace_limits
         self.v_x, self.v_y, self.v_z = 0, 0, 0
@@ -27,7 +27,7 @@ class XboxPoseUpdater:
         self._maximum_speed = maximum_speed  # cm/sec
         self.ramp_up_time = ramp_up_time  # time to speed up/slow down
         self._dv = self._maximum_speed / (self.ramp_up_time * self.steps_per_second)  # v/step
-        self.controller_state_manager = controller_state_manager
+        self.controller = controller
         self.lock = threading.RLock()
         self.is_linux = is_linux()
 
@@ -56,12 +56,12 @@ class XboxPoseUpdater:
         return new_velocity
 
     def get_xyz_from_poller(self):
-        x_in, y_in = self.controller_state_manager.get_left_thumb()
-        z_in = -self.controller_state_manager.get_lr_trigger()
+        x_in, y_in = self.controller.get_left_thumb()
+        z_in = self.controller.get_lr_trigger()
         return x_in, y_in, z_in
 
     def __update_orientation_velocities(self, find_center_mode):
-        right_thumb_x, right_thumb_y = self.controller_state_manager.get_right_thumb()
+        right_thumb_x, right_thumb_y = self.controller.get_right_thumb()
         if not self.is_linux:
             right_thumb_x *= -1
         right_thumb_y *= -1
@@ -130,10 +130,7 @@ class XboxPoseUpdater:
 
         return alpha, gamma
 
-    def reset_buttons(self):
-        self.controller_state_manager.reset_buttons()
-
     def stop(self):
-        self.controller_state_manager.stop()
+        self.controller.stop()
 
 
