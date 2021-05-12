@@ -75,7 +75,7 @@ class ServoHandler(object):
 
         for servo_id in self.servo_map:
             servo = self.servo_map[servo_id]
-            val = (servo.profile_velocity / 100) * percentage
+            val = int((servo.profile_velocity / 100) * percentage)
 
             self.__add_to_write(self.config.ADDR_PROFILE_VELOCITY,
                                 self.config.LEN_PROFILE_VELOCITY, servo_id, val)
