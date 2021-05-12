@@ -13,8 +13,8 @@ class ServoEncoder(json.JSONEncoder):
             return {
                 "min_position": o.min_position,
                 "max_position": o.max_position,
-                "max_angle": o.max_angle/pi,
-                "min_angle": o.min_angle/pi,
+                "max_angle": o.max_angle,
+                "min_angle": o.min_angle,
                 "profile_velocity": o.profile_velocity,
                 "profile_acceleration": o.profile_acceleration,
                 "p": o.p,
@@ -32,16 +32,14 @@ class ServoDecoder(json.JSONDecoder):
     def __init__(self) -> None:
         super().__init__(object_hook=self.dict_to_object)
 
-
-
     @staticmethod
     def dict_to_object(dictionary):
         if "class" in dictionary.keys() and dictionary["class"] == "servo":
             return Servo(
                 dictionary["min_position"],
                 dictionary["max_position"],
-                dictionary["max_angle"],
                 dictionary["min_angle"],
+                dictionary["max_angle"],
                 dictionary["profile_velocity"],
                 dictionary["profile_acceleration"],
                 dictionary["p"],
