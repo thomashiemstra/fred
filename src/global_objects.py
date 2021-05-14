@@ -20,11 +20,9 @@ def get_robot(port):
 
 
 def get_servo_config(servo_config_path):
-    import jsonpickle
     try:
         with open(servo_config_path, 'r') as servo_config_file:
             return servo_config_file.read()
-            # return jsonpickle.decode(string)
     except FileNotFoundError:
         logging.error("error getting servo config, exiting")
         sys.exit()
