@@ -14,14 +14,6 @@ from src.utils.decorators import synchronized_with_lock
 # Facade for the robot as a whole, abstracting away the servo handling
 from src.utils.robot_controller_utils import get_recommended_wait_time
 
-gripper_min_pwm = 60
-gripper_max_pwm = 160
-gripper_servo_pin = 9
-
-
-def convert_gripper_state_to_pwm(state):
-    return gripper_min_pwm + ((gripper_max_pwm - gripper_min_pwm) * (state / 100))
-
 
 class DynamixelRobotController(AbstractRobotController):
 
@@ -104,15 +96,14 @@ class DynamixelRobotController(AbstractRobotController):
         end = timer()
         return end - start
 
-    # TODO used brain to convert gripper state to servo command
     def set_gripper(self, new_gripper_state):
         """
         directly control the gripper on the robot
         :param new_gripper_state: value between 0 and 100 0 being fully closed 100 fully open
         :return:
         """
-        pass
-        # self.gripper_servo_handler.set_angle(7, new_gripper_state)
+        self.gripper_servo_handler.set_angle(7, new_gripper_state)
+        self.gripper_servo_handler.move_to_angles()
 
     def set_velocity_profile(self):
         self.base_servo_handler.set_profile_velocity_and_acceleration()
@@ -120,9 +111,8 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler.set_profile_velocity_and_acceleration()
 
     def set_goal_current(self):
-        # Only the gripper uses current based position control
-        # self.base_servo_handler.set_configured_goal_current()
-        # self.wrist_servo_handler.set_configured_goal_current()
+        self.base_servo_handler.set_configured_goal_current()
+        self.wrist_servo_handler.set_configured_goal_current()
         self.gripper_servo_handler.set_configured_goal_current()
 
     def set_pid(self):
@@ -179,8 +169,10 @@ class DynamixelRobotController(AbstractRobotController):
     def set_servo_position(self, servo_id, pos):
         if servo_id <= 3:
             self.base_servo_handler.move_servo_to_pos(servo_id, pos)
-        else:
+        elif 3 < servo_id <= 6:
             self.wrist_servo_handler.move_servo_to_pos(servo_id, pos)
+        elif servo_id == 7:
+            self.gripper_servo_handler.move_servo_to_pos(servo_id, pos)
 
     def get_servo_position(self, servo_id):
         if servo_id <= 3:
