@@ -62,6 +62,9 @@ class SimulatedRobotController(AbstractRobotController):
         angles = inverse_kinematics(pose, self.robot_config)
         self.reset_servos(angles)
 
+    def reset_to_angels(self, angles):
+        self.reset_servos(angles)
+
     def reset_servos(self, angles):
         self._current_angles = angles
         p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
