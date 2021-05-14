@@ -4,4 +4,4 @@ from numpy import pi
 robot_controller = start_simulated_robot(True)
 
 
-print("hi")
+input("whatever")

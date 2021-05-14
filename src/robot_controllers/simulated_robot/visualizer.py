@@ -3,6 +3,5 @@ from numpy import pi
 
 robot_controller = start_simulated_robot(True)
 
-angles = [0, 0, pi/2, 0, 0, 0, 0]
-robot_controller.move_servos(angles)
+robot_controller.move_servos([0, 0, pi/2, 0, 0, 0, 0])
 print("hi")
