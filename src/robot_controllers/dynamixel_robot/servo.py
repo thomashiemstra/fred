@@ -21,6 +21,7 @@ class ServoEncoder(json.JSONEncoder):
                 "i": o.i,
                 "d": o.d,
                 "offset": o.offset,
+                "goal_current": o.goal_current,
                 "class": "servo"
             }
         else:
@@ -45,7 +46,8 @@ class ServoDecoder(json.JSONDecoder):
                 dictionary["p"],
                 dictionary["i"],
                 dictionary["d"],
-                dictionary["offset"]
+                dictionary["offset"],
+                dictionary["goal_current"]
             )
         else:
             return dictionary
@@ -58,7 +60,7 @@ class Servo:
     current_position = -1  # set by the servo handler
 
     def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=100, profile_acceleration=50,
-                 p=1000, i=600, d=500, offset=0, goal_current=300):
+                 p=1000, i=600, d=500, offset=0, goal_current=None):
         self.p = p
         self.i = i
         self.d = d
@@ -70,6 +72,12 @@ class Servo:
         self.profile_acceleration = profile_acceleration
         self.offset = offset
         self.goal_current = goal_current
+
+    def __str__(self):
+        return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} " \
+               "profile_velocity={} profile_acceleration={} offset={} goal_current={}" \
+            .format(self.p, self.i, self.d, self.max_angle, self.min_angle, self.min_position, self.max_position,
+                    self.profile_velocity, self.profile_acceleration, self.offset, self.goal_current)
 
     # updates the target position of this servo
     def set_target_position_from_angle(self, angle):
