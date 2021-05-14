@@ -2,13 +2,13 @@ import json
 from src.robot_controllers.dynamixel_robot.servo import Servo, ServoEncoder, ServoDecoder
 from numpy import pi
 
-servo1 = Servo(0, 6144, 0, pi, 100, 20, p=1500, i=0, d=1500)
-servo2 = Servo(0, 6144, 0, pi, 50, 10, p=1500, i=100, d=1500)
-servo3 = Servo(6144, 0, -pi/2, pi/2, 100, 20, p=1500, i=0, d=1500)
-servo4 = Servo(0, 4095, -pi, pi, 400, 80, p=1000, i=0, d=200)
-servo5 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=500)
-servo6 = Servo(0, 4095, -pi, pi, 150, 50, p=1500, i=0, d=500)
-servo7 = Servo(0, 4095, -pi, pi, 150, 50, p=2500, i=0, d=500)
+servo1 = Servo(0, 6144, 0, pi, 150, 40, p=1500, i=0, d=1500)
+servo2 = Servo(0, 6144, 0, pi, 150, 40, p=2000, i=100, d=2500)
+servo3 = Servo(6144, 0, -pi/2, pi/2, 150, 40, p=1500, i=0, d=4500)
+servo4 = Servo(0, 4095, -pi, pi, 250, 50, p=1500, i=0, d=500)
+servo5 = Servo(0, 4095, -pi, pi, 250, 50, p=1500, i=0, d=500)
+servo6 = Servo(0, 4095, -pi, pi, 250, 50, p=1500, i=0, d=500)
+servo7 = Servo(2048, 3072, 0, 100, 150, 50, p=500, i=0, d=500, goal_current=400)
 
 servos = {
     "servo1": servo1,
