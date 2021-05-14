@@ -87,6 +87,9 @@ class ServoHandler(object):
 
         for servo_id in self.servo_map:
             servo = self.servo_map[servo_id]
+            goal_current = servo.goal_current
+            if goal_current is None:
+                continue
             self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
                                 self.config.LEN_GOAL_POSITION, servo_id, servo.goal_current)
 
