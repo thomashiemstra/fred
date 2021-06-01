@@ -94,8 +94,6 @@ class XboxController(object):
         self.y = False
         self.a = False
         self.b = False
-        self.lb = False
-        self.rb = False
         self.pad_up = False
         self.pad_down = False
         self.pad_left = False
