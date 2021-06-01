@@ -18,7 +18,7 @@ from src.utils.os_utils import is_linux
 
 class XboxPoseUpdater:
 
-    def __init__(self, controller, maximum_speed=15.0, ramp_up_time=0.1,
+    def __init__(self, controller, maximum_speed=5.0, ramp_up_time=0.1,
                  workspace_limits=WorkSpaceLimits):
         self.workspace_limits = workspace_limits
         self.v_x, self.v_y, self.v_z = 0, 0, 0
