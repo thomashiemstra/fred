@@ -42,8 +42,8 @@ slider_label.grid(
 #  slider
 slider = ttk.Scale(
     root,
-    from_=-100,
-    to=100,
+    from_=-200,
+    to=200,
     orient='horizontal',  # vertical
     command=slider_changed,
     variable=current_value
@@ -101,14 +101,23 @@ def get_servo_config(servo_config_path):
 servo_config = get_servo_config("resources/servo_config.json")
 robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config, servo_config)
 
-robot.enable_servos()
+servo = robot.servo1
+servo_id = 1
+print("offset: {}".format(servo.offset))
 
-servo = robot.servo5
-servo_id = 5
 
-# robot.servo1.offset = 1
-# robot.move_servo(servo_id, pi)
+def move_to_180():
+    robot.move_servo(servo_id, pi)
 
+
+create_button(root, "180", 6, 0, command=move_to_180)
+
+
+def move_to_135():
+    robot.move_servo(servo_id, (3 / 4) * pi)
+
+
+create_button(root, "135", 6, 1, command=move_to_135)
 
 
 def move_to_90():
@@ -144,6 +153,9 @@ def move_to_minus_90():
 
 
 create_button(root, "-90", 5, 4, command=move_to_minus_90)
+
+
+create_button(root, "enable servos", 6, 3, command=robot.enable_servos)
 
 
 def set_offset():
