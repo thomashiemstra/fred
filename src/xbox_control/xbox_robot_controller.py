@@ -97,7 +97,9 @@ class XboxRobotController:
             return False
 
     def __start_internal(self):
-        self.servo_controller.set_profile_velocity_percentage(10)
+
+        # self.servo_controller.set_profile_velocity_percentage(10)
+
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
 
