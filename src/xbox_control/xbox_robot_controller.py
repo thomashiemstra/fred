@@ -20,7 +20,7 @@ import logging as log
 
 
 class XboxRobotController:
-    start_pose = Pose(21, 21.0, 5)
+    start_pose = Pose(30, 30, 5)
 
     def __init__(self, dynamixel_robot_config, servo_controller, pose_updater):
         self.pose_updater = pose_updater
