@@ -15,8 +15,7 @@ def get_robot(port):
         return start_simulated_robot(use_gui=True)
     else:
         from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
-        servo_config = get_servo_config(global_constants.servo_config_file)
-        return DynamixelRobotController(port, global_constants.dynamixel_robot_config, servo_config)
+        return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
 
 
 def get_servo_config(servo_config_path):

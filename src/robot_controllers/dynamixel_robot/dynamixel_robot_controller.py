@@ -1,39 +1,37 @@
 import threading
 from timeit import default_timer as timer
 
-import jsonpickle
 import numpy as np
-from time import sleep
 
 from src.kinematics.kinematics import inverse_kinematics, forward_position_kinematics
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
+from src.robot_controllers.dynamixel_robot.servo_configurations import servo_configs
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
-from src.robot_controllers.dynamixel_robot.servo import ServoDecoder
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
-# Facade for the robot as a whole, abstracting away the servo handling
 from src.utils.robot_controller_utils import get_recommended_wait_time
 
 
+# Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, port, robot_config, servo_config):
+    def __init__(self, port, robot_config, servos=servo_configs):
         """
         :param port: a string representing the usb port the robot is connected to
         :param robot_config: a RobotConfig object
-        :param servo_config: (dict of str:json) servo name and servo config
+        :param servos: (dict of str:json) servo name and servo config
         """
+        self.robot_config = robot_config
+        self.dynamic_offsets = dynamic_offsets
 
-        decodes_servos = ServoDecoder().decode(servo_config)
-
-        self.servo1 = decodes_servos["servo1"]
-        self.servo2 = decodes_servos["servo2"]
-        self.servo3 = decodes_servos["servo3"]
-        self.servo4 = decodes_servos["servo4"]
-        self.servo5 = decodes_servos["servo5"]
-        self.servo6 = decodes_servos["servo6"]
-        self.servo7 = decodes_servos["servo7"]
+        self.servo1 = servos[0]
+        self.servo2 = servos[1]
+        self.servo3 = servos[2]
+        self.servo4 = servos[3]
+        self.servo5 = servos[4]
+        self.servo6 = servos[5]
+        self.servo7 = servos[6]
 
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
@@ -49,7 +47,6 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler = ServoHandler(gripper_servos, cfg, port_handler,
                                                   packet_handler, group_bulk_write, group_bulk_read)
 
-        self.robot_config = robot_config
         self.set_velocity_profile()
         self.set_pid()
         self.status = False
@@ -58,9 +55,26 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
 
     def enable_servos(self):
+        if not self.safety_check():
+            print('failed the safety check, not enabling servos!')
+            return
+
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
         self.gripper_servo_handler.set_torque(enable=True)
+
+    def safety_check(self):
+        positions = self.get_current_positions()
+        if positions[2] > 3000 or positions[2] < 0:
+            print()
+            print("------------------------------------------------------------------------------")
+            ans = input("DANGER servo 2 might be below the 0 degree line, are you sure!? y/n")
+            if ans == 'y':
+                return True
+            else:
+                return False
+        else:
+            return True
 
     def disable_servos(self):
         self.base_servo_handler.set_torque(enable=False)
@@ -81,21 +95,21 @@ class DynamixelRobotController(AbstractRobotController):
     # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
         start = timer()
-        current_positions = self._get_current_positions()
-
-        previous_target_positions = np.zeros(7, dtype=np.int)
-        previous_target_positions[1] = self.servo1.target_position
-        previous_target_positions[2] = self.servo2.target_position
-        previous_target_positions[3] = self.servo3.target_position
-        previous_target_positions[4] = self.servo4.target_position
-        previous_target_positions[5] = self.servo5.target_position
-        previous_target_positions[6] = self.servo6.target_position
-
-        diff = np.zeros(7, dtype=np.int)
-        for i in range(1, 7):
-            diff[i] = current_positions[i] - previous_target_positions[i]
-
-        print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+        # current_positions = self.get_current_positions()
+        #
+        # previous_target_positions = np.zeros(7, dtype=np.long)
+        # previous_target_positions[1] = self.servo1.target_position
+        # previous_target_positions[2] = self.servo2.target_position
+        # previous_target_positions[3] = self.servo3.target_position
+        # previous_target_positions[4] = self.servo4.target_position
+        # previous_target_positions[5] = self.servo5.target_position
+        # previous_target_positions[6] = self.servo6.target_position
+        #
+        # diff = np.zeros(7, dtype=np.long)
+        # for i in range(1, 7):
+        #     diff[i] = current_positions[i] - previous_target_positions[i]
+        #
+        # print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
 
         self._current_angles = angles
         # First set the target_position variable of all servos
@@ -166,10 +180,10 @@ class DynamixelRobotController(AbstractRobotController):
 
         return angles
 
-    def _get_current_positions(self):
+    def get_current_positions(self):
         self.base_servo_handler.read_current_pos()
         self.wrist_servo_handler.read_current_pos()
-        positions = np.zeros(7, dtype=np.int)
+        positions = np.zeros(7, dtype=np.long)
 
         positions[1] = self.servo1.current_position
         positions[2] = self.servo2.current_position

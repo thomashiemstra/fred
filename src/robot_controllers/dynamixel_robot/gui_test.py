@@ -90,20 +90,11 @@ def create_button(root_element, text, row, column, command=None):
     )
 
 
-def get_servo_config(servo_config_path):
-    try:
-        with open(servo_config_path, 'r') as servo_config_file:
-            return servo_config_file.read()
-    except FileNotFoundError:
-        print("nope")
-
-
-servo_config = get_servo_config("resources/servo_config.json")
-robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config, servo_config)
+robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config)
 
 servo = robot.servo1
 servo_id = 1
-print("offset: {}".format(servo.offset))
+print("offset: {}".format(servo.servo_2offsets_dict))
 
 
 def move_to_180():
@@ -161,7 +152,7 @@ create_button(root, "enable servos", 6, 3, command=robot.enable_servos)
 def set_offset():
     val = current_value.get()
     print("setting offset = {}".format(val))
-    servo.offset = val
+    servo.servo_2offsets_dict = val
 
 
 create_button(root, "set offset", 4, 0, command=set_offset)
