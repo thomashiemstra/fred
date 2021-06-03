@@ -2,6 +2,7 @@
 import src.robot_controllers.dynamixel_robot.dynamixel_sdk as dynamixel
 import src.robot_controllers.dynamixel_robot.dynamixel_utils as utils
 
+MAX_INT = 4294967296
 
 class ServoHandler(object):
     """class for handling servos
@@ -147,6 +148,8 @@ class ServoHandler(object):
         for servo_id in self.servo_map:
             position_result = self.__get_read_res(servo_id, self.config.ADDR_PRESENT_POSITION,
                                                   self.config.LEN_PRESENT_POSITION)
+            if position_result is not None and position_result > MAX_INT / 2:
+                position_result = position_result - MAX_INT
             self.servo_map[servo_id].current_position = position_result
 
         self.group_bulk_read.clearParam()
