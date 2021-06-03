@@ -23,7 +23,6 @@ class DynamixelRobotController(AbstractRobotController):
         :param servos: (dict of str:json) servo name and servo config
         """
         self.robot_config = robot_config
-        self.dynamic_offsets = dynamic_offsets
 
         self.servo1 = servos[0]
         self.servo2 = servos[1]
