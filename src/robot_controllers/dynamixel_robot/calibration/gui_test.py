@@ -92,61 +92,74 @@ def create_button(root_element, text, row, column, command=None):
 
 robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config)
 
-servo = robot.servo1
-servo_id = 1
-print("offset: {}".format(servo.servo_2offsets_dict))
+servo = robot.servo2
+servo_id = 2
+print("offset: {}".format(servo.constant_offset))
+all_angles = [0, pi/4, pi/2, pi/2, 0.0, 0.0, 0.0]
 
 
 def move_to_180():
-    robot.move_servo(servo_id, pi)
+    all_angles[servo_id] = pi
+    robot.move_servos(all_angles)
 
 
 create_button(root, "180", 6, 0, command=move_to_180)
 
 
 def move_to_135():
-    robot.move_servo(servo_id, (3 / 4) * pi)
+    all_angles[servo_id] = (3 / 4) * pi
+    robot.move_servos(all_angles)
 
 
 create_button(root, "135", 6, 1, command=move_to_135)
 
 
 def move_to_90():
-    robot.move_servo(servo_id, pi/2)
+    all_angles[servo_id] = pi/2
+    robot.move_servos(all_angles)
 
 
 create_button(root, "90", 5, 0, command=move_to_90)
 
 
 def move_to_45():
-    robot.move_servo(servo_id, pi/4)
+    all_angles[servo_id] = pi/4
+    robot.move_servos(all_angles)
 
 
 create_button(root, "45", 5, 1, command=move_to_45)
 
 
 def move_to_0():
-    robot.move_servo(servo_id, 0)
+    all_angles[servo_id] = 0
+    robot.move_servos(all_angles)
 
 
 create_button(root, "0", 5, 2, command=move_to_0)
 
 
 def move_to_minus45():
-    robot.move_servo(servo_id, -pi/4)
+    all_angles[servo_id] = -pi/4
+    robot.move_servos(all_angles)
 
 
 create_button(root, "-45", 5, 3, command=move_to_minus45)
 
 
 def move_to_minus_90():
-    robot.move_servo(servo_id, -pi/2)
+    all_angles[servo_id] = -pi/2
+    robot.move_servos(all_angles)
 
 
 create_button(root, "-90", 5, 4, command=move_to_minus_90)
 
 
-create_button(root, "enable servos", 6, 3, command=robot.enable_servos)
+def enable():
+    robot.enable_servos()
+    robot.move_servos(all_angles)
+
+
+create_button(root, "enable servos", 6, 3, command=enable)
 
 
 def set_offset():
