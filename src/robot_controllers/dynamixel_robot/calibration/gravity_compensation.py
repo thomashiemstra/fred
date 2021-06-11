@@ -50,7 +50,6 @@ class Servo2Manager:
 
     def print_offset_json(self):
         print(json.dumps(self.servo_2offsets_dict))
-        print(json.dumps(self.servo_3offsets_dict))
         print(json.dumps(self.servo_3_direct_offsets_dict))
 
     def record_offset(self):
@@ -67,7 +66,6 @@ class Servo2Manager:
 
         if self.debug:
             print(angle2rounded, angle3rounded, servo2_offset, servo3_offset)
-        print("record_offset()")
 
         angle3_dict = {} if angle2rounded not in self.servo_2offsets_dict else self.servo_2offsets_dict[angle2rounded]
         angle3_dict[angle3rounded] = int(servo2_offset)
@@ -83,7 +81,6 @@ class Servo2Manager:
         self.servo_3_direct_offsets_dict[combined_angle] = angle2_list
 
     def switch_servo(self):
-        print("switch_servo()")
         if self.servo_id == 2:
             self.servo_id = 3
             self.servo = self.robot.servo3
@@ -96,7 +93,6 @@ class Servo2Manager:
                 print("switched to servo2")
 
     def move_current_servo_up(self):
-        print("move_current_servo_up()")
         if self.servo_id == 2:
             self.angle2 = self.angle2 + self.step_size if self.angle2 < 1 else self.angle2
             self.robot.move_servo(self.servo_id, self.angle2 * pi)
@@ -105,7 +101,6 @@ class Servo2Manager:
             self.robot.move_servo(self.servo_id, self.angle3 * pi)
 
     def move_current_servo_down(self):
-        print("move_current_servo_down()")
         if self.servo_id == 2:
             self.angle2 = self.angle2 - self.step_size if self.angle2 > 0 else self.angle2
             self.robot.move_servo(self.servo_id, self.angle2 * pi)
@@ -114,5 +109,6 @@ class Servo2Manager:
             self.robot.move_servo(self.servo_id, self.angle3 * pi)
 
 
-manager = Servo2Manager()
-manager.start()
+if __name__ == '__main__':
+    manager = Servo2Manager(debug=True)
+    manager.start()

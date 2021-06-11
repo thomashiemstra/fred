@@ -2,9 +2,10 @@ from time import sleep
 
 from src.robot_controllers.dynamixel_robot.calibration.gravity_compensation import Servo2Manager
 
-manager = Servo2Manager()
+manager = Servo2Manager(debug=True)
 manager.start_no_keyboard()
 
+sleep(2)
 manager.move_current_servo_up()
 manager.move_current_servo_up()
 manager.move_current_servo_up()
