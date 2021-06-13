@@ -55,7 +55,8 @@ class DynamixelRobotController(AbstractRobotController):
 
     def enable_servos(self):
         if not self.safety_check():
-            print('failed the safety check, not enabling servos!')
+            print('failed the safety check, disabling servos!')
+            self.disable_servos()
             return
 
         self.base_servo_handler.set_torque(enable=True)
@@ -94,27 +95,27 @@ class DynamixelRobotController(AbstractRobotController):
     # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
         start = timer()
-        # current_positions = self.get_current_positions()
-        #
-        # previous_target_positions = np.zeros(7, dtype=np.long)
-        # previous_target_positions[1] = self.servo1.target_position
-        # previous_target_positions[2] = self.servo2.target_position
-        # previous_target_positions[3] = self.servo3.target_position
-        # previous_target_positions[4] = self.servo4.target_position
-        # previous_target_positions[5] = self.servo5.target_position
-        # previous_target_positions[6] = self.servo6.target_position
-        #
-        # diff = np.zeros(7, dtype=np.long)
-        # for i in range(1, 7):
-        #     diff[i] = current_positions[i] - previous_target_positions[i]
-        #
-        # print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+        current_positions = self.get_current_positions()
+
+        previous_target_positions = np.zeros(7, dtype=np.long)
+        previous_target_positions[1] = self.servo1.unmodified_target_position
+        previous_target_positions[2] = self.servo2.unmodified_target_position
+        previous_target_positions[3] = self.servo3.unmodified_target_position
+        previous_target_positions[4] = self.servo4.unmodified_target_position
+        previous_target_positions[5] = self.servo5.unmodified_target_position
+        previous_target_positions[6] = self.servo6.unmodified_target_position
+
+        diff = np.zeros(7, dtype=np.long)
+        for i in range(1, 7):
+            diff[i] = current_positions[i] - previous_target_positions[i]
+
+        print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
 
         self._current_angles = angles
         # First set the target_position variable of all servos
         self.base_servo_handler.set_angle(1, angles[1])
-        self.base_servo_handler.set_angle(2, angles[2])
-        self.base_servo_handler.set_angle(3, angles[3])
+        self.base_servo_handler.set_angle(2, angles[2], angles)
+        self.base_servo_handler.set_angle(3, angles[3], angles)
 
         self.wrist_servo_handler.set_angle(4, angles[4])
         self.wrist_servo_handler.set_angle(5, angles[5])
@@ -156,12 +157,12 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler.set_profile_velocity_percentage(percentage)
 
     # debug function to control single servo
-    def move_servo(self, servo_id, angle):
+    def move_servo(self, servo_id, angle, all_angles=None):
         if servo_id <= 3:
-            self.base_servo_handler.set_angle(servo_id, angle)
+            self.base_servo_handler.set_angle(servo_id, angle, all_angles)
             self.base_servo_handler.move_servo_to_angle(servo_id)
         else:
-            self.wrist_servo_handler.set_angle(servo_id, angle)
+            self.wrist_servo_handler.set_angle(servo_id, angle, all_angles)
             self.wrist_servo_handler.move_servo_to_angle(servo_id)
 
     def get_current_angles(self):
