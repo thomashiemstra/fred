@@ -20,7 +20,7 @@ import logging as log
 
 
 class XboxRobotController:
-    start_pose = Pose(30, 30, 5)
+    start_pose = Pose(21, 21.0, 4)
 
     def __init__(self, dynamixel_robot_config, servo_controller, pose_updater):
         self.pose_updater = pose_updater
@@ -135,11 +135,11 @@ class XboxRobotController:
                 return
             self.current_pose = self.playback_recorded_moves(self.recorded_moves)
         elif buttons.lb:
-            self.gripper_state = np.clip(self.gripper_state - 10, 0, 100)
+            self.gripper_state = np.clip(self.gripper_state - 1, 0, 100)
             self.servo_controller.set_gripper(self.gripper_state)
             return
         elif buttons.rb:
-            self.gripper_state = np.clip(self.gripper_state + 10, 0, 100)
+            self.gripper_state = np.clip(self.gripper_state + 1, 0, 100)
             self.servo_controller.set_gripper(self.gripper_state)
         elif buttons.b:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config,
