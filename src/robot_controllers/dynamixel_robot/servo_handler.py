@@ -192,10 +192,9 @@ class ServoHandler(object):
         """return the servo object corresponding to the id"""
         return self.servo_map[servo_id]
 
-    # debug function for a single servo
-    def set_angle(self, servo_id, angle):
+    def set_angle(self, servo_id, angle, all_angles=None):
         """Set the target position based on the angle for the specific servo"""
-        self.servo_map[servo_id].set_target_position_from_angle(angle)
+        self.servo_map[servo_id].set_target_position_from_angle(angle, all_angles)
 
     # debug function to move a single servo
     def move_servo_to_angle(self, servo_id):
