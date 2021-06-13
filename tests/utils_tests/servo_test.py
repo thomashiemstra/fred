@@ -1,6 +1,7 @@
 import unittest
 
-from src.robot_controllers.dynamixel_robot.servo import Servo
+from src.robot_controllers.dynamixel_robot.servo import Servo, Servo2, Servo3, ServoWithOffsetFunction
+from numpy import pi
 
 
 class ServoTest(unittest.TestCase):
@@ -67,3 +68,126 @@ class ServoTest(unittest.TestCase):
         # then
         target = servo.target_position
         self.assertEqual(25, target, "got a wrong target")
+
+
+class ServoWithOffsetFunctionTest(unittest.TestCase):
+
+    def test_offset_function(self):
+        # given
+        def offset_function(all_angles):
+            return all_angles[0]
+        servo = ServoWithOffsetFunction(0, 100, 0, pi, offset_function=offset_function)
+
+        # when
+        servo.set_target_position_from_angle(pi/2, [10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo.target_position
+        self.assertEqual(40, target, "got a wrong target")
+
+    def test_no_function(self):
+        self.assertRaises(ValueError, ServoWithOffsetFunction, 0, 1, 0, 1, None)
+
+
+class Servo2Tests(unittest.TestCase):
+
+    def test_1(self):
+        # given
+        offset = {"0.0": {"0.0": -10}}
+        servo2 = Servo2(0, 100, 0, 100, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.0
+        angle3 = 0.0
+        servo2.set_target_position_from_angle(angle2, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo2.target_position
+        self.assertEqual(10, target, "got a wrong target")
+
+    def test_2(self):
+        # given
+        offset = {"0.2": {"0.0": -10}}
+        servo2 = Servo2(0, 100, 0, pi, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.25 * pi
+        angle3 = 0.0
+        servo2.set_target_position_from_angle(angle2, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo2.target_position
+        self.assertEqual(35, target, "got a wrong target")
+
+    def test_3(self):
+        # given
+        offset = {"0.0": {"0.0": -10}, "0.1": {"0.0": -5}}
+        servo2 = Servo2(0, 100, 0, pi, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.25 * pi
+        angle3 = 0.0
+        servo2.set_target_position_from_angle(angle2, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo2.target_position
+        self.assertEqual(30, target, "got a wrong target")
+
+    def test_4(self):
+        # given
+        offset = {"0.1": {"0.0": -5}}
+        servo2 = Servo2(0, 100, 0, pi, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.0
+        angle3 = 0.0
+        servo2.set_target_position_from_angle(angle2, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo2.target_position
+        self.assertEqual(5, target, "got a wrong target")
+
+
+class Servo3Test(unittest.TestCase):
+
+    def test_1(self):
+        # given
+        offset = {"0.4": 1, "0.5": 10, "0.6": 2}
+        servo3 = Servo3(0, 100, 0, pi, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.0
+        angle3 = 0.5 * pi
+        servo3.set_target_position_from_angle(angle3, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo3.target_position
+        self.assertEqual(-10, target, "got a wrong target")
+
+    def test_2(self):
+        # given
+        offset = {"0.4": 1, "0.5": 10, "0.6": 2}
+        servo3 = Servo3(0, 100, 0, pi, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.2 * pi
+        angle3 = 0.1 * pi
+        servo3.set_target_position_from_angle(angle3, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo3.target_position
+        self.assertEqual(9, target, "got a wrong target")
+
+    def test_3(self):
+        # given
+        offset = {"0.4": 1, "0.5": 10, "0.6": 2}
+        servo3 = Servo3(0, 100, 0, pi, dynamic_offsets=offset)
+
+        # when
+        angle2 = 0.5 * pi
+        angle3 = 0.5 * pi
+        servo3.set_target_position_from_angle(angle3, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+
+        # then
+        target = servo3.target_position
+        self.assertEqual(48, target, "got a wrong target")
