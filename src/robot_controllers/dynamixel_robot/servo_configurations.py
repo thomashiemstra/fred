@@ -35,10 +35,12 @@ def servo3_offset_function_going_down(all_angles):
 
 
 servo1 = Servo(0, 6144, 0, pi, 150, 50, p=1500, i=0, d=500, offset=0)
-servo2 = ServoWithOffsetFunction(0, 6144, 0, pi, servo2_offset_function_going_up, servo2_offset_function_going_down, 150, 50, p=1000, i=0, d=0, offset=0)
+servo2 = ServoWithOffsetFunction(0, 6144, 0, pi,
+                                 servo2_offset_function_going_up, servo2_offset_function_going_down,
+                                 150, 50, p=1000, i=0, d=0, offset=0)
 servo3 = ServoWithOffsetFunction(3072, 1024, -pi/2, pi/2,
                                  servo3_offset_function_going_up, servo3_offset_function_going_down,
-                                 150, 15, p=2000, i=0, d=0, offset=10)
+                                 150, 15, p=2000, i=0, d=0, offset=-10)
 servo4 = Servo(0, 4096, -pi, pi, 250, 50, p=3000, i=0, d=0, offset=0)
 servo5 = Servo(0, 4096, -pi, pi, 250, 50, p=5500, i=0, d=2000, offset=0)
 servo6 = Servo(0, 4096, -pi, pi, 250, 50, p=2000, i=0, d=0, offset=0)
