@@ -95,7 +95,7 @@ robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config
 servo = robot.servo2
 servo_id = 2
 print("offset: {}".format(servo.constant_offset))
-all_angles = [0, pi/4, pi/2, pi/2, 0.0, 0.0, 0.0]
+all_angles = [0, pi/4, pi/4, pi/2, 0.0, 0.0, 0.0]
 
 
 def move_to_180():
@@ -165,7 +165,7 @@ create_button(root, "enable servos", 6, 3, command=enable)
 def set_offset():
     val = current_value.get()
     print("setting offset = {}".format(val))
-    servo.servo_2offsets_dict = val
+    servo.constant_offset = val
 
 
 create_button(root, "set offset", 4, 0, command=set_offset)
