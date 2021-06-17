@@ -95,10 +95,17 @@ class ArucoImageHandler(ImageHandler):
     def deactivate_handler(self):
         pass
 
+    def detect_and_draw_board(self, gray_image, captured_frame, detection_parameters):
+        retval, rvec, tvec = self.detect_board(gray_image, captured_frame, detection_parameters)
+        if retval:
+            aruco.drawAxis(captured_frame, self.cameraMatrix, self.distCoeffs, rvec, tvec,
+                           50)  # axis length 100 can be changed according to your requirement
+            return retval, rvec, tvec
+
     def detect_board(self, gray_image, captured_frame, detection_parameters):
-        corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, self.charuco_board_dictionary,
+        corners, ids, rejected_img_points = aruco.detectMarkers(gray_image, self.charuco_board_dictionary,
                                                               parameters=detection_parameters)
-        aruco.refineDetectedMarkers(gray_image, self.board, corners, ids, rejectedImgPoints)
+        aruco.refineDetectedMarkers(gray_image, self.board, corners, ids, rejected_img_points)
 
         if ids is None:
             # nothing found
@@ -115,6 +122,10 @@ class ArucoImageHandler(ImageHandler):
                                                             useExtrinsicGuess=False)  # posture estimation from a charuco board
 
         return False, rvec, tvec
+
+    def detect_and_draw_marker(self, gray_image, captured_frame, detection_parameters):
+        ids, rvecs, tvecs, corners = self.detect_markers(gray_image, captured_frame, detection_parameters)
+        aruco.drawDetectedMarkers(captured_frame, corners, ids)
 
     def detect_markers(self, gray_image, captured_frame, detection_parameters):
         corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, self.aruco_dictionary,
