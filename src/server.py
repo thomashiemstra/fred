@@ -56,21 +56,21 @@ def test2():
 
 @app.route('/startcamera', methods=['POST'])
 def start_camera():
-    camera = global_objects.get_camera(0)
+    camera = global_objects.get_camera()
     camera.start_camera()
     return jsonify(success=True)
 
 
 @app.route('/startcameraRecording', methods=['POST'])
 def start_camera_recording():
-    camera = global_objects.get_camera(0)
+    camera = global_objects.get_camera()
     camera.start_camera_recording()
     return jsonify(success=True)
 
 
 @app.route('/stopcamera', methods=['POST'])
 def stop_camera():
-    camera = global_objects.get_camera(0)
+    camera = global_objects.get_camera()
     camera.stop_camera()
     return jsonify(success=True)
 

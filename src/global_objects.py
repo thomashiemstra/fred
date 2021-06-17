@@ -40,6 +40,6 @@ def get_xbox_robot_controller(port):
 
 
 @lru_cache(maxsize=1)
-def get_camera(camera):
+def get_camera(camera=0):
     from src.camera.capture import CameraCapture
     return CameraCapture(camera, [])
