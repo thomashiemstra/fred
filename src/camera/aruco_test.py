@@ -4,7 +4,7 @@ import cv2
 from cv2 import aruco
 import jsonpickle
 import numpy as np
-from src.camera.capture import aruco_dictionary, charuco_board_dictionary
+from src.camera.util import charuco_board_dictionary, aruco_dictionary
 
 try:
     with open('calibration/calibration_data.json', 'r') as calibartion_file:

@@ -4,7 +4,7 @@ import cv2
 import jsonpickle
 import numpy as np
 
-from src.camera.capture import charuco_board_dictionary, aruco_dictionary, get_default_charuco_board
+from src.camera.util import charuco_board_dictionary, aruco_dictionary, get_default_charuco_board
 from src.camera.image_handlers import ArucoImageHandler
 
 

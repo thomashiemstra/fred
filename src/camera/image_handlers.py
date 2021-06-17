@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from cv2 import aruco
 
-from src.camera.capture_config import CaptureConfig
+from src.camera.util import CaptureConfig
 from src.utils.decorators import synchronized_with_lock
 
 

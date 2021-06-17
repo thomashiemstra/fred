@@ -3,7 +3,7 @@ import numpy as np
 from src.utils.os_utils import get_current_dir
 
 # Load the predefined dictionary
-from src.camera.capture import charuco_board_dictionary
+from src.camera.util import charuco_board_dictionary
 
 dictionary = charuco_board_dictionary
 

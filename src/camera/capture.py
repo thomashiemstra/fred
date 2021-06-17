@@ -1,21 +1,9 @@
 import cv2
 import threading
 
-from src.camera.capture_config import CaptureConfig
-from src.camera.image_handlers import CrossDrawer
+from src.camera.util import CaptureConfig
 from src.utils.decorators import synchronized_with_lock
 
-charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
-aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
-
-
-def get_default_charuco_board():
-    squares_x = 5
-    squares_y = 3
-    square_length = 3.18
-    marker_length = 2.55
-
-    return cv2.aruco.CharucoBoard_create(squares_x, squares_y, square_length, marker_length, charuco_board_dictionary)
 
 class CameraCapture:
     screen_width = 1920
@@ -114,11 +102,3 @@ class CameraCapture:
     @synchronized_with_lock("image_handlers_lock")
     def add_image_handler(self, image_handler):
         self._image_handlers.appen(image_handler)
-
-
-if __name__ == '__main__':
-    cross_drawer = CrossDrawer()
-    test_image_handlers = [cross_drawer]
-
-    capture = CameraCapture(0, test_image_handlers)
-    capture.start_camera()
