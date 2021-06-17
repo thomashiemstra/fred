@@ -10,13 +10,14 @@ class CaptureConfig:
 
 
 charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
+aruco_marker_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
 aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
 
 
-def get_default_charuco_board():
-    squares_x = 5
-    squares_y = 3
-    square_length = 3.18
-    marker_length = 2.55
+def get_default_charuco_board(squares_x=6,
+                              squares_y=3,
+                              square_length=1,
+                              marker_length=0.8
+                              ):
 
     return cv2.aruco.CharucoBoard_create(squares_x, squares_y, square_length, marker_length, charuco_board_dictionary)
