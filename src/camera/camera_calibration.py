@@ -102,7 +102,7 @@ print(tvecs)
 
 calibration_data = {'cameraMatrix': cameraMatrix, 'distCoeffs': distCoeffs}
 
-with open('calibration/calibration_data.txt', 'w'):
-    json.dump(calibration_data)
+with open('calibration/calibration_data.txt', 'w') as outfile:
+    json.dump(calibration_data, outfile)
 
 # https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/
