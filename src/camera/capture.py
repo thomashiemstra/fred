@@ -101,4 +101,4 @@ class CameraCapture:
 
     @synchronized_with_lock("image_handlers_lock")
     def add_image_handler(self, image_handler):
-        self._image_handlers.appen(image_handler)
+        self._image_handlers.append(image_handler)
