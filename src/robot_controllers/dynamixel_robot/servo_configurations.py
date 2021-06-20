@@ -6,16 +6,16 @@ def servo2_offset_function_going_up(all_angles):
     angle2_input = all_angles[2]
     angle3_input = all_angles[3] - 0.5 * pi
     # function fitting output:
-    # [-5.78395335  1.85416765 -7.71692822  0.21412491]
-    return int(-5.8 * cos(1.8 * angle2_input) - 7.7 * cos(0.2 * (angle2_input + angle3_input)))
+    # [-6.02716  1.53488 -6.60631 -0.32969]
+    return int(-6 * cos(1.5 * angle2_input) - 6.6 * cos(-0.3 * (angle2_input + angle3_input)))
 
 
 def servo2_offset_function_going_down(all_angles):
     angle2_input = all_angles[2]
     angle3_input = all_angles[3] - 0.5 * pi
     # function fitting output:
-    # [-1.26041  1.03593 -1.97792  0.00002]
-    return int(-1.3 * cos(1.0 * angle2_input) - 2.0)
+    # [-3.58724  0.64946 -0.05264  2.25318]
+    return int(-3.6 * cos(0.6 * angle2_input) - 0.05 * cos(2.3 * (angle2_input + angle3_input)))
 
 
 def servo3_offset_function_going_up(all_angles):
