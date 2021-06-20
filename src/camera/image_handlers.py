@@ -6,7 +6,8 @@ import numpy as np
 from cv2 import aruco
 
 from src.camera.util import CaptureConfig, get_default_charuco_board, get_calibrations, aruco_marker_dictionary, \
-    charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length
+    charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length, \
+    find_relative_vector_and_rotation
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -53,18 +54,17 @@ class CrossDrawer(ImageHandler):
 
 
 class DetectedMarker:
-    def __init__(self, id, rvec, tvec):
+    def __init__(self, id, relative_rotation_matrix, tvec):
         self.id = id
-        self.rvec = rvec
+        self.relative_rotation_matrix = relative_rotation_matrix
         self.tvec = tvec
 
     def copy(self):
-        res = DetectedMarker(self.id, self.rvec, self.tvec)
+        res = DetectedMarker(self.id, self.relative_rotation_matrix, self.tvec)
         return res
 
 
 def get_default_aurco_image_handler():
-
     board = get_default_charuco_board(square_length=charuco_base_board_square_length,
                                       marker_length=charuco__baseboard_marker_length)
     cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data.json')
@@ -97,11 +97,13 @@ class ArucoImageHandler(ImageHandler):
         ids, marker_rvecs, marker_tvecs, corners = self.detect_markers(gray, frame, self.parameters)
         if ids is None:
             return
-        relative_tvecs, relative_rvecs = self.find_relative_vectors_of_markers_with_respect_to_board(board_rvec,
-                                                                                                     board_tvec, ids,
-                                                                                                     marker_rvecs,
-                                                                                                     marker_tvecs)
-        self.populate_detected_makers(ids, relative_tvecs, relative_rvecs)
+        relative_tvecs, relative_rotation_matrices = self.find_relative_vectors_of_markers_with_respect_to_board(
+            board_rvec,
+            board_tvec, ids,
+            marker_rvecs,
+            marker_tvecs)
+
+        self.populate_detected_makers(ids, relative_rotation_matrices, relative_tvecs)
 
         if self.should_draw:
             aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
@@ -165,24 +167,25 @@ class ArucoImageHandler(ImageHandler):
                                                                markers_tvecs):
         board_rotation_matrix, _ = cv2.Rodrigues(board_rvec)
         relative_tvecs = []
-        relative_rvecs = []
+        relative_rotation_matrices = []
         for i in range(len(marker_ids)):
-            relative_tvec = np.matmul(board_rotation_matrix.transpose(),
-                                      markers_tvecs[i].reshape((3, 1)) - board_tvec)
+            marker_rotation_matrix, _ = cv2.Rodrigues(markers_rvecs[i])
+            relative_rotation_matrix, relative_tvec = find_relative_vector_and_rotation(board_rotation_matrix,
+                                                                                        board_tvec,
+                                                                                        marker_rotation_matrix,
+                                                                                        markers_tvecs[i])
             relative_tvecs.append(relative_tvec)
-            # TODO, copy paste from old shit, matrix multiplication
-            relative_rvec = None
-            relative_rvecs.append(relative_rvec)
+            relative_rotation_matrices.append(relative_rotation_matrix)
 
-        return relative_tvecs, relative_rvecs
+        return relative_tvecs, relative_rotation_matrices
 
     @synchronized_with_lock("lock")
-    def populate_detected_makers(self, ids, rvecs, tvecs):
+    def populate_detected_makers(self, ids, relative_rotation_matrices, tvecs):
         if ids is None:
             return
         self.detected_markers = []
-        for id, rvec, tvec in zip(ids, rvecs, tvecs):
-            self.detected_markers.append(DetectedMarker(id, rvec, tvec))
+        for id, relative_rotation_matrix, tvec in zip(ids, relative_rotation_matrices, tvecs):
+            self.detected_markers.append(DetectedMarker(id, relative_rotation_matrix, tvec))
 
     @synchronized_with_lock("lock")
     def get_detected_markers(self):

@@ -44,3 +44,12 @@ def get_calibrations(path):
     distCoeffs = np.array(calibrations['distCoeffs'])
 
     return cameraMatrix, distCoeffs
+
+
+def find_relative_vector_and_rotation(base_rotation_matrix, base_tvec, target_rotation_matrix, target_tvec):
+    base_to_target_vec = target_tvec.reshape((3, 1)) - base_tvec
+
+    relative_tvec = np.matmul(base_rotation_matrix.transpose(), base_to_target_vec)
+    relative_rotation_matrix = np.matmul(base_rotation_matrix.transpose(), target_rotation_matrix)
+
+    return relative_rotation_matrix, relative_tvec
