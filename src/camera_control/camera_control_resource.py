@@ -33,10 +33,11 @@ def start():
 
 @camera_api.route('/stop', methods=['POST'])
 def stop():
-    global started
+    global started, aruco_started
     with api_lock:
         if started:
             started = False
+            aruco_started = False
         else:
             return "already stopped"
 
@@ -56,6 +57,8 @@ def start_aruco():
             return jsonify(success=False)
         if aruco_started:
             return jsonify(success=True)
+        else:
+            aruco_started = True
     camera = global_objects.get_camera()
 
     global aruco_image_handler
