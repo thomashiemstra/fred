@@ -5,7 +5,8 @@ import cv2
 import numpy as np
 from cv2 import aruco
 
-from src.camera.util import CaptureConfig
+from src.camera.util import CaptureConfig, get_default_charuco_board, get_calibrations, aruco_marker_dictionary, \
+    charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -62,6 +63,16 @@ class DetectedMarker:
         return res
 
 
+def get_default_aurco_image_handler():
+
+    board = get_default_charuco_board(square_length=charuco_base_board_square_length,
+                                      marker_length=charuco__baseboard_marker_length)
+    cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data.json')
+    handler = ArucoImageHandler(board, cameraMatrix, distCoeffs, aruco_marker_dictionary,
+                                charuco_board_dictionary, aruco_marker_length, should_draw=True)
+    return handler
+
+
 class ArucoImageHandler(ImageHandler):
 
     def __init__(self, board, cameraMatrix, distCoeffs, aruco_dictionary, charuco_board_dictionary, aruco_marker_length,
@@ -79,11 +90,13 @@ class ArucoImageHandler(ImageHandler):
 
     def handle_frame(self, frame, gray):
         retval, board_rvec, board_tvec = self.detect_board(gray, frame, self.parameters)
-        if not retval and board_tvec is None:
+        if self.board_not_detected(board_rvec, board_tvec, retval):
             # did not detect the board and no board was detected in the past
             return
 
         ids, marker_rvecs, marker_tvecs, corners = self.detect_markers(gray, frame, self.parameters)
+        if ids is None:
+            return
         relative_tvecs, relative_rvecs = self.find_relative_vectors_of_markers_with_respect_to_board(board_rvec,
                                                                                                      board_tvec, ids,
                                                                                                      marker_rvecs,
@@ -93,6 +106,15 @@ class ArucoImageHandler(ImageHandler):
         if self.should_draw:
             aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
             aruco.drawDetectedMarkers(frame, corners, ids)
+
+    @staticmethod
+    def board_not_detected(board_rvec, board_tvec, retval):
+        if not retval:
+            return True
+        if board_rvec is None or board_tvec is None:
+            return True
+        if len(board_rvec) == 3 and len(board_tvec) == 3:
+            return False
 
     def deactivate_handler(self):
         pass
@@ -123,7 +145,7 @@ class ArucoImageHandler(ImageHandler):
                                                             self.distCoeffs, empty_array, empty_array,
                                                             useExtrinsicGuess=False)  # posture estimation from a charuco board
 
-        return False, rvec, tvec
+        return retval, rvec, tvec
 
     def detect_and_draw_marker(self, gray_image, captured_frame, detection_parameters):
         ids, rvecs, tvecs, corners = self.detect_markers(gray_image, captured_frame, detection_parameters)
