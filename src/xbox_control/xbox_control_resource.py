@@ -3,7 +3,6 @@ from __future__ import division
 import threading
 
 from flask import Blueprint, request
-from flask import Response
 from flask import jsonify
 
 import src.global_constants
