@@ -4,7 +4,7 @@ import cv2
 from cv2 import aruco
 import jsonpickle
 import numpy as np
-from src.camera.util import charuco_board_dictionary, aruco_dictionary
+from src.camera.util import charuco_board_dictionary, aruco_dictionary, get_default_charuco_board
 
 try:
     with open('calibration/calibration_data.json', 'r') as calibartion_file:
@@ -30,12 +30,8 @@ cap.set(cv2.CAP_PROP_FPS, 30)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-squares_x = 5
-squares_y = 3
-square_length = 3.18
-marker_length = 2.55
 
-board = aruco.CharucoBoard_create(squares_x, squares_y, square_length, marker_length, charuco_board_dictionary)
+board = get_default_charuco_board(square_length=4, marker_length=3.2)
 
 
 def detect_and_draw_board(gray_image, captured_frame, detection_parameters):
