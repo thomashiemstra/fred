@@ -27,7 +27,7 @@ def start():
             started = True
     camera = global_objects.get_camera()
     camera.start_camera()
-    resp = jsonify(success=success)
+    resp = jsonify(success=True)
     return resp
 
 
@@ -42,5 +42,5 @@ def stop():
 
     camera = global_objects.get_camera()
     camera.stop_camera()
-    resp = jsonify(success=success)
+    resp = jsonify(success=True)
     return resp
