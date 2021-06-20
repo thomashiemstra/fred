@@ -75,21 +75,23 @@ class ArucoImageHandler(ImageHandler):
         self.charuco_board_dictionary = charuco_board_dictionary
         self.aruco_marker_length = aruco_marker_length
         self.should_draw = should_draw
-        self.board_rvec = None
-        self.board_tvec = None
         self.detected_markers = []
 
     def handle_frame(self, frame, gray):
-        retval, self.board_rvec, self.board_tvec = self.detect_board(gray, frame, self.parameters)
-        if not retval and self.board_tvec is None:
+        retval, board_rvec, board_tvec = self.detect_board(gray, frame, self.parameters)
+        if not retval and board_tvec is None:
             # did not detect the board and no board was detected in the past
             return
 
-        ids, rvecs, tvecs, corners = self.detect_markers(gray, frame, self.parameters)
-        self.populate_detected_makers(ids, rvecs, tvecs)
+        ids, marker_rvecs, marker_tvecs, corners = self.detect_markers(gray, frame, self.parameters)
+        relative_tvecs, relative_rvecs = self.find_relative_vectors_of_markers_with_respect_to_board(board_rvec,
+                                                                                                     board_tvec, ids,
+                                                                                                     marker_rvecs,
+                                                                                                     marker_tvecs)
+        self.populate_detected_makers(ids, relative_tvecs, relative_rvecs)
 
         if self.should_draw:
-            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, self.board_rvec, self.board_tvec, length=50)
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
             aruco.drawDetectedMarkers(frame, corners, ids)
 
     def deactivate_handler(self):
@@ -104,7 +106,7 @@ class ArucoImageHandler(ImageHandler):
 
     def detect_board(self, gray_image, captured_frame, detection_parameters):
         corners, ids, rejected_img_points = aruco.detectMarkers(gray_image, self.charuco_board_dictionary,
-                                                              parameters=detection_parameters)
+                                                                parameters=detection_parameters)
         aruco.refineDetectedMarkers(gray_image, self.board, corners, ids, rejected_img_points)
 
         if ids is None:
@@ -136,6 +138,21 @@ class ArucoImageHandler(ImageHandler):
                                                           self.distCoeffs)
 
         return ids, rvecs, tvecs, corners
+
+    def find_relative_vectors_of_markers_with_respect_to_board(self, board_rvec, board_tvec, marker_ids, markers_rvecs,
+                                                               markers_tvecs):
+        board_rotation_matrix, _ = cv2.Rodrigues(board_rvec)
+        relative_tvecs = []
+        relative_rvecs = []
+        for i in range(len(marker_ids)):
+            relative_tvec = np.matmul(board_rotation_matrix.transpose(),
+                                      markers_tvecs[i].reshape((3, 1)) - board_tvec)
+            relative_tvecs.append(relative_tvec)
+            # TODO, copy paste from old shit, matrix multiplication
+            relative_rvec = None
+            relative_rvecs.append(relative_rvec)
+
+        return relative_tvecs, relative_rvecs
 
     @synchronized_with_lock("lock")
     def populate_detected_makers(self, ids, rvecs, tvecs):

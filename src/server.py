@@ -6,6 +6,7 @@ from src import global_objects
 from src.global_constants import dynamixel_robot_arm_port
 from src.global_objects import get_robot
 from src.xbox_control.xbox_control_resource import xbox_api
+from src.camera_control.camera_control_resource import camera_api
 
 from flask_cors import CORS
 from flask_cdn import CDN
@@ -16,6 +17,7 @@ from flask import jsonify
 app = Flask(__name__)
 CORS(app)
 app.register_blueprint(xbox_api, url_prefix='/xbox')
+app.register_blueprint(camera_api, url_prefix='/camera')
 CDN(app)
 
 nav = Nav()
@@ -30,6 +32,12 @@ def index():
 @app.route('/xbox')
 def xbox():
     return render_template('xbox_control.html')
+
+
+@app.route('/camera')
+def camera():
+    return render_template('camera_control.html')
+
 
 @app.route('/getJsonList', methods=['GET'])
 def getJsonList():
