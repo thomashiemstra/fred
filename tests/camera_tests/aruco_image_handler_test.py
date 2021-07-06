@@ -4,7 +4,7 @@ import cv2
 import jsonpickle
 import numpy as np
 
-from src.camera.util import charuco_board_dictionary, aruco_dictionary, get_default_charuco_board
+from src.camera.util import charuco_board_dictionary, aruco_marker_dictionary, get_default_charuco_board
 from src.camera.image_handlers import ArucoImageHandler
 
 
@@ -71,7 +71,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
     def get_default_image_handler(self):
         aruco_marker_length = 2.65
         return ArucoImageHandler(get_default_charuco_board(), self.cameraMatrix, self.distCoeffs,
-                                                aruco_dictionary, charuco_board_dictionary, aruco_marker_length)
+                                                aruco_marker_dictionary, charuco_board_dictionary, aruco_marker_length)
 
     @staticmethod
     def handle_frame(image_handler, frame):

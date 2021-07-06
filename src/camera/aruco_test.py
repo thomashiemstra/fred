@@ -4,10 +4,10 @@ import cv2
 from cv2 import aruco
 import jsonpickle
 import numpy as np
-from src.camera.util import charuco_board_dictionary, aruco_dictionary, get_default_charuco_board
+from src.camera.util import charuco_board_dictionary, aruco_marker_dictionary, get_default_charuco_board
 
 try:
-    with open('calibration/calibration_data.json', 'r') as calibartion_file:
+    with open('calibration/calibration_data_charuco.json', 'r') as calibartion_file:
         string = calibartion_file.read()
 except FileNotFoundError:
     print("calibration file not found, exiting")
@@ -57,7 +57,7 @@ def detect_and_draw_board(gray_image, captured_frame, detection_parameters):
 
 
 def detect_and_draw_markers(gray_image, captured_frame, detection_parameters):
-    corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, aruco_dictionary, parameters=detection_parameters)
+    corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, aruco_marker_dictionary, parameters=detection_parameters)
     aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)
 
     aruco_marker_length = 2.65

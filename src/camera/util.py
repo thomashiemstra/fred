@@ -13,10 +13,9 @@ class CaptureConfig:
     image_format = cv2.VideoWriter_fourcc(*'MJPG')
 
 
-charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
-charuco_board_dictionary_2 = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
-aruco_marker_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
-aruco_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
+charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
+charuco_board_dictionary_2 = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
+aruco_marker_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
 charuco_base_board_square_length = 2
 charuco__baseboard_marker_length = 1.6
 aruco_marker_length = 2.65
