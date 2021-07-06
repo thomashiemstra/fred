@@ -17,6 +17,7 @@ started = False
 aruco_started = False
 aruco_image_handler = None
 
+
 @camera_api.route('/start', methods=['POST'])
 def start():
     global started
