@@ -22,9 +22,9 @@ def calibrate_camera(allCorners,allIds,imsize):
     """
     print("CAMERA CALIBRATION")
 
-    cameraMatrixInit = np.array([[ 1000.,    0., imsize[0]/2.],
-                                 [    0., 1000., imsize[1]/2.],
-                                 [    0.,    0.,           1.]])
+    cameraMatrixInit = np.array([[ 1430.,    0., 989.],
+                                 [    0., 1430., 505.],
+                                 [    0.,    0.,   1.]])
 
     distCoeffsInit = np.zeros((5,1))
     flags = (cv2.CALIB_USE_INTRINSIC_GUESS + cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_FIX_ASPECT_RATIO)
@@ -91,7 +91,7 @@ while cap.isOpened():
         if ret:
             img_name = "captures/opencv_frame_{}.png".format(img_counter)
             print("Saving image as: {}".format(img_name))
-            cv2.imwrite(img_name, frame)
+            cv2.imwrite(img_name, gray)
             img_counter += 1
 
             if len(corners) > 0:
@@ -104,7 +104,7 @@ while cap.isOpened():
                 charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,
                                                                                                 board)
                 if charucoCorners is not None and charucoIds is not None and len(
-                        charucoCorners) > 3 and decimator % 1 == 0 and len(ids) == 9:
+                        charucoCorners) > 3 and decimator % 1 == 0 and 7 < len(ids) <= 9:
                     print("found {} ids".format(len(ids)))
                     allCorners.append(charucoCorners)
                     allIds.append(charucoIds)
