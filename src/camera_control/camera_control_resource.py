@@ -2,14 +2,12 @@ from __future__ import division
 
 import threading
 
-from flask import Blueprint, request
+from flask import Blueprint
 from flask import jsonify
 
-import src.global_constants
 import src.global_objects as global_objects
-from src.camera.image_handlers import ArucoImageHandler, get_default_aurco_image_handler, \
+from src.camera.image_handlers import get_default_aurco_image_handler, \
     get_default_board_to_board_image_handler
-from src.camera.util import get_calibrations
 from src.camera_control.board_to_board_robot_controller import get_board_to_board_controller
 
 camera_api = Blueprint('camera_api', __name__)
@@ -33,6 +31,7 @@ def start():
     with api_lock:
         started = True
     resp = jsonify(success=True)
+    print("camera started")
     return resp
 
 
@@ -49,6 +48,7 @@ def stop():
     camera = global_objects.get_camera()
     camera.stop_camera()
     resp = jsonify(success=True)
+    print("camera stopped")
     return resp
 
 
@@ -74,9 +74,8 @@ def start_aruco():
     aruco_image_handler = get_default_aurco_image_handler()
     camera.add_image_handler(aruco_image_handler)
     resp = jsonify(success=True)
+    print("aruco started")
     return resp
-
-# get_default_board_to_board_image_handler
 
 
 @camera_api.route('/start_board_to_board', methods=['POST'])
@@ -101,6 +100,7 @@ def start_board_to_board():
     board_to_board_handler = get_default_board_to_board_image_handler()
     camera.add_image_handler(board_to_board_handler)
     resp = jsonify(success=True)
+    print("board to board started")
     return resp
 
 
@@ -118,6 +118,7 @@ def start_board_to_board_controller():
     global board_to_board_handler
     controller = get_board_to_board_controller(board_to_board_handler)
     controller.start()
+    print("board to board controller stopped")
     return jsonify(success=True)
 
 
