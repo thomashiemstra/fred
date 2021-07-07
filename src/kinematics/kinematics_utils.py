@@ -5,17 +5,24 @@ import json
 
 class Pose:
 
-    def __init__(self, x, y, z, flip=False, alpha=0.0, beta=0.0, gamma=0.0, time=2.0):
+    def __init__(self, x, y, z, flip=False, alpha=0.0, beta=0.0, gamma=0.0, time=2.0, euler_matrix=None):
         self.x = float(x)
         self.y = float(y)
         self.z = float(z)
         self.time = time
         self.flip = flip
+        self.euler_matrix = euler_matrix
         self.alpha = float(alpha)
         self.beta = float(beta)
         self.gamma = float(gamma)
 
     def get_euler_matrix(self):
+        if self.euler_matrix is not None:
+            return self.euler_matrix
+        else:
+            return self._get_euler_matrix_from_angles()
+
+    def _get_euler_matrix_from_angles(self):
         """alpha is a turn around the world z-axis"""
         """beta is a turn around the world y-axis"""
         """gamma is a turn around the world x-axis"""

@@ -7,7 +7,7 @@ from cv2 import aruco
 
 from src.camera.util import CaptureConfig, get_default_charuco_board, get_calibrations, aruco_marker_dictionary, \
     charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length, \
-    find_relative_vector_and_rotation
+    find_relative_vector_and_rotation, charuco_board_dictionary_2
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -123,13 +123,6 @@ class ArucoImageHandler(ImageHandler):
     def deactivate_handler(self):
         pass
 
-    def detect_and_draw_board(self, gray_image, captured_frame, detection_parameters):
-        retval, rvec, tvec = self.detect_board(gray_image, detection_parameters)
-        if retval:
-            aruco.drawAxis(captured_frame, self.cameraMatrix, self.distCoeffs, rvec, tvec,
-                           50)  # axis length 100 can be changed according to your requirement
-            return retval, rvec, tvec
-
     def get_previous_vecs_if_exist(self):
         if self._previous_board_rvec is not None and self._previous_board_tvec is not None:
             return True, self._previous_board_rvec, self._previous_board_tvec
@@ -156,10 +149,6 @@ class ArucoImageHandler(ImageHandler):
 
         self._previous_board_rvec, self._previous_board_tvec = rvec, tvec
         return retval, rvec, tvec
-
-    def detect_and_draw_marker(self, gray_image, captured_frame, detection_parameters):
-        ids, rvecs, tvecs, corners = self.detect_markers(gray_image, captured_frame, detection_parameters)
-        aruco.drawDetectedMarkers(captured_frame, corners, ids)
 
     def detect_markers(self, gray_image, captured_frame, detection_parameters):
         corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, self.aruco_dictionary,
@@ -198,3 +187,120 @@ class ArucoImageHandler(ImageHandler):
     @synchronized_with_lock("lock")
     def get_detected_markers(self):
         return [detected_marker.copy() for detected_marker in self.detected_markers]
+
+
+def get_default_board_to_board_image_handler():
+    base_board = get_default_charuco_board(square_length=charuco_base_board_square_length,
+                                      marker_length=charuco__baseboard_marker_length)
+    target_board = get_default_charuco_board(square_length=charuco_base_board_square_length,
+                                      marker_length=charuco__baseboard_marker_length,
+                                             dictionary=charuco_board_dictionary_2)
+
+    cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data.json')
+    handler = BoardToBoardImageHandler(base_board, target_board, cameraMatrix, distCoeffs, charuco_board_dictionary,
+                                       charuco_board_dictionary_2, should_draw=False)
+    return handler
+
+
+class BoardToBoardImageHandler(ImageHandler):
+
+    def __init__(self, board, target_board, cameraMatrix, distCoeffs, charuco_board_dictionary, target_board_dictionary,
+                 should_draw=False):
+        self.board = board
+        self.target_board = target_board
+        self.lock = threading.RLock()
+        self.parameters = aruco.DetectorParameters_create()
+        self.cameraMatrix = cameraMatrix
+        self.distCoeffs = distCoeffs
+
+        self.charuco_board_dictionary = charuco_board_dictionary
+        self.target_board_dictionary = target_board_dictionary
+
+        self.should_draw = should_draw
+
+        self.relative_matrix = None
+        self.relative_tvec = None
+
+        self._previous_board_rvec = None
+        self._previous_board_tvec = None
+
+    def handle_frame(self, frame, gray):
+        retval, board_rvec, board_tvec = self.detect_board(gray, self.board, self.charuco_board_dictionary)
+        if not retval:
+            retval, board_rvec, board_tvec = self.get_previous_vecs_if_exist()
+        if self.board_not_detected(board_rvec, board_tvec, retval):
+            # did not detect the board and no board was detected in the past
+            return
+
+        retval, target_board_rvec, target_board_tvec = self.detect_board(gray, self.target_board,
+                                                                    self.target_board_dictionary)
+        if self.board_not_detected(target_board_rvec, target_board_tvec, retval):
+            # did not detect the board
+            return
+
+        relative_rotation_matrix, relative_tvec = self.find_relative_matrix_and_vector(board_rvec, board_tvec,
+                                                                                       target_board_rvec,
+                                                                                       target_board_tvec)
+        self.populate_relative_vecs(relative_rotation_matrix, relative_tvec)
+
+        if self.should_draw:
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, target_board_rvec, target_board_tvec, length=50)
+
+    @staticmethod
+    def board_not_detected(board_rvec, board_tvec, retval):
+        if not retval:
+            return True
+        if board_rvec is None or board_tvec is None:
+            return True
+        if len(board_rvec) == 3 and len(board_tvec) == 3:
+            return False
+
+    def deactivate_handler(self):
+        pass
+
+    def get_previous_vecs_if_exist(self):
+        if self._previous_board_rvec is not None and self._previous_board_tvec is not None:
+            return True, self._previous_board_rvec, self._previous_board_tvec
+        else:
+            return False, None, None
+
+    def detect_board(self, gray_image, board, board_dictionary):
+        corners, ids, rejected_img_points = aruco.detectMarkers(gray_image, board_dictionary,
+                                                                parameters=self.parameters)
+        aruco.refineDetectedMarkers(gray_image, self.board, corners, ids, rejected_img_points)
+
+        if ids is None:
+            return False, None, None
+
+        charucoretval, charucoCorners, charucoIds = aruco.interpolateCornersCharuco(corners, ids, gray_image,
+                                                                                    self.board)
+
+        empty_array = np.array([])
+        retval, rvec, tvec = aruco.estimatePoseCharucoBoard(charucoCorners, charucoIds, board, self.cameraMatrix,
+                                                            self.distCoeffs, empty_array, empty_array,
+                                                            useExtrinsicGuess=False)
+        if self.board_not_detected(rvec, tvec, retval):
+            return False, None, None
+
+        self._previous_board_rvec, self._previous_board_tvec = rvec, tvec
+        return retval, rvec, tvec
+
+    @staticmethod
+    def find_relative_matrix_and_vector(board_rvec, board_tvec, target_board_rvec, target_board_tvec):
+        board_rotation_matrix, _ = cv2.Rodrigues(board_rvec)
+        target_board_rotation_matrix, _ = cv2.Rodrigues(target_board_rvec)
+        relative_rotation_matrix, relative_tvec = find_relative_vector_and_rotation(board_rotation_matrix,
+                                                                                    board_tvec,
+                                                                                    target_board_rotation_matrix,
+                                                                                    target_board_tvec)
+        return relative_rotation_matrix, relative_tvec
+
+    @synchronized_with_lock("lock")
+    def populate_relative_vecs(self, relative_matrix, tvec):
+        self.relative_matrix = relative_matrix
+        self.relative_tvec = tvec
+
+    @synchronized_with_lock("lock")
+    def get_revlative_vecs(self):
+        return self.relative_matrix, self.relative_tvec

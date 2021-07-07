@@ -9,25 +9,41 @@
 {% block content %}
 
     <div class="container">
-      <div class="row">
-        <div class="col-sm-4">
-            <h2>Instructions:</h2>
-                <p>something:</p>
-        </div>
-        <div class="col-sm-4">
-          <div class="container">
-              <h2>Camera control</h2>
-              <div class="btn-group">
-                <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start')">On</button>
-                <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop')">Off</button>
+        <div class="row">
+            <div class="col-sm-4">
+                <h2>Instructions:</h2>
+                    <p>something:</p>
+            </div>
+            <div class="col-sm-4">
+              <div class="container">
+                  <h2>Camera control</h2>
+                  <div class="btn-group">
+                    <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start')">On</button>
+                    <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop')">Off</button>
+                  </div>
               </div>
-          </div>
-        </div>
+            </div>
             <div class="col-sm-4">
                 <h2>Start aruco marker detection relative to the charuco board</h2>
-               <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_aruco')">Start</button>
+                <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_aruco')">Start</button>
             </div>
-      </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-4">
+                <h2>Start board to board detection</h2>
+                <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_board_to_board')">Start</button>
+            </div>
+            <div class="col-sm-4">
+                <div class="btn-group">
+                    <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_board_to_board_controller')">On</button>
+                    <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop_board_to_board_controller')">Off</button>
+                </div>
+            </div>
+            <div class="col-sm-4">
+
+            </div>
+        </div>
     </div>
 
 {% endblock %}
