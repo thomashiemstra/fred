@@ -12,11 +12,11 @@ from src.utils.obstacle import BoxObstacle
 
 class RobotEnvWithObstacles(RobotEnv):
 
-    def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False):
+    def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False, robot_controller=None):
         if scenarios is None:
             raise ValueError("RobotEnvWithObstacles should be initialized with scenarios, "
                              "otherwise we would default to no obstacle scenarios!")
-        super().__init__(use_gui, raw_obs, is_eval=is_eval, scenarios=scenarios)
+        super().__init__(use_gui, raw_obs, is_eval=is_eval, scenarios=scenarios, robot_controller=robot_controller)
         self._hilbert_curve_iteration = 3
         self._grid_len_x = 40
         self._grid_len_y = 40
