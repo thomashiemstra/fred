@@ -19,7 +19,7 @@ from src.utils.obstacle import BoxObstacle, SphereObstacle
 
 class RobotEnv(py_environment.PyEnvironment):
 
-    def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False):
+    def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False, robot_controller=None):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
@@ -42,7 +42,10 @@ class RobotEnv(py_environment.PyEnvironment):
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
-        self._robot_controller = start_simulated_robot(use_gui)
+        if robot_controller is None:
+            self._robot_controller = start_simulated_robot(use_gui)
+        else:
+            self._robot_controller = robot_controller
         self._physics_client = self._robot_controller.physics_client
         self._start_pose = None
         self._closest_distance_so_far = None
@@ -181,7 +184,8 @@ class RobotEnv(py_environment.PyEnvironment):
         return self._done
 
     def close(self):
-        pass
+        if self._current_scenario is not None:
+            self._current_scenario.destroy_scenario(self._physics_client)
 
     def get_info(self):
         return None
