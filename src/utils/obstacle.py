@@ -33,6 +33,9 @@ class BoxObstacle(Obstacle):
             dimensions: array of length, width, height of the obstacle
             raw_base_center_position: array of the x,y,z coordinates of the center of the base of the obstacle
             alpha: angle by which to rotate the body around the z-axis
+            color: color components for RED, GREEN, BLUE and ALPHA, each in range [0..1]. Alpha has to be 0 (invisible)
+             or 1 (visible) at the moment. Note that TinyRenderer doesn't support transparancy, but the GUI/EGL OpenGL3
+             renderer does.
         """
         super().__init__()
         self.alpha = alpha
@@ -63,7 +66,7 @@ class BoxObstacle(Obstacle):
 
     def destroy(self, physics_client):
         if self.obstacle_id is None:
-            logging.warn("no obstacle to destroy, call build() first")
+            logging.warning("no obstacle to destroy, call build() first")
             return
         p.removeBody(self.obstacle_id, physicsClientId=physics_client)
 
