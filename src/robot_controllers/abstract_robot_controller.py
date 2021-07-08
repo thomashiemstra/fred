@@ -4,6 +4,14 @@ from abc import ABC, abstractmethod
 class AbstractRobotController(ABC):
 
     @abstractmethod
+    def enable_servos(self):
+        pass
+
+    @abstractmethod
+    def disable_servos(self):
+        pass
+
+    @abstractmethod
     def move_to_pose(self, pose):
         pass
 
@@ -21,4 +29,8 @@ class AbstractRobotController(ABC):
 
     @abstractmethod
     def set_gripper(self, new_gripper_state):
+        pass
+
+    @abstractmethod
+    def reset_to_pose(self, pose):
         pass
