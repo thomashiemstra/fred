@@ -5,17 +5,22 @@ from src import global_constants
 
 from functools import lru_cache
 
+from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.xbox_control.xbox360controller.XboxController import XboxController
 
 
 @lru_cache(maxsize=1)
 def get_robot(port):
+    from src.simulation.simulation_utils import start_simulated_robot
+    simulated_robot = start_simulated_robot(use_gui=True)
     if global_constants.use_simulation:
         from src.simulation.simulation_utils import start_simulated_robot
-        return start_simulated_robot(use_gui=True)
+        return simulated_robot
     else:
         from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
-        return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
+        dynamixel_robot = DynamixelRobotController(port, global_constants.dynamixel_robot_config)
+        return CombinedRobot(dynamixel_robot, simulated_robot)
+        # return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
 
 
 def get_servo_config(servo_config_path):
