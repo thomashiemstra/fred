@@ -19,6 +19,7 @@ aruco_marker_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
 charuco_base_board_square_length = 3
 charuco__baseboard_marker_length = 2.4
 aruco_marker_length = 2.65
+base_marker_offset = [-26.5, 8, 0]
 
 
 def get_default_charuco_board(squares_x=6,

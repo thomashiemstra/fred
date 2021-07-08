@@ -11,6 +11,23 @@
     <div class="container">
         <div class="row">
             <div class="col-sm-4">
+
+            </div>
+            <div class="col-sm-4">
+                <h2>Robot controll</h2>
+                  <div class="btn-group">
+                    <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/enable_servos')">On</button>
+                    <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/disable_servos')">Off</button>
+                  </div>
+            </div>
+            <div class="col-sm-4">
+
+            </div>
+        </div>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-sm-4">
                 <h2>Instructions:</h2>
                     <p>something:</p>
             </div>
@@ -18,14 +35,38 @@
               <div class="container">
                   <h2>Camera control</h2>
                   <div class="btn-group">
-                    <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start')">On</button>
-                    <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop')">Off</button>
+                    <button id="toggleCameraOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start')">On</button>
+                    <button id="toggleCameraOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop')">Off</button>
                   </div>
               </div>
             </div>
             <div class="col-sm-4">
-                <h2>Start aruco marker detection relative to the charuco board</h2>
+                <h4>Start aruco marker detection</h4>
                 <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_aruco')">Start</button>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-4">
+                <h2>Start obstacle avoidance</h2>
+                <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_obstacle_avoidance')">Start</button>
+            </div>
+            <div class="col-sm-4">
+                <div class="btn-group">
+                    <h2>Create scenario</h2>
+                    <br>
+                    <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/create_and_set_scenario')">Create</button>
+                </div>
+            </div>
+            <div class="col-sm-4">
+                    <h6>Avoid obstacles using gradient descent</h6>
+                    <div class="btn-group">
+                        <button id="startGradientDescent" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/obstacle_avoidance_gradient_descent')">On</button>
+                        <button id="stopGradientDescent" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop_obstacle_avoidance')">Off</button>
+                    </div>
+
+                    <h6>Avoid obstacles using deep learning</h6>
+                    <h6>comming soon!</h6>
             </div>
         </div>
 
