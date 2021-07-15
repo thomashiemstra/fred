@@ -11,6 +11,9 @@ class CaptureConfig:
     fps = 30
     marker_size = 20
     image_format = cv2.VideoWriter_fourcc(*'MJPG')
+    FOURCC =  cv2.VideoWriter.fourcc('m', 'j', 'p', 'g')
+    FOURCC2 = cv2.VideoWriter.fourcc('M', 'J', 'P', 'G')
+
 
 
 charuco_board_dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
