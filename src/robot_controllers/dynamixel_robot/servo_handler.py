@@ -42,7 +42,7 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_GOAL_POSITION,
                                 self.config.LEN_GOAL_POSITION, servo_id, servo.target_position)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def set_profile_velocity_and_acceleration(self):
         """set the velocity profile of the servos, this get's wiped after a reboot"""
@@ -53,7 +53,9 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_PROFILE_VELOCITY,
                                 self.config.LEN_PROFILE_VELOCITY, servo_id, servo.profile_velocity)
 
-        self.__write_and_clear()
+        success = self.__write_and_clear()
+        if not success:
+            return success
 
         for servo_id in self.servo_map:
             servo = self.servo_map[servo_id]
@@ -61,7 +63,7 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_PROFILE_ACCELERATION,
                                 self.config.LEN_PROFILE_ACCELERATION, servo_id, servo.profile_acceleration)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def set_profile_velocity_percentage(self, percentage):
         """
@@ -81,7 +83,7 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_PROFILE_VELOCITY,
                                 self.config.LEN_PROFILE_VELOCITY, servo_id, val)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def set_configured_goal_current(self):
         self.group_bulk_write.clearParam()
@@ -94,7 +96,7 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
                                 self.config.LEN_GOAL_POSITION, servo_id, servo.goal_current)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def set_goal_current(self, val):
         self.group_bulk_write.clearParam()
@@ -104,7 +106,7 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
                                 self.config.LEN_GOAL_POSITION, servo_id, val)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def set_pid(self):
         """set the velocity profile of the servos, this get's wiped after a reboot"""
@@ -115,7 +117,9 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_P,
                                 self.config.LEN_PID, servo_id, servo.p)
 
-        self.__write_and_clear()
+        success = self.__write_and_clear()
+        if not success:
+            return success
 
         for servo_id in self.servo_map:
             servo = self.servo_map[servo_id]
@@ -123,7 +127,9 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_I,
                                 self.config.LEN_PID, servo_id, servo.i)
 
-        self.__write_and_clear()
+        success = self.__write_and_clear()
+        if not success:
+            return success
 
         for servo_id in self.servo_map:
             servo = self.servo_map[servo_id]
@@ -131,7 +137,7 @@ class ServoHandler(object):
             self.__add_to_write(self.config.ADDR_D,
                                 self.config.LEN_PID, servo_id, servo.d)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def read_current_pos(self):
         """update the current_position parameter of all the servo objects"""
@@ -148,19 +154,24 @@ class ServoHandler(object):
         for servo_id in self.servo_map:
             position_result = self.__get_read_res(servo_id, self.config.ADDR_PRESENT_POSITION,
                                                   self.config.LEN_PRESENT_POSITION)
+            if position_result is None:
+                return False
+
             if position_result is not None and position_result > MAX_INT / 2:
                 position_result = position_result - MAX_INT
             self.servo_map[servo_id].current_position = position_result
 
         self.group_bulk_read.clearParam()
+        return True
 
     def get_angle(self, servo_id, position):
         """converts the position to a servo angle"""
         return self.servo_map[servo_id].get_angle_from_position(position)
 
     def __write_and_clear(self):
-        self.__send_write_packet()
+        success = self.__send_write_packet()
         self.group_bulk_write.clearParam()
+        return success 
 
     def __add_to_write(self, address, address_length, servo_id, value):
         utils.add_group_write(self.group_bulk_write, servo_id, address,
@@ -171,6 +182,8 @@ class ServoHandler(object):
         comm_result = self.group_bulk_write.txPacket()
         if comm_result != dynamixel.COMM_SUCCESS:
             print("%s" % self.packet_handler.getTxRxResult(comm_result))
+            return False
+        return True
 
     def __send_read_packet(self):
         """send all the read commands to all the servos"""
@@ -204,7 +217,7 @@ class ServoHandler(object):
         self.__add_to_write(self.config.ADDR_GOAL_POSITION,
                             self.config.LEN_GOAL_POSITION, servo_id, servo.target_position)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     # debug function to set the torque of a single servo
     def set_servo_torque(self, servo_id, enable):
@@ -216,7 +229,7 @@ class ServoHandler(object):
         self.__add_to_write(self.config.ADDR_GOAL_POSITION,
                             self.config.LEN_GOAL_POSITION, servo_id, position)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
 
     def read_current_pos_single_servo(self, servo_id):
         """update the current_position parameter of all the servo objects"""
@@ -244,14 +257,18 @@ class ServoHandler(object):
         self.__add_to_write(self.config.ADDR_P,
                             self.config.LEN_PID, servo_id, p)
 
-        self.__write_and_clear()
+        success = self.__write_and_clear()
+        if not success:
+            return success
 
         self.__add_to_write(self.config.ADDR_I,
                             self.config.LEN_PID, servo_id, i)
 
-        self.__write_and_clear()
+        success = self.__write_and_clear()
+        if not success:
+            return success
 
         self.__add_to_write(self.config.ADDR_D,
                             self.config.LEN_PID, servo_id, d)
 
-        self.__write_and_clear()
+        return self.__write_and_clear()
