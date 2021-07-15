@@ -64,8 +64,15 @@ class RobotEnv(py_environment.PyEnvironment):
         self._externally_set_scenario = None
         self._traveled_distances = []
         self._times_current_scenario_payed = 0
+        self._target_reached_distance = 15
         self.rewards = []
         self.distance = []
+
+    def set_target_reached_distance(self, val):
+        self._target_reached_distance = val
+
+    def disable_max_steps_to_take_before_failure(self):
+        self._max_steps_to_take_before_failure = 10000000
 
     @property
     def current_angles(self):
@@ -247,7 +254,7 @@ class RobotEnv(py_environment.PyEnvironment):
         if stuck:
             self._done = True
             return ts.termination(observation, reward=0)
-        elif total_distance < 15:  # target reached
+        elif total_distance < self._target_reached_distance:
             self._done = True
             max_speed_bonus = 5
             speed_bonus = (-max_speed_bonus / self._max_steps_to_take_before_failure) * self._steps_taken \
