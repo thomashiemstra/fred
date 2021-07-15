@@ -34,15 +34,17 @@ class CameraCapture:
             print("camera already running")
             return
 
-        self._cap = cv2.VideoCapture(self._camera)
+        self._cap = cv2.VideoCapture(self._camera, cv2.CAP_DSHOW)
 
         if not self._cap.isOpened():
             print("no camera connected!")
             return
 
+        self._cap.set(cv2.CAP_PROP_FPS, CaptureConfig.fps)
+        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.FOURCC)
+        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.FOURCC2)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CaptureConfig.screen_width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
-        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.image_format)
 
         thread = threading.Thread(target=self.__capture_camera)
         self._running = True
@@ -59,9 +61,11 @@ class CameraCapture:
             print("no camera connected!")
             return
 
+        self._cap.set(cv2.CAP_PROP_FPS, CaptureConfig.fps)
+        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.FOURCC)
+        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.FOURCC2)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CaptureConfig.screen_width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
-        self._cap.set(cv2.CAP_PROP_FOURCC, CaptureConfig.image_format)
 
         thread = threading.Thread(target=self.__capture_camera)
         self._running = True
