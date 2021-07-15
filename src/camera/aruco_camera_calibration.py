@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 from src.camera.util import get_default_charuco_board, charuco_board_dictionary
+from src.utils.decorators import timer
 
 ESC_KEY = 27
 SPACE_KEY = 32
@@ -45,15 +46,30 @@ def calibrate_camera(allCorners,allIds,imsize):
     return ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors
 
 
-cap = cv2.VideoCapture(0, cv2.CAP_MSMF)
+@timer
+def open_cap():
+    return cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
+
+cap = open_cap()
+
+
+@timer
+def set_cap_properties(cap):
+    cap.set(cv2.CAP_PROP_FPS, 30.0)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('m', 'j', 'p', 'g'))
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M', 'J', 'P', 'G'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+
+set_cap_properties(cap)
+
 if not cap.isOpened():
     print("Camera not connected, exiting!")
     sys.exit()
 
-cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-cap.set(cv2.CAP_PROP_FPS, 30)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
 fps = int(cap.get(cv2.CAP_PROP_FPS))
 print("fps:", fps)
 
