@@ -25,6 +25,7 @@ class ObstacleAvoidance:
         self.control_point_1_position = 11.2
         self.stopped = False
         self.thread = None
+        self._initial_state = None
 
     @synchronized_with_lock("lock")
     def is_stopped(self):
@@ -52,9 +53,16 @@ class ObstacleAvoidance:
         self.set_stopped(False)
 
         obstacles = self._find_obstacles()
+        self.env = self.get_env(obstacles)
+        self._initial_state = self.env.reset()
+
+    def get_env(self, obstacles):
         scenario = Scenario(obstacles, start_pose=self.start_pose, target_pose=self.target_pose)
-        self.env = RobotEnvWithObstacles(scenarios=[scenario], robot_controller=self.robot)
-        self.env.reset()
+        env = RobotEnvWithObstacles(scenarios=[scenario], robot_controller=self.robot)
+        env._update_step_size = 0.001
+        env.set_target_reached_distance(5)
+        env.disable_max_steps_to_take_before_failure()
+        return env
 
     def enable_servos(self):
         self.robot.enable_servos()
@@ -63,9 +71,13 @@ class ObstacleAvoidance:
         self.robot.disable_servos()
 
     def stop(self):
+        if self.thread is None:
+            print("already stopped")
+            return
         self.set_stopped(True)
         self.thread.join()
         self.thread = None
+        self.set_stopped(False)
 
     @synchronized_with_lock("lock")
     def obstacle_avoidance_gradient_descent(self):
@@ -81,7 +93,7 @@ class ObstacleAvoidance:
             print("first set a scenario based on the image in order to create an env")
             return
 
-        state = self.env.reset()
+        state = self._initial_state
 
         while not self.is_stopped():
             raw_observation = state.observation
@@ -110,7 +122,7 @@ class ObstacleAvoidance:
             absolute_force = np.linalg.norm(joint_forces)
 
             action = (joint_forces / absolute_force)
-            sleep(0.05)
+            # sleep(0.01)
 
             state = self.env.step(action[1:6])
 
