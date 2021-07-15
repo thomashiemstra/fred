@@ -1,3 +1,4 @@
+import sys
 import threading
 from timeit import default_timer as timer
 
@@ -47,20 +48,26 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler = ServoHandler(gripper_servos, cfg, port_handler,
                                                   packet_handler, group_bulk_write, group_bulk_read)
 
-        self.set_velocity_profile()
-        self.set_pid()
+        success = self.set_velocity_profile()
+        success = success & self.set_pid()
+        if not success:
+            print('failed to setup the dynamixel robot, exiting')
+            sys.exit()
         self.status = False
         self.lock = threading.RLock()
         self._current_angles = self.get_current_angles()
+        if self._current_angles is None:
+            print('failed to setup the dynamixel robot, exiting')
+            sys.exit()
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
 
     def enable_servos(self):
-        # if not self.safety_check():
-        #     print('failed the safety check, disabling servos!')
-        #     self.disable_servos()
-        #     return
-        #
-        # self.base_servo_handler.set_torque(enable=True)
+        if not self.safety_check():
+            print('failed the safety check, disabling servos!')
+            self.disable_servos()
+            return
+
+        self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
         self.gripper_servo_handler.set_torque(enable=True)
 
@@ -138,24 +145,28 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler.move_to_angles()
 
     def set_velocity_profile(self):
-        self.base_servo_handler.set_profile_velocity_and_acceleration()
-        self.wrist_servo_handler.set_profile_velocity_and_acceleration()
-        self.gripper_servo_handler.set_profile_velocity_and_acceleration()
+        success = self.base_servo_handler.set_profile_velocity_and_acceleration()
+        success = success & self.wrist_servo_handler.set_profile_velocity_and_acceleration()
+        success = success & self.gripper_servo_handler.set_profile_velocity_and_acceleration()
+        return success
 
     def set_goal_current(self):
-        self.base_servo_handler.set_configured_goal_current()
-        self.wrist_servo_handler.set_configured_goal_current()
-        self.gripper_servo_handler.set_configured_goal_current()
+        success = self.base_servo_handler.set_configured_goal_current()
+        success = success & self.wrist_servo_handler.set_configured_goal_current()
+        success = success & self.gripper_servo_handler.set_configured_goal_current()
+        return success
 
     def set_pid(self):
-        self.base_servo_handler.set_pid()
-        self.wrist_servo_handler.set_pid()
-        self.gripper_servo_handler.set_pid()
+        success = self.base_servo_handler.set_pid()
+        success = success & self.wrist_servo_handler.set_pid()
+        success = success & self.gripper_servo_handler.set_pid()
+        return success
 
     def set_profile_velocity_percentage(self, percentage):
-        self.base_servo_handler.set_profile_velocity_percentage(percentage)
-        self.wrist_servo_handler.set_profile_velocity_percentage(percentage)
-        self.gripper_servo_handler.set_profile_velocity_percentage(percentage)
+        success = self.base_servo_handler.set_profile_velocity_percentage(percentage)
+        success = success & self.wrist_servo_handler.set_profile_velocity_percentage(percentage)
+        success = success & self.gripper_servo_handler.set_profile_velocity_percentage(percentage)
+        return success
 
     # debug function to control single servo
     def move_servo(self, servo_id, angle, all_angles=None):
@@ -167,8 +178,11 @@ class DynamixelRobotController(AbstractRobotController):
             self.wrist_servo_handler.move_servo_to_angle(servo_id)
 
     def get_current_angles(self):
-        self.base_servo_handler.read_current_pos()
-        self.wrist_servo_handler.read_current_pos()
+        success = self.base_servo_handler.read_current_pos()
+        success = success & self.wrist_servo_handler.read_current_pos()
+        if not success:
+            return None
+
         angles = np.zeros(7, dtype=np.float64)
 
         angles[1] = self.base_servo_handler.get_angle(1, self.servo1.current_position)
