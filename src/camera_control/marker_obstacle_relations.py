@@ -9,6 +9,7 @@ RED_COLOR = [1, 0, 0, 1]
 GREEN_COLOR = [0, 1, 0, 1]
 BLUE_COLOR = [0, 0, 1, 1]
 
+block_ids = [6, 7, 10, 11, 12, 13]
 
 def get_rotation_around_z_from_marker(found_marker):
     matrix = found_marker.relative_rotation_matrix
@@ -26,5 +27,5 @@ def get_obstacle_from_marker(found_marker):
 
     if marker_id == 29:
         return BoxObstacle(np.array([13, 12, 35]), location, alpha=alpha, color=RED_COLOR)
-    elif marker_id == 2:
-        return None
+    elif marker_id in block_ids:
+        return BoxObstacle(np.array([2.7, 2.7, 2.7]), location, alpha=alpha, color=GREEN_COLOR)
