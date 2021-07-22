@@ -63,7 +63,7 @@ def train_eval(checkpoint_dir,
                batch_size=256,
                use_tf_functions=True,
                # Params for eval,
-               num_eval_episodes=10,
+               num_eval_episodes=len(medium_scenarios),
                eval_interval=2000,
                # Params for summaries and logging,
                train_checkpoint_interval=5000,
@@ -102,11 +102,15 @@ def train_eval(checkpoint_dir,
         # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=easy_scenarios)
 
         logging.info("difficulty = {}".format(difficulty))
-        if difficulty == 'med':
-            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=medium_scenarios)
+        if difficulty == 'easy':
+            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+                                              scenarios=easy_scenarios)
+        elif difficulty == 'med':
+            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+                                              scenarios=medium_scenarios)
         elif difficulty == 'hard':
-            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=hard_scenarios)
-            logging.info("yeah, like whatever man.")
+            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+                                              scenarios=hard_scenarios)
             total_train_steps += total_train_steps
 
         tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles,
