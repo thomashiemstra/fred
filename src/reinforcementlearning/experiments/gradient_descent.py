@@ -2,9 +2,11 @@ from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 import numpy as np
+from time import sleep
 
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.environment.scenario import Scenario, easy_scenarios, medium_scenarios, hard_scenarios
+from src.reinforcementlearning.environment.scenario import Scenario, easy_scenarios, medium_scenarios, hard_scenarios, \
+    super_easy_scenarios
 from src.utils.obstacle import BoxObstacle
 
 control_point_1_position = 11.2
@@ -15,12 +17,17 @@ def reset_to_scenario(env, scenario):
     env.reset()
 
 
-env = RobotEnvWithObstacles(use_gui=True, scenarios=easy_scenarios)
+env = RobotEnvWithObstacles(use_gui=True, scenarios=easy_scenarios, angle_control=True)
 
 scenario_id = 2
 
-env.set_scenario(easy_scenarios[scenario_id])
-# env.set_scenario(medium_scenarios[scenario_id])
+
+start_pose = Pose(-30, 25, 10)
+end_pose = Pose(30, 25, 10)
+
+
+# env.set_scenario(Scenario([],start_pose, end_pose))
+env.set_scenario(medium_scenarios[3])
 # env.set_scenario(hard_scenarios[scenario_id])
 
 state = env.reset()

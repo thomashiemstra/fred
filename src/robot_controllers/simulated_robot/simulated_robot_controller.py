@@ -1,4 +1,4 @@
-from src.kinematics.kinematics import inverse_kinematics
+from src.kinematics.kinematics import inverse_kinematics, forward_position_kinematics
 import pybullet as p
 import numpy as np
 
@@ -78,11 +78,19 @@ class SimulatedRobotController(AbstractRobotController):
         self.move_servos(angles)
         return recommended_time, 0
 
+    def move_to_pose_and_give_new_angles(self, pose):
+        angles = inverse_kinematics(pose, self.robot_config)
+        self.move_servos(angles)
+        return angles
+
     def move_servos(self, angles):
         self._current_angles = angles
         # First set the target_position variable of all servos
         p.setJointMotorControlArray(self.body_id, self.motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)
+
+    def forward_position_kinematics(self, angles):
+        return forward_position_kinematics(angles, self.robot_config)
 
     def set_gripper(self, new_gripper_state):
         pass
