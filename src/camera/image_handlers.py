@@ -7,7 +7,7 @@ from cv2 import aruco
 
 from src.camera.util import CaptureConfig, get_default_charuco_board, get_calibrations, aruco_marker_dictionary, \
     charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length, \
-    find_relative_vector_and_rotation, charuco_board_dictionary_2
+    find_relative_vector_and_rotation, charuco_board_dictionary_2, relativePosition
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -67,7 +67,7 @@ class DetectedMarker:
 def get_default_aurco_image_handler():
     board = get_default_charuco_board(square_length=charuco_base_board_square_length,
                                       marker_length=charuco__baseboard_marker_length)
-    cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data.json')
+    cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data_charuco.json')
     handler = ArucoImageHandler(board, cameraMatrix, distCoeffs, aruco_marker_dictionary,
                                 charuco_board_dictionary, aruco_marker_length, should_draw=True)
     return handler
@@ -109,7 +109,12 @@ class ArucoImageHandler(ImageHandler):
 
         if self.should_draw:
             aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
-            aruco.drawDetectedMarkers(frame, corners, ids)
+            self.draw_marker_axis(frame, marker_rvecs, marker_tvecs, ids)
+            # aruco.drawDetectedMarkers(frame, corners, ids)
+
+    def draw_marker_axis(self, frame, rvec, tvecs, marker_ids):
+        for i in range(len(marker_ids)):
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, rvec[i], tvecs[i], length=50)
 
     @staticmethod
     def board_not_detected(board_rvec, board_tvec, retval):
