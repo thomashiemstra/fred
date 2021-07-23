@@ -6,22 +6,23 @@ from tf_agents.environments import tf_py_environment
 from tf_agents.trajectories import policy_step
 from time import sleep
 
+from src.global_constants import sac_network_weights
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
 from src.reinforcementlearning.environment.scenario import easy_scenarios, medium_scenarios, hard_scenarios, \
     super_easy_scenarios
+from src.utils.os_utils import get_project_root
 
-checkpoint_dir = 'rs_01_direct_control'
+
 robot_env_no_obstacles = False
 
-current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
-
-train_dir = os.path.join(root_dir, 'train')
+train_dir = sac_network_weights
 tf.compat.v1.enable_v2_behavior()
 global_step = tf.compat.v1.train.create_global_step()
+
+print(get_project_root())
 
 # for debugging
 # tf.config.experimental_run_functions_eagerly(True)
