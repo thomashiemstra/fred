@@ -7,7 +7,7 @@ from cv2 import aruco
 
 from src.camera.util import CaptureConfig, get_default_charuco_board, get_calibrations, aruco_marker_dictionary, \
     charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length, \
-    find_relative_vector_and_rotation, charuco_board_dictionary_2, relativePosition
+    find_relative_vector_and_rotation, charuco_board_dictionary_2
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -109,8 +109,8 @@ class ArucoImageHandler(ImageHandler):
 
         if self.should_draw:
             aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
-            self.draw_marker_axis(frame, marker_rvecs, marker_tvecs, ids)
-            # aruco.drawDetectedMarkers(frame, corners, ids)
+            # self.draw_marker_axis(frame, marker_rvecs, marker_tvecs, ids)
+            aruco.drawDetectedMarkers(frame, corners, ids)
 
     def draw_marker_axis(self, frame, rvec, tvecs, marker_ids):
         for i in range(len(marker_ids)):
