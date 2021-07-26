@@ -1,14 +1,19 @@
 import threading
 
+from tf_agents.environments import tf_py_environment
+
 from src.camera_control.marker_obstacle_relations import get_obstacle_from_marker
+from src.global_constants import sac_network_weights
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.environment.scenario import Scenario
+import tensorflow as tf
 
 import numpy as np
 from time import sleep
 
+from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, initialize_and_restore_train_checkpointer
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -26,6 +31,16 @@ class ObstacleAvoidance:
         self.stopped = False
         self.thread = None
         self._initial_state = None
+        self.tf_agent = None
+
+    def start_sac(self):
+        tf.compat.v1.enable_v2_behavior()
+        global_step = tf.compat.v1.train.create_global_step()
+        with tf.compat.v2.summary.record_if(False):
+            train_dir = sac_network_weights
+            tf_agent = create_agent(self.env, None, False)
+            initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
+        return tf_agent
 
     @synchronized_with_lock("lock")
     def is_stopped(self):
@@ -58,10 +73,10 @@ class ObstacleAvoidance:
 
     def get_env(self, obstacles):
         scenario = Scenario(obstacles, start_pose=self.start_pose, target_pose=self.target_pose)
-        env = RobotEnvWithObstacles(scenarios=[scenario], robot_controller=self.robot)
-        env._update_step_size = 0.001
-        env.set_target_reached_distance(5)
-        env.disable_max_steps_to_take_before_failure()
+        env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=[scenario],
+                                                                      robot_controller=self.robot, is_eval=True))
+        env.pyenv.envs[0].set_target_reached_distance(5)
+        env.pyenv.envs[0].disable_max_steps_to_take_before_failure()
         return env
 
     def enable_servos(self):
@@ -80,6 +95,39 @@ class ObstacleAvoidance:
         self.set_stopped(False)
 
     @synchronized_with_lock("lock")
+    def obstacle_avoidance_sac(self):
+        if self.thread is not None:
+            print("already have thread running, shut it down first!")
+            return
+
+        self.thread = threading.Thread(target=self.__start_sac)
+        self.thread.start()
+
+    def __start_sac(self):
+        if self.env is None:
+            print("first set a scenario based on the image in order to create an env")
+            return
+
+        if self.tf_agent is None:
+            self.tf_agent = self.start_sac()
+
+        state = self._initial_state
+        self.env.pyenv.envs[0].set_angle_control(False)
+        self._update_step_size = 0.01
+
+        while not self.is_stopped():
+            action_step = self.tf_agent.policy.action(state)
+            state = self.env.step(action_step.action)
+            sleep(0.05)
+
+            if state.step_type == 2:
+                if state.reward == 0:
+                    print("stuck")
+                else:
+                    print("goal reached!")
+                break
+
+    @synchronized_with_lock("lock")
     def obstacle_avoidance_gradient_descent(self):
         if self.thread is not None:
             print("already have thread running, shut it down first!")
@@ -94,10 +142,12 @@ class ObstacleAvoidance:
             return
 
         state = self._initial_state
+        self.env.pyenv.envs[0]._update_step_size = 0.001
+        self.env.pyenv.envs[0].set_angle_control(True)
 
         while not self.is_stopped():
             raw_observation = state.observation
-            observation = raw_observation[0]
+            observation = raw_observation[0].numpy()[0]
 
             c1_attr = np.zeros(3)
             c2_attr = 3 * observation[0:3]
@@ -112,9 +162,9 @@ class ObstacleAvoidance:
 
             forces = attractive_forces + repulsive_forces
 
-            current_angles = self.env.current_angles
+            current_angles = self.env.pyenv.envs[0].current_angles
 
-            robot_controller = self.env.robot_controller
+            robot_controller = self.env.pyenv.envs[0].robot_controller
 
             joint_forces = jacobian_transpose_on_f(forces, current_angles,
                                                    robot_controller.robot_config, self.control_point_1_position)
@@ -122,10 +172,14 @@ class ObstacleAvoidance:
             absolute_force = np.linalg.norm(joint_forces)
 
             action = (joint_forces / absolute_force)
-            # sleep(0.01)
+            tensor_action = tf.constant([action[1:6]])
+            sleep(0.001)
 
-            state = self.env.step(action[1:6])
+            state = self.env.step(tensor_action)
 
             if state.step_type == 2:
-                print("goal reached!")
+                if state.reward == 0:
+                    print("stuck")
+                else:
+                    print("goal reached!")
                 break

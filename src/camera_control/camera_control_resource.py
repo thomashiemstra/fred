@@ -221,6 +221,18 @@ def obstacle_avoidance_gradient_descent():
     return jsonify(success=True)
 
 
+@camera_api.route('/obstacle_avoidance_sac', methods=['POST'])
+def obstacle_avoidance_sac():
+    global object_handler
+    with api_lock:
+        if object_handler.get_obstacle_avoidance() is None:
+            print("no obstacle avoidance running!")
+            return jsonify(success=False)
+
+    object_handler.get_obstacle_avoidance().obstacle_avoidance_sac()
+    return jsonify(success=True)
+
+
 @camera_api.route('/stop_obstacle_avoidance', methods=['POST'])
 def stop_obstacle_avoidance():
     global object_handler

@@ -80,6 +80,9 @@ class RobotEnv(py_environment.PyEnvironment):
     def set_target_reached_distance(self, val):
         self._target_reached_distance = val
 
+    def set_angle_control(self, val):
+        self.angle_control = val
+
     def disable_max_steps_to_take_before_failure(self):
         self._max_steps_to_take_before_failure = 10000000
 
