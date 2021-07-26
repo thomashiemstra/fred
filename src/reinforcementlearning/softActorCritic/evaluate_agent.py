@@ -18,7 +18,6 @@ from src.utils.os_utils import get_project_root
 
 robot_env_no_obstacles = False
 
-train_dir = sac_network_weights
 tf.compat.v1.enable_v2_behavior()
 global_step = tf.compat.v1.train.create_global_step()
 
@@ -32,9 +31,10 @@ use_gui = True
 if robot_env_no_obstacles:
     eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnv(use_gui=use_gui,  is_eval=True))
 else:
-    eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=use_gui, scenarios=medium_scenarios, is_eval=True))
+    eval_py_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=use_gui, scenarios=hard_scenarios, is_eval=True))
 
 with tf.compat.v2.summary.record_if(False):
+    train_dir = sac_network_weights
     tf_agent = create_agent(eval_py_env, None, robot_env_no_obstacles)
     initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
 
@@ -42,7 +42,7 @@ num_episodes = 100
 
 
 # eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[3]
-for i in range(1900):
+for i in range(100):
     # eval_py_env.pyenv.envs[0].scenario = scenario.scenarios_no_obstacles[i % 10]
     # eval_py_env.pyenv.envs[0].reverse_scenario = random.choice([True, False])
     reward = 0
