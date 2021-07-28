@@ -6,7 +6,7 @@ from time import sleep
 
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.environment.scenario import Scenario, easy_scenarios, medium_scenarios, hard_scenarios, \
-    super_easy_scenarios
+    super_easy_scenarios, sensible_scenarios
 from src.utils.obstacle import BoxObstacle
 
 control_point_1_position = 11.2
@@ -17,21 +17,22 @@ def reset_to_scenario(env, scenario):
     env.reset()
 
 
-env = RobotEnvWithObstacles(use_gui=True, scenarios=easy_scenarios, angle_control=True)
+env = RobotEnvWithObstacles(use_gui=True, scenarios=sensible_scenarios, angle_control=True)
 
 scenario_id = 2
-
 
 start_pose = Pose(-30, 25, 10)
 end_pose = Pose(30, 25, 10)
 
+scenario = Scenario([BoxObstacle([10, 40, 15], [-5, 35, 0]), BoxObstacle([10, 40, 25], [5, 35, 0])],
+                    start_pose, end_pose),
 
-# env.set_scenario(Scenario([],start_pose, end_pose))
-env.set_scenario(medium_scenarios[3])
+env.set_scenario(Scenario([],start_pose, end_pose))
+
+# env.set_scenario(medium_scenarios[3])
 # env.set_scenario(hard_scenarios[scenario_id])
 
 state = env.reset()
-
 
 steps_taken = 0
 total_reward = 0
@@ -71,6 +72,7 @@ while True:
     state = env.step(action[1:6])
     # print(state.reward)
     total_reward = total_reward + state.reward
+    sleep(0.02)
 
     if state.step_type == 2:
         print("goal reached!")
