@@ -1,13 +1,12 @@
-from tf_agents.specs import array_spec
-
-from src.kinematics.kinematics_utils import Pose
-from src.reinforcementlearning.environment.robot_env import RobotEnv
-from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles, scenarios_obstacles, Scenario
 import numpy as np
-from tf_agents.trajectories import time_step as ts
-
+from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.occupancy_grid_util import create_hilbert_curve_from_obstacles
+from src.reinforcementlearning.environment.robot_env import RobotEnv
+from src.reinforcementlearning.environment.scenario import Scenario, \
+    sensible_scenarios
 from src.utils.obstacle import BoxObstacle
+from tf_agents.specs import array_spec
+from tf_agents.trajectories import time_step as ts
 
 
 class RobotEnvWithObstacles(RobotEnv):
@@ -29,7 +28,7 @@ class RobotEnvWithObstacles(RobotEnv):
                                       shape=(2 ** (2 * self._hilbert_curve_iteration),),
                                       dtype=np.float32, minimum=0, maximum=1, name='hilbert_curve'),
         )
-        self._max_steps_to_take_before_failure = 300
+        self._max_steps_to_take_before_failure = 100
         self._update_step_size = 0.03
         self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y,
@@ -56,13 +55,11 @@ class RobotEnvWithObstacles(RobotEnv):
     def show_occupancy_grid_and_curve(self):
         from src.reinforcementlearning.environment.occupancy_grid_util import create_occupancy_grid_from_obstacles
 
-        len_x = 40
-        len_y = 40
-        curve_iteration = 3
-
-        grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y, grid_size=4)
-        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=len_x, grid_len_y=len_y,
-                                                    iteration=curve_iteration)
+        grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                          grid_len_y=self._grid_len_y, grid_size=4)
+        curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                          grid_len_y=self._grid_len_y,
+                                                          iteration=self._hilbert_curve_iteration)
 
         import matplotlib.pyplot as plt
 
@@ -71,7 +68,7 @@ class RobotEnvWithObstacles(RobotEnv):
         fig = plt.figure()
         ax1 = fig.add_subplot(2, 2, 1)
 
-        reshape = 2 ** curve_iteration
+        reshape = 2 ** self._hilbert_curve_iteration
         ax1.imshow(curve.reshape(reshape, reshape))
         ax2 = fig.add_subplot(2, 2, 2)
         ax2.imshow(grid)
@@ -80,12 +77,14 @@ class RobotEnvWithObstacles(RobotEnv):
 
 
 if __name__ == '__main__':
-    env = RobotEnvWithObstacles(use_gui=True)
+    x = Scenario([BoxObstacle([10, 40, 15], [-10, 35, 0]), BoxObstacle([10, 40, 25], [10, 35, 0])],
+             Pose(-25, 20, 10), Pose(30, 30, 10)),
+    scenario = Scenario([BoxObstacle([10, 10, 30], [-5, 20, 0], alpha=0),
+                         BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
+                        Pose(-25, 20, 10), Pose(30, 30, 10))
+    env = RobotEnvWithObstacles(use_gui=True, scenarios=sensible_scenarios)
     state = env.observation_spec()
     print(state)
-    env._externally_set_scenario = Scenario([BoxObstacle([10, 10, 30], [-5, 35, 0], alpha=0),
-                                             BoxObstacle([10, 20, 20], [5, 35, 0], alpha=np.pi / 4)],
-                                            Pose(-25, 20, 10), Pose(30, 30, 10))
     obs = env.reset()
     env.show_occupancy_grid_and_curve()
     print("hoi")

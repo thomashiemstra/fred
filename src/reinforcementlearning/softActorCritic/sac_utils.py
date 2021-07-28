@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
 import os
 import time
 
@@ -82,6 +83,7 @@ def create_agent(env,
         fc_layer_params=critic_fc_layers,
         kernel_initializer='glorot_uniform'
     )
+
 
     agent = CustomSacAgent(
         time_step_spec,
@@ -192,12 +194,15 @@ def save_checkpoints(global_step_val, train_checkpoint_interval_manager, policy_
                      rb_checkpoint_interval_manager, train_checkpointer, policy_checkpointer, rb_checkpointer,
                      global_step):
     if train_checkpoint_interval_manager.should_trigger(global_step_val):
+        logging.info("saving train")
         train_checkpointer.save(global_step=global_step)
 
     if policy_checkpoint_interval_manager.should_trigger(global_step_val):
+        logging.info("saving policy")
         policy_checkpointer.save(global_step=global_step)
 
     if rb_checkpoint_interval_manager.should_trigger(global_step_val):
+        logging.info("saving replay buffer")
         rb_checkpointer.save(global_step=global_step)
 
 
