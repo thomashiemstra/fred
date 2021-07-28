@@ -19,10 +19,10 @@ class ControlPoint:
 
     @property
     def position(self):
-        self.update_position()
+        self._update_position()
         return self._position
 
-    def update_position(self):
+    def _update_position(self):
         """
         Function used to sync the position of the control point with the robot,
         needs to be called before getting the position of the control point

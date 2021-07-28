@@ -24,7 +24,8 @@ from tf_agents.system import system_multiprocessing as multiprocessing
 from tf_agents.utils import common
 import numpy as np
 
-from src.reinforcementlearning.environment.scenario import easy_scenarios, medium_scenarios, hard_scenarios
+from src.reinforcementlearning.environment.scenario import easy_scenarios, medium_scenarios, hard_scenarios, \
+    sensible_scenarios
 from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, compute_metrics, save_checkpoints, \
     make_and_initialze_checkpointers, print_time_progression, initialize_and_restore_train_checkpointer, create_envs
@@ -66,9 +67,9 @@ def train_eval(checkpoint_dir,
                num_eval_episodes=len(medium_scenarios),
                eval_interval=2000,
                # Params for summaries and logging,
-               train_checkpoint_interval=5000,
-               policy_checkpoint_interval=5000,
-               rb_checkpoint_interval=5000,
+               train_checkpoint_interval=10000,
+               policy_checkpoint_interval=10000,
+               rb_checkpoint_interval=10000,
                log_interval=5000,
                summary_interval=1000,
                summaries_flush_secs=10,
@@ -99,19 +100,20 @@ def train_eval(checkpoint_dir,
     with tf.compat.v2.summary.record_if(
             lambda: tf.math.equal(global_step % summary_interval, 0)):
 
-        # tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=easy_scenarios)
+        tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+                                          scenarios=sensible_scenarios)
 
-        logging.info("difficulty = {}".format(difficulty))
-        if difficulty == 'easy':
-            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
-                                              scenarios=easy_scenarios)
-        elif difficulty == 'med':
-            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
-                                              scenarios=medium_scenarios)
-        elif difficulty == 'hard':
-            tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
-                                              scenarios=hard_scenarios)
-            total_train_steps += total_train_steps
+        # logging.info("difficulty = {}".format(difficulty))
+        # if difficulty == 'easy':
+        #     tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+        #                                       scenarios=easy_scenarios)
+        # elif difficulty == 'med':
+        #     tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+        #                                       scenarios=medium_scenarios)
+        # elif difficulty == 'hard':
+        #     tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, num_parallel_environments,
+        #                                       scenarios=hard_scenarios)
+        #     total_train_steps += total_train_steps
 
         tf_agent = create_agent(tf_env, global_step, robot_env_no_obstacles,
                                 reward_scale_factor=reward_scaling, entropy=entropy)
