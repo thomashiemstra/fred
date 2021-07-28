@@ -1,21 +1,19 @@
 import random
+from copy import copy
 from time import sleep
 
 import numpy as np
 import pybullet as p
-from tf_agents.environments import py_environment
-from tf_agents.specs import array_spec
-from tf_agents.trajectories import time_step as ts
-import random
 from absl import logging
-from copy import copy
-
-from src.reinforcementlearning.environment.robot_env_utils import get_control_point_pos, sphere_2_id, sphere_3_id, \
-    get_attractive_force_world, get_target_points, draw_debug_lines, get_repulsive_forces_world, \
-    get_normalized_current_angles, get_clipped_state
+from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
+    draw_debug_lines, get_repulsive_forces_world, \
+    get_clipped_state
 from src.reinforcementlearning.environment.scenario import scenarios_no_obstacles
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.obstacle import BoxObstacle, SphereObstacle
+from tf_agents.environments import py_environment
+from tf_agents.specs import array_spec
+from tf_agents.trajectories import time_step as ts
 
 
 class RobotEnv(py_environment.PyEnvironment):
@@ -42,10 +40,9 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._update_step_size = 0.02
 
-        self._xyz_update_step_size = 1.5
-        self._alpha_beta_gamma_update_step_size = 0.1
-
-        self._max_steps_to_take_before_failure = 200
+        self._xyz_update_step_size = 5
+        self._alpha_beta_gamma_update_step_size = 0.3
+        self._max_steps_to_take_before_failure = 100
         self._simulation_steps_per_step = 1
         self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
         self._episode_ended = False
@@ -71,7 +68,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._externally_set_scenario = None
         self._traveled_distances = []
         self._times_current_scenario_payed = 0
-        self._target_reached_distance = 15
+        self._target_reached_distance = 25
         self.rewards = []
         self.distance = []
         self._current_pose = None
@@ -97,6 +94,11 @@ class RobotEnv(py_environment.PyEnvironment):
     @staticmethod
     def get_random_id(max_range):
         return random.randint(0, max_range - 1)
+
+    def set_step_size(self, xyz, abg, steps):
+        self._xyz_update_step_size = xyz
+        self._alpha_beta_gamma_update_step_size = abg
+        self._max_steps_to_take_before_failure = steps
 
     def _pick_eval_scenario(self):
         id = self._eval_scenario_id
@@ -234,7 +236,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._current_pose.x = np.clip(new_x, -35, 35)
         self._current_pose.y = np.clip(new_y, y_clip, 50)
-        self._current_pose.z = np.clip(new_z, 0, 50)
+        self._current_pose.z = np.clip(new_z, 9, 50)
         self._current_pose.alpha = np.clip(self._current_pose.alpha + rot_step * action[3], -0.45 * np.pi, 0.45 * np.pi)
         self._current_pose.gamma = np.clip(self._current_pose.gamma + rot_step * action[4], -0.45 * np.pi, 0.45 * np.pi)
 
@@ -249,7 +251,8 @@ class RobotEnv(py_environment.PyEnvironment):
             return self.reset()
 
         if self.angle_control:
-            converted_action = np.append(np.append([0], action), [0])  # angles are not 0 indexed and we don't use the last angle
+            converted_action = np.append(np.append([0], action),
+                                         [0])  # angles are not 0 indexed and we don't use the last angle
             self._current_angles = get_clipped_state(self._current_angles + self._update_step_size * converted_action)
             self._robot_controller.move_servos(self._current_angles)
         else:
@@ -300,17 +303,17 @@ class RobotEnv(py_environment.PyEnvironment):
             return ts.termination(observation, reward=0)
         elif collision:
             self._done = True
-            return ts.termination(observation, reward=-30)
+            return ts.termination(observation, reward=-50)
         if stuck:
             self._done = True
             return ts.termination(observation, reward=0)
         elif total_distance < self._target_reached_distance:
             self._done = True
-            max_speed_bonus = 5
+            max_speed_bonus = 20
             speed_bonus = (-max_speed_bonus / self._max_steps_to_take_before_failure) * self._steps_taken \
                           + max_speed_bonus
 
-            total_reward = 10 + speed_bonus
+            total_reward = 30 + speed_bonus
 
             self._switch_current_scenario_to_done()
             return ts.termination(observation, reward=total_reward)
@@ -339,7 +342,7 @@ class RobotEnv(py_environment.PyEnvironment):
         # Control point 1 is not used for the attractive forces
         attractive_cutoff_dis = 10
         attractive_forces, total_distance = get_attractive_force_world(
-            np.array([c1.position, c2.position, c3.position]),
+            np.array([None, c2.position, c3.position], dtype=object),
             np.array([None, target_point_2, target_point_3], dtype=object),
             attractive_cutoff_distance=attractive_cutoff_dis)
 
@@ -349,7 +352,7 @@ class RobotEnv(py_environment.PyEnvironment):
 
         obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
 
-        repulsive_cutoff_distance = 6
+        repulsive_cutoff_distance = 8
         repulsive_forces = get_repulsive_forces_world(self._robot_body_id, np.array([c1, c2, c3]),
                                                       obstacle_ids, self._physics_client,
                                                       repulsive_cutoff_distance=repulsive_cutoff_distance,
@@ -394,12 +397,6 @@ class RobotEnv(py_environment.PyEnvironment):
         normalized_alpha = self._current_pose.alpha / np.pi
         normalized_gamma = self._current_pose.gamma / np.pi
         return [normalized_x, normalized_y, normalized_z, normalized_alpha, normalized_gamma]
-
-
-    def _get_control_point_positions(self):
-        c2_pos = get_control_point_pos(self._robot_body_id, sphere_2_id)
-        c3_pos = get_control_point_pos(self._robot_body_id, sphere_3_id)
-        return c2_pos, c3_pos
 
     def _advance_simulation(self):
         if self._use_gui:
