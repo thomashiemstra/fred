@@ -25,6 +25,10 @@ class CombinedRobot(AbstractRobotController):
         self.simulated_robot.move_to_pose(pose)
         return self.dynamixel_robot.move_to_pose(pose)
 
+    def move_to_pose_and_give_new_angles(self, pose):
+        self.simulated_robot.move_to_pose_and_give_new_angles(pose)
+        return self.dynamixel_robot.move_to_pose_and_give_new_angles(pose)
+
     def move_servos(self, angles):
         self.simulated_robot.move_servos(angles)
         return self.dynamixel_robot.move_servos(angles)

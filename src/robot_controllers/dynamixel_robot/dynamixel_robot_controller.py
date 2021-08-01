@@ -95,6 +95,11 @@ class DynamixelRobotController(AbstractRobotController):
         time_taken = self.move_servos(angles)
         return recommended_time, time_taken
 
+    def move_to_pose_and_give_new_angles(self, pose):
+        angles = inverse_kinematics(pose, self.robot_config)
+        self.move_servos(angles)
+        return angles
+
     def get_current_gripper_position(self):
         angles = self.get_current_angles()
         _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)

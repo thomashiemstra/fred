@@ -16,6 +16,10 @@ class AbstractRobotController(ABC):
         pass
 
     @abstractmethod
+    def move_to_pose_and_give_new_angles(self, pose):
+        pass
+
+    @abstractmethod
     def move_servos(self, angles):
         pass
 
