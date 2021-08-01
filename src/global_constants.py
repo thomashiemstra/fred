@@ -1,5 +1,7 @@
+import os
+
 from src.kinematics.kinematics_utils import RobotConfig
-from src.utils.os_utils import is_linux
+from src.utils.os_utils import is_linux, get_project_root
 
 dynamixel_robot_arm_port = '/dev/ttyUSB0' if is_linux() else 'COM3'
 # dynamixel_robot_config = RobotConfig(d1=9.1, a2=15.8, d4=21.9, d6=11)
@@ -12,6 +14,8 @@ recommended_max_servo_speed = 4  # rads/sec
 use_simulation = False
 root_dir = None
 
+sac_network_weights = os.path.expanduser(os.path.dirname(get_project_root()) +
+                                         '/src/reinforcementlearning/softActorCritic/checkpoints/rs_01_direct_control/train')
 
 class WorkSpaceLimits:
     radius_min = 15
