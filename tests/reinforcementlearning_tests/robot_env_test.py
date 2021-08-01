@@ -7,20 +7,21 @@ import numpy as np
 
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.environment.scenario import Scenario
+from utils.obstacle import BoxObstacle
 
-scenario = Scenario([], Pose(-25, 35, 10), Pose(25, 35, 10))
+scenario_no_obstacles = Scenario([], Pose(-25, 35, 10), Pose(25, 35, 10))
+scenario_obstacles = Scenario([BoxObstacle([10, 40, 10], [0, 35, 0])], Pose(-25, 35, 10), Pose(25, 35, 10))
 
 
 class TestRobotEnv(unittest.TestCase):
 
     def test_env_no_obs(self):
         env = RobotEnv(use_gui=False)
-        env._externally_set_scenario = scenario
+        env._externally_set_scenario = scenario_no_obstacles
         utils.validate_py_environment(env, episodes=5)
 
-    def test_env_obs(self):
-        env = RobotEnvWithObstacles()
-        env._externally_set_scenario = scenario
+    def test_env_obstacles(self):
+        env = RobotEnvWithObstacles(scenarios=[scenario_obstacles])
         utils.validate_py_environment(env, episodes=5)
 
     def test_initial_observations_normalized(self):
@@ -37,7 +38,7 @@ class TestRobotEnv(unittest.TestCase):
         env = RobotEnv(use_gui=False)
         env.reset()
 
-        simple_action = np.array([-1, 0, 0, 0, 0, 0], dtype=np.float32)
+        simple_action = np.array([-1, 0, 0, 0, 0], dtype=np.float32)
         timestep = env.step(simple_action)
 
         norm_1 = np.linalg.norm(timestep.observation[0:3])

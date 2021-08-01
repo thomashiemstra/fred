@@ -2,14 +2,6 @@ import numpy as np
 from numpy import pi
 import pybullet as p
 
-# Ids of the control points in the urdf robot
-sphere_1_id = 8  # in between frame 3 and the wrist
-sphere_2_id = 7  # wrist (frame 4)
-sphere_3_id = 6  # tip of the gripper
-control_point_ids = np.array([sphere_1_id, sphere_2_id, sphere_3_id])  # todo convert control points to class
-
-control_point_base_radius = 1
-
 
 def get_target_points(target_pose, d6):
     """gives the target 3d location for the control points on the robot

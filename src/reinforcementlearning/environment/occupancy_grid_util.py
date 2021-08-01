@@ -47,21 +47,23 @@ def create_occupancy_grid_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40
 
     scaled_y = np.ceil(grid_len_y/grid_size)
 
-    grid = np.zeros((scaled_x.astype(int), scaled_y.astype(int)))
+    result = np.zeros((scaled_x.astype(int), scaled_y.astype(int)), dtype=np.float32)
+    if obstacles is None:
+        return result
 
-    for grid_x in range(0, grid.shape[0]):
-        for grid_y in range(0, grid.shape[1]):
+    for grid_x in range(0, result.shape[0]):
+        for grid_y in range(0, result.shape[1]):
             x_coordinate = grid_x*grid_size + grid_size/2 - grid_len_x/2
             y_coordinate = grid_y*grid_size + grid_size/2
             point_location = np.array([x_coordinate, y_coordinate])
             intersecting_obstacles = get_obstacles_for_point(point_location, obstacles)
             if intersecting_obstacles.size != 0:
                 height = get_height_tallest_obstacle(intersecting_obstacles)
-                grid[grid_x][grid_y] = min(1.0, height/max_height)
+                result[grid_x][grid_y] = min(1.0, height/max_height)
 
             # print("indices: ({}, {}) coordinates: ({}, {}), intersection_obs: {}".format(grid_x, grid_y, x_coordinate, y_coordinate, intersecting_obstacles))
 
-    return grid
+    return result
 
 
 def create_hilbert_curve_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40, iteration=3):

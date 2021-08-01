@@ -19,10 +19,10 @@ class ControlPoint:
 
     @property
     def position(self):
-        self.update_position()
+        self._update_position()
         return self._position
 
-    def update_position(self):
+    def _update_position(self):
         """
         Function used to sync the position of the control point with the robot,
         needs to be called before getting the position of the control point
@@ -74,8 +74,8 @@ class SimulatedRobotController(AbstractRobotController):
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
-        recommended_time = 0 #get_recommended_wait_time(self._current_angles, angles)
         self.move_servos(angles)
+        recommended_time = 0
         return recommended_time, 0
 
     def move_to_pose_and_give_new_angles(self, pose):
