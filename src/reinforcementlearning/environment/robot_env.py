@@ -4,7 +4,6 @@ from time import sleep
 
 import numpy as np
 import pybullet as p
-from absl import logging
 from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
     draw_debug_lines, get_repulsive_forces_world, \
     get_clipped_state
@@ -40,11 +39,14 @@ class RobotEnv(py_environment.PyEnvironment):
 
         self._update_step_size = 0.02
 
-        self._xyz_update_step_size = 5
-        self._alpha_beta_gamma_update_step_size = 0.3
+        self._xyz_update_step_size = 3
+        self._alpha_beta_gamma_update_step_size = 0.1
         self._max_steps_to_take_before_failure = 100
-        self._simulation_steps_per_step = 1
-        self._wait_time_per_step = self._simulation_steps_per_step / 240  # Pybullet simulations run at 240HZ
+        self._simulation_steps_per_step = 10
+
+        # Pybullet simulations run at 240HZ, it takes about 16 ms to run the neural network (4 simulation steps).
+        # In order for the simulation  and the real robot to behave the same we should wait the same amount of time
+        self._wait_time_per_step = (self._simulation_steps_per_step - 4) / 240
         self._episode_ended = False
         if robot_controller is None:
             self._robot_controller = start_simulated_robot(use_gui)
@@ -197,7 +199,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._create_visual_target_spheres(self._target_pose)
 
         self._robot_controller.reset_to_pose(self._start_pose)
-        self._advance_simulation()
+        self._advance_simulation(0)
 
         self._current_angles = self._robot_controller.get_current_angles()
         observation, self._closest_distance_so_far = self._get_observations()
@@ -226,16 +228,8 @@ class RobotEnv(py_environment.PyEnvironment):
         new_y = self._current_pose.y + xyz_step * action[1]
         new_z = self._current_pose.z + xyz_step * action[2]
 
-        # very carefully tuned numbers, do not touch!
-        y_clip = 17
-        if new_z > 26:
-            y_clip = 10
-        elif new_z > 17.5:
-            z_distance_to_base = new_z - 10
-            y_clip = np.clip(np.sqrt(17 * 17 - z_distance_to_base * z_distance_to_base), 10, 50)
-
         self._current_pose.x = np.clip(new_x, -35, 35)
-        self._current_pose.y = np.clip(new_y, y_clip, 50)
+        self._current_pose.y = np.clip(new_y, 20, 50)
         self._current_pose.z = np.clip(new_z, 9, 50)
         self._current_pose.alpha = np.clip(self._current_pose.alpha + rot_step * action[3], -0.45 * np.pi, 0.45 * np.pi)
         self._current_pose.gamma = np.clip(self._current_pose.gamma + rot_step * action[4], -0.45 * np.pi, 0.45 * np.pi)
@@ -250,25 +244,26 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._done:
             return self.reset()
 
+        recommended_time = 0
+        prev_x, prev_y, prev_z = 0, 0, 0
         if self.angle_control:
             converted_action = np.append(np.append([0], action),
                                          [0])  # angles are not 0 indexed and we don't use the last angle
             self._current_angles = get_clipped_state(self._current_angles + self._update_step_size * converted_action)
             self._robot_controller.move_servos(self._current_angles)
         else:
+            prev_x, prev_y, prev_z = self._current_pose.x, self._current_pose.y, self._current_pose.z
             self._update_current_pose_and_clip(action)
-            self._current_angles = self._robot_controller.move_to_pose_and_give_new_angles(self._current_pose)
+            recommended_time, _ = self._robot_controller.move_to_pose(self._current_pose)
 
-            _, _, _, _, p6 = self._robot_controller.forward_position_kinematics(self.current_angles)
-            self._current_pose.x = p6[0]
-            self._current_pose.y = p6[1]
-            self._current_pose.z = p6[2]
+        self._advance_simulation(recommended_time)
+        self._sync_position()
 
-        self._advance_simulation()
+        new_x, new_y, new_z = self._current_pose.x, self._current_pose.y, self._current_pose.z
+        distance_moved = np.array([new_x - prev_x, new_y - prev_y, new_z - prev_z])
 
         contact_points = p.getContactPoints(bodyA=self._robot_body_id, physicsClientId=self._physics_client)
         collision = contact_points != ()
-        # print("collision: {}".format(collision))
 
         observation, total_distance = self._get_observations()
         self._traveled_distances.append(total_distance)
@@ -279,7 +274,7 @@ class RobotEnv(py_environment.PyEnvironment):
             extra_distance_closed_this_step = self._closest_distance_so_far - total_distance
             self._closest_distance_so_far = total_distance
 
-        reward = self._get_reward(extra_distance_closed_this_step, total_distance, action)
+        reward = self._get_reward(extra_distance_closed_this_step, total_distance, distance_moved)
 
         self.rewards.append(reward)
         self.distance.append(total_distance)
@@ -288,11 +283,17 @@ class RobotEnv(py_environment.PyEnvironment):
         self._steps_taken += 1
         return self._current_time_step
 
+    def _sync_position(self):
+        c1, c2, c3 = self._robot_controller.control_points
+        self._current_pose.x = c3.position[0]
+        self._current_pose.y = c3.position[1]
+        self._current_pose.z = c3.position[2]
+
     @staticmethod
-    def _get_reward(extra_distance_closed_this_step, total_distance, action):
+    def _get_reward(extra_distance_closed_this_step, total_distance, delta_distance):
         reward = extra_distance_closed_this_step
 
-        # effort = np.sum(action * action) * 0.01
+        # effort = np.sum(delta_distance * delta_distance) * 0.05
         # reward -= effort
 
         return reward
@@ -300,45 +301,44 @@ class RobotEnv(py_environment.PyEnvironment):
     def _get_current_time_step(self, collision, observation, total_distance, reward, stuck):
         if self._steps_taken > self._max_steps_to_take_before_failure:
             self._done = True
-            return ts.termination(observation, reward=0)
+            return ts.termination(observation, reward=0.0)
         elif collision:
             self._done = True
             return ts.termination(observation, reward=-50)
         if stuck:
             self._done = True
-            return ts.termination(observation, reward=0)
+            return ts.termination(observation, reward=0.0)
         elif total_distance < self._target_reached_distance:
             self._done = True
-            max_speed_bonus = 20
+            max_speed_bonus = 50
             speed_bonus = (-max_speed_bonus / self._max_steps_to_take_before_failure) * self._steps_taken \
                           + max_speed_bonus
 
-            total_reward = 30 + speed_bonus
+            total_reward = 50 + speed_bonus
 
             self._switch_current_scenario_to_done()
-            return ts.termination(observation, reward=total_reward)
+            return ts.termination(observation, reward=float(total_reward))
         else:
             self._done = False
-            return ts.transition(observation, reward=reward, discount=1.0)
+            return ts.transition(observation, reward=float(reward), discount=1.0)
 
     def _switch_current_scenario_to_done(self):
         if self._is_eval or self._doing_already_completed_scenario:
             return
-        logging.info("completed a scenario!")
+        # logging.info("completed a scenario!")
         del self._non_completed_scenarios[self._current_scenario_id]
         self._completed_scenarios.append(self._current_scenario)
 
     @staticmethod
     def _is_stuck(total_distance, traveled_distances):
-        if len(traveled_distances) > 250:
-            return abs(traveled_distances[-200] - traveled_distances[-1]) < 1
+        # if len(traveled_distances) > 50:
+        #     return abs(traveled_distances[-30] - traveled_distances[-1]) < 3
         return False
 
     def _get_observations(self):
         c1, c2, c3 = self._robot_controller.control_points
 
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
-
         # Control point 1 is not used for the attractive forces
         attractive_cutoff_dis = 10
         attractive_forces, total_distance = get_attractive_force_world(
@@ -398,9 +398,14 @@ class RobotEnv(py_environment.PyEnvironment):
         normalized_gamma = self._current_pose.gamma / np.pi
         return [normalized_x, normalized_y, normalized_z, normalized_alpha, normalized_gamma]
 
-    def _advance_simulation(self):
+    def _advance_simulation(self, recommended_time):
+        # for _ in range(self._simulation_steps_per_step):
+        #     p.stepSimulation(self._physics_client)
         if self._use_gui:
-            sleep(self._wait_time_per_step)
+            if recommended_time == 0:
+                sleep(self._wait_time_per_step)
+            else:
+                sleep(recommended_time)
         else:
             for _ in range(self._simulation_steps_per_step):
                 p.stepSimulation(self._physics_client)

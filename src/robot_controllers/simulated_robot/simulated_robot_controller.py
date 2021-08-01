@@ -74,8 +74,8 @@ class SimulatedRobotController(AbstractRobotController):
 
     def move_to_pose(self, pose):
         angles = inverse_kinematics(pose, self.robot_config)
-        recommended_time = 0 #get_recommended_wait_time(self._current_angles, angles)
         self.move_servos(angles)
+        recommended_time = 0
         return recommended_time, 0
 
     def move_to_pose_and_give_new_angles(self, pose):

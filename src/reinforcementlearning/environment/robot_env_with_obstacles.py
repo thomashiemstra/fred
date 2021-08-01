@@ -1,10 +1,12 @@
 import numpy as np
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.occupancy_grid_util import create_hilbert_curve_from_obstacles
+from src.reinforcementlearning.environment.occupancy_grid_util import create_occupancy_grid_from_obstacles
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.scenario import Scenario, \
     sensible_scenarios
 from src.utils.obstacle import BoxObstacle
+from tf_agents.environments import tf_py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
@@ -21,42 +23,36 @@ class RobotEnvWithObstacles(RobotEnv):
         self._hilbert_curve_iteration = 3
         self._grid_len_x = 40
         self._grid_len_y = 40
-        self._observation_spec = (array_spec.BoundedArraySpec(
-            shape=(20,),
-            dtype=np.float32, minimum=-1, maximum=1, name='observation'),
-                                  array_spec.BoundedArraySpec(
-                                      shape=(2 ** (2 * self._hilbert_curve_iteration),),
-                                      dtype=np.float32, minimum=0, maximum=1, name='hilbert_curve'),
-        )
-        self._max_steps_to_take_before_failure = 100
-        self._update_step_size = 0.03
-        self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
-                                                          grid_len_y=self._grid_len_y,
-                                                          iteration=self._hilbert_curve_iteration)
+        self._grid_size = 2
+        self._observation_spec = {
+            'observation': array_spec.BoundedArraySpec(shape=(20,), dtype=np.float32, minimum=-2, maximum=2),
+            'grid': array_spec.BoundedArraySpec((20, 20, 1), np.float32, minimum=0, maximum=1)
+        }
+        self._grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                          grid_len_y=self._grid_len_y, grid_size=self._grid_size)
 
     def _reset(self):
         super(RobotEnvWithObstacles, self)._reset()
-        self._curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
-                                                          grid_len_y=self._grid_len_y,
-                                                          iteration=self._hilbert_curve_iteration)
+        self._grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
+                                                          grid_len_y=self._grid_len_y, grid_size=self._grid_size)
         observation, _ = self._get_observations()
         return ts.restart(observation)
 
     def _get_observations(self):
         no_obstacle_obs, total_distance = super()._get_observations()
 
-        curve = self._curve
+        grid = self._grid
 
-        total_observation = [np.array(no_obstacle_obs, dtype=np.float32),
-                             np.array(np.array(curve.tolist()), dtype=np.float32)]
+        total_observation = {
+            'observation': np.array(no_obstacle_obs, dtype=np.float32),
+            'grid': np.expand_dims(grid, axis=2)
+        }
 
         return total_observation, total_distance
 
     def show_occupancy_grid_and_curve(self):
-        from src.reinforcementlearning.environment.occupancy_grid_util import create_occupancy_grid_from_obstacles
-
         grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
-                                                          grid_len_y=self._grid_len_y, grid_size=4)
+                                                          grid_len_y=self._grid_len_y, grid_size=self._grid_size)
         curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y,
                                                           iteration=self._hilbert_curve_iteration)
@@ -86,8 +82,9 @@ if __name__ == '__main__':
     state = env.observation_spec()
     print(state)
     obs = env.reset()
+    print(obs)
     env.show_occupancy_grid_and_curve()
-    print("hoi")
+    # print("hoi")
 
 # ░░░░░░░█▐▓▓░████▄▄▄█▀▄▓▓▓▌█ Epic code
 # ░░░░░▄█▌▀▄▓▓▄▄▄▄▀▀▀▄▓▓▓▓▓▌█

@@ -17,17 +17,9 @@ def reset_to_scenario(env, scenario):
     env.reset()
 
 
-env = RobotEnvWithObstacles(use_gui=True, scenarios=sensible_scenarios, angle_control=True)
+env = RobotEnvWithObstacles(use_gui=True, scenarios=[sensible_scenarios[3]], angle_control=True, is_eval=True)
 
-scenario_id = 2
 
-start_pose = Pose(-30, 25, 10)
-end_pose = Pose(30, 25, 10)
-
-scenario = Scenario([BoxObstacle([10, 40, 15], [-5, 35, 0]), BoxObstacle([10, 40, 25], [5, 35, 0])],
-                    start_pose, end_pose),
-
-env.set_scenario(Scenario([],start_pose, end_pose))
 
 # env.set_scenario(medium_scenarios[3])
 # env.set_scenario(hard_scenarios[scenario_id])
@@ -39,7 +31,7 @@ total_reward = 0
 
 while True:
     raw_observation = state.observation
-    observation = raw_observation[0]
+    observation = raw_observation['observation']
 
     c1_attr = np.zeros(3)
     c2_attr = observation[0:3]

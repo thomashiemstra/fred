@@ -84,7 +84,6 @@ def create_agent(env,
         kernel_initializer='glorot_uniform'
     )
 
-
     agent = CustomSacAgent(
         time_step_spec,
         action_spec,
@@ -119,9 +118,13 @@ def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles,
         )
         return preprocessing_layer, None
     else:
-        preprocessing_layer = (
-            tf.keras.layers.Dense(actor_preprocessing_layer), tf.keras.layers.Dense(actor_preprocessing_layer_curve)
-        )
+        preprocessing_layer = {
+            'observation': tf.keras.layers.Dense(actor_preprocessing_layer),
+            'grid': tf.keras.models.Sequential([tf.keras.layers.Conv2D(8, (4, 4), 2), # , input_shape=(20, 20, 1)
+                                                tf.keras.layers.Conv2D(16, (2, 2), 1),
+                                                tf.keras.layers.Flatten()])
+        }
+
         return preprocessing_layer, tf.keras.layers.Concatenate(axis=-1)
 
 
@@ -131,26 +134,31 @@ def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
                                                  critic_preprocessing_layer_action):
     if robot_env_no_obstacles:
         preprocessing_layer = (
-            tf.keras.layers.Dense(critic_preprocessing_layer),          # 20 observations
-            tf.keras.layers.Dense(critic_preprocessing_layer_action)    # 5 actions
+            tf.keras.layers.Dense(critic_preprocessing_layer),  # 20 observations
+            tf.keras.layers.Dense(critic_preprocessing_layer_action)  # 5 actions
         )
         return preprocessing_layer
     else:
         preprocessing_layer = (
-            (tf.keras.layers.Dense(critic_preprocessing_layer),         # 20 normal observations
-             tf.keras.layers.Dense(critic_preprocessing_layer_curve)),  # 64 hilbert curve observations
-            tf.keras.layers.Dense(critic_preprocessing_layer_action)    # 5 actions
+            {
+                'observation': tf.keras.layers.Dense(critic_preprocessing_layer),
+                'grid': tf.keras.models.Sequential([tf.keras.layers.Conv2D(8, (4, 4), 2),
+                                                    tf.keras.layers.Conv2D(16, (2, 2), 1),
+                                                    tf.keras.layers.Flatten()])
+            },
+            tf.keras.layers.Dense(critic_preprocessing_layer_action)
         )
+
         return preprocessing_layer
 
 
-def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=None):
+def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=None, train_scenarios=None):
     if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
         if robot_env_no_obstacles:
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
         else:
-            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios))
+            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios+train_scenarios))
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios, is_eval=True))
 
         return tf_env, eval_tf_env
