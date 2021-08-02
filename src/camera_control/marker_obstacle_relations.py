@@ -11,6 +11,7 @@ BLUE_COLOR = [0, 0, 1, 1]
 
 block_ids = [6, 7, 10, 11, 12, 13]
 
+
 def get_rotation_around_z_from_marker(found_marker):
     matrix = found_marker.relative_rotation_matrix
     return math.atan2(matrix[1][0], matrix[0][0])
