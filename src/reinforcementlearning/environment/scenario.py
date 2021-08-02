@@ -266,6 +266,27 @@ sensible_scenarios = [
 
     Scenario([BoxObstacle([30, 15, 20], [0, 22, 0]),
               BoxObstacle([10, 10, 40], [0, 32, 0])],
+             start_pose, end_pose),
+
+    Scenario([BoxObstacle([20, 10, 20], [0, 20, 0])],
+             start_pose, end_pose),
+
+    Scenario([BoxObstacle([10, 30, 20], [0, 30, 0], alpha=np.pi / 4)],
+             start_pose, end_pose),
+
+    Scenario([BoxObstacle([10, 40, 25], [10, 35, 0]),
+              BoxObstacle([30, 10, 15], [-10, 35, 0])],
+             start_pose, end_pose),
+
+    Scenario([BoxObstacle([10, 30, 25], [-10, 35, 0]),
+              BoxObstacle([30, 10, 15], [10, 40, 0])],
+             start_pose, end_pose),
+
+    Scenario([BoxObstacle([8, 23, 21], [0, 32, 0])],
+             start_pose, end_pose),
+
+    Scenario([BoxObstacle([8, 23, 21], [0, 35, 0]),
+              BoxObstacle([19, 5, 15], [0, 20, 0])],
              start_pose, end_pose)
 ]
 
@@ -285,6 +306,12 @@ train_scenarios = [
               BoxObstacle([10, 10, 40], [5, 40, 0]),
               BoxObstacle([40, 10, 20], [-20, 40, 0])],
              Pose(0, 25, 35), end_pose)
+]
+
+whoop = [
+    Scenario([BoxObstacle([8, 23, 21], [0, 35, 0]),
+              BoxObstacle([19, 5, 15], [0, 20, 0])],
+             start_pose, end_pose)
 ]
 
 if __name__ == '__main__':
