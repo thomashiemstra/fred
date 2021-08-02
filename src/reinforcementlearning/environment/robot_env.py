@@ -25,7 +25,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(5,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(20,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+            shape=(17,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
 
         scenarios = scenarios_no_obstacles if scenarios is None else scenarios
 
@@ -99,6 +99,9 @@ class RobotEnv(py_environment.PyEnvironment):
     @staticmethod
     def get_random_id(max_range):
         return random.randint(0, max_range - 1)
+
+    def start_recording(self, filename):
+        p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, filename)
 
     def set_step_size(self, xyz, abg, steps):
         self._xyz_update_step_size = xyz
@@ -370,7 +373,7 @@ class RobotEnv(py_environment.PyEnvironment):
         total_observation = []
 
         # attractive forces[0] is for a control point which is not considered for the attractive forces
-        total_observation += self._get_normalized_vector_as_list(attractive_forces[1])
+        # total_observation += self._get_normalized_vector_as_list(attractive_forces[1])
         total_observation += self._get_normalized_vector_as_list(attractive_forces[2])
 
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[0])

@@ -6,7 +6,6 @@ from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.scenario import Scenario, \
     sensible_scenarios
 from src.utils.obstacle import BoxObstacle
-from tf_agents.environments import tf_py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
@@ -23,10 +22,10 @@ class RobotEnvWithObstacles(RobotEnv):
         self._hilbert_curve_iteration = 3
         self._grid_len_x = 40
         self._grid_len_y = 40
-        self._grid_size = 2
+        self._grid_size = 4
         self._observation_spec = {
-            'observation': array_spec.BoundedArraySpec(shape=(20,), dtype=np.float32, minimum=-2, maximum=2),
-            'grid': array_spec.BoundedArraySpec((20, 20, 1), np.float32, minimum=0, maximum=1)
+            'observation': array_spec.BoundedArraySpec(shape=(17,), dtype=np.float32, minimum=-2, maximum=2),
+            'grid': array_spec.BoundedArraySpec((10, 10, 1), np.float32, minimum=0, maximum=1)
         }
         self._grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y, grid_size=self._grid_size)

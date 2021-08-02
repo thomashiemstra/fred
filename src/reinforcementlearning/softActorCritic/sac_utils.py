@@ -34,13 +34,13 @@ def normal_projection_net(action_spec):
 def create_agent(env,
                  global_step,
                  robot_env_no_obstacles,
-                 actor_fc_layers=(128, 64),
-                 actor_preprocessing_layer=128,
-                 actor_preprocessing_layer_curve=128,
-                 critic_preprocessing_layer=128,
-                 critic_preprocessing_layer_curve=128,
+                 actor_fc_layers=(32,),
+                 actor_preprocessing_layer=64,
+                 actor_preprocessing_layer_curve=64,
+                 critic_preprocessing_layer=64,
+                 critic_preprocessing_layer_curve=64,
                  critic_preprocessing_layer_action=32,
-                 critic_fc_layers=(128, 64),
+                 critic_fc_layers=(32,),
                  target_update_tau=0.005,
                  target_update_period=1,
                  actor_learning_rate=3e-4,
@@ -120,9 +120,9 @@ def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles,
     else:
         preprocessing_layer = {
             'observation': tf.keras.layers.Dense(actor_preprocessing_layer),
-            'grid': tf.keras.models.Sequential([tf.keras.layers.Conv2D(8, (4, 4), 2), # , input_shape=(20, 20, 1)
-                                                tf.keras.layers.Conv2D(16, (2, 2), 1),
-                                                tf.keras.layers.Flatten()])
+            'grid': tf.keras.models.Sequential([tf.keras.layers.Conv2D(4, (2, 2), 1),
+                                                tf.keras.layers.Flatten(),
+                                                tf.keras.layers.Dense(64)])
         }
 
         return preprocessing_layer, tf.keras.layers.Concatenate(axis=-1)
@@ -142,9 +142,9 @@ def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
         preprocessing_layer = (
             {
                 'observation': tf.keras.layers.Dense(critic_preprocessing_layer),
-                'grid': tf.keras.models.Sequential([tf.keras.layers.Conv2D(8, (4, 4), 2),
-                                                    tf.keras.layers.Conv2D(16, (2, 2), 1),
-                                                    tf.keras.layers.Flatten()])
+                'grid': tf.keras.models.Sequential([tf.keras.layers.Conv2D(4, (2, 2), 1),
+                                                    tf.keras.layers.Flatten(),
+                                                    tf.keras.layers.Dense(64)])
             },
             tf.keras.layers.Dense(critic_preprocessing_layer_action)
         )
@@ -158,7 +158,7 @@ def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=Non
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
         else:
-            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios+train_scenarios))
+            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios + train_scenarios))
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios, is_eval=True))
 
         return tf_env, eval_tf_env
