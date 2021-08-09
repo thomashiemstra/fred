@@ -17,7 +17,12 @@ def reset_to_scenario(env, scenario):
     env.reset()
 
 
-env = RobotEnvWithObstacles(use_gui=True, scenarios=[sensible_scenarios[3]], angle_control=True, is_eval=True)
+start_pose = Pose(-30, 25, 10)
+end_pose = Pose(30, 25, 10)
+scenario = Scenario([BoxObstacle([10, 40, 30], [0, 40, 0])],
+             start_pose, end_pose)
+
+env = RobotEnvWithObstacles(use_gui=True, scenarios=[scenario], angle_control=True, is_eval=True)
 
 
 
@@ -30,20 +35,17 @@ steps_taken = 0
 total_reward = 0
 
 while True:
+
     raw_observation = state.observation
     observation = raw_observation['observation']
 
     c1_attr = np.zeros(3)
-    c2_attr = observation[0:3]
-    c3_attr = observation[3:6]
+    c2_attr = np.zeros(3)
+    c3_attr = observation[0:3]
 
-    # if steps_taken < 15:
-    #     c2_attr += [0, -0.4, 0.5]
-    #     c3_attr += [0, -0.4, 0.5]
-
-    c1_rep = 4 * observation[6:9]
-    c2_rep = 4 * observation[9:12]
-    c3_rep = 4 * observation[12:15]
+    c1_rep = 4 * observation[3:6]
+    c2_rep = 4 * observation[6:9]
+    c3_rep = 4 * observation[9:12]
 
     attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
     repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
