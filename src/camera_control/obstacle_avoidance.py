@@ -27,6 +27,7 @@ class ObstacleAvoidance:
         self.start_pose = Pose(-25, 35, 10)
         self.target_pose = Pose(25, 35, 10)
         self.env = None
+        self.tf_env = None
         self.control_point_1_position = 11.2
         self.stopped = False
         self.thread = None
@@ -38,7 +39,7 @@ class ObstacleAvoidance:
         global_step = tf.compat.v1.train.create_global_step()
         with tf.compat.v2.summary.record_if(False):
             train_dir = sac_network_weights
-            tf_agent = create_agent(self.env, None, False)
+            tf_agent = create_agent(self.tf_env, None, False)
             initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
         return tf_agent
 
@@ -56,28 +57,33 @@ class ObstacleAvoidance:
         obstacles = []
         for marker in detected_markers:
             obstacle = get_obstacle_from_marker(marker)
-            obstacles.append(obstacle)
+            if obstacle is not None:
+                obstacles.append(obstacle)
 
         return obstacles
 
     @synchronized_with_lock("lock")
     def create_and_set_scenario(self):
-        if self.env is not None:
-            self.env.close()
+        if self.tf_env is not None:
+            self.tf_env.close()
 
         self.set_stopped(False)
 
         obstacles = self._find_obstacles()
-        self.env = self.get_env(obstacles)
-        self._initial_state = self.env.reset()
+        self.env, self.tf_env = self.get_env(obstacles)
+        self._initial_state = self.tf_env.reset()
 
     def get_env(self, obstacles):
         scenario = Scenario(obstacles, start_pose=self.start_pose, target_pose=self.target_pose)
-        env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=[scenario],
-                                                                      robot_controller=self.robot, is_eval=True))
-        env.pyenv.envs[0].set_target_reached_distance(5)
-        env.pyenv.envs[0].disable_max_steps_to_take_before_failure()
-        return env
+        env = RobotEnvWithObstacles(scenarios=[scenario],
+                                    robot_controller=self.robot, is_eval=True,
+                                    use_gui=True)
+        env.set_target_reached_distance(10)
+        env.disable_max_steps_to_take_before_failure()
+        env.set_xyz_update_step_size(1)
+
+        tf_env = tf_py_environment.TFPyEnvironment(env)
+        return env, tf_env
 
     def enable_servos(self):
         self.robot.enable_servos()
@@ -104,7 +110,7 @@ class ObstacleAvoidance:
         self.thread.start()
 
     def __start_sac(self):
-        if self.env is None:
+        if self.tf_env is None:
             print("first set a scenario based on the image in order to create an env")
             return
 
@@ -112,13 +118,11 @@ class ObstacleAvoidance:
             self.tf_agent = self.start_sac()
 
         state = self._initial_state
-        self.env.pyenv.envs[0].set_angle_control(False)
-        self._update_step_size = 0.01
+        self.env.set_angle_control(False)
 
         while not self.is_stopped():
             action_step = self.tf_agent.policy.action(state)
-            state = self.env.step(action_step.action)
-            sleep(0.05)
+            state = self.tf_env.step(action_step.action)
 
             if state.step_type == 2:
                 if state.reward == 0:
@@ -137,34 +141,33 @@ class ObstacleAvoidance:
         self.thread.start()
 
     def __start_gradient_descent(self):
-        if self.env is None:
+        if self.tf_env is None:
             print("first set a scenario based on the image in order to create an env")
             return
 
         state = self._initial_state
-        self.env.pyenv.envs[0]._update_step_size = 0.001
-        self.env.pyenv.envs[0].set_angle_control(True)
+        self.env.set_angle_control(True)
 
         while not self.is_stopped():
             raw_observation = state.observation
-            observation = raw_observation[0].numpy()[0]
+            observation = raw_observation['observation'].numpy()[0]
 
             c1_attr = np.zeros(3)
-            c2_attr = 3 * observation[0:3]
-            c3_attr = observation[3:6]
+            c2_attr = np.zeros(3)
+            c3_attr = observation[0:3]
 
-            c1_rep = 4 * observation[6:9]
-            c2_rep = 4 * observation[9:12]
-            c3_rep = 4 * observation[12:15]
+            c1_rep = 4 * observation[3:6]
+            c2_rep = 4 * observation[6:9]
+            c3_rep = 4 * observation[9:12]
 
             attractive_forces = np.stack((c1_attr, c2_attr, c3_attr))
             repulsive_forces = np.stack((c1_rep, c2_rep, c3_rep))
 
             forces = attractive_forces + repulsive_forces
 
-            current_angles = self.env.pyenv.envs[0].current_angles
+            current_angles = self.tf_env.pyenv.envs[0].current_angles
 
-            robot_controller = self.env.pyenv.envs[0].robot_controller
+            robot_controller = self.tf_env.pyenv.envs[0].robot_controller
 
             joint_forces = jacobian_transpose_on_f(forces, current_angles,
                                                    robot_controller.robot_config, self.control_point_1_position)
@@ -173,9 +176,8 @@ class ObstacleAvoidance:
 
             action = (joint_forces / absolute_force)
             tensor_action = tf.constant([action[1:6]])
-            sleep(0.001)
 
-            state = self.env.step(tensor_action)
+            state = self.tf_env.step(tensor_action)
 
             if state.step_type == 2:
                 if state.reward == 0:

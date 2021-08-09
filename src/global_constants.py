@@ -15,7 +15,9 @@ use_simulation = False
 root_dir = None
 
 sac_network_weights = os.path.expanduser(os.path.dirname(get_project_root()) +
-                                         '/src/reinforcementlearning/softActorCritic/checkpoints/rs_01_direct_control/train')
+                                         '/src/reinforcementlearning/softActorCritic/'
+                                         'checkpoints/rs_01_grid_new_network/train')
+
 
 class WorkSpaceLimits:
     radius_min = 15
