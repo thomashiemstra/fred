@@ -308,7 +308,7 @@ train_scenarios = [
              Pose(0, 25, 35), end_pose)
 ]
 
-whoop = [
+test = [
     Scenario([BoxObstacle([8, 23, 21], [0, 35, 0]),
               BoxObstacle([19, 5, 15], [0, 20, 0])],
              start_pose, end_pose)
