@@ -4,8 +4,9 @@ import cv2
 import jsonpickle
 import numpy as np
 
-from src.camera.util import charuco_board_dictionary, aruco_marker_dictionary, get_default_charuco_board
-from src.camera.image_handlers import ArucoImageHandler
+from src.camera.util import charuco_board_dictionary, aruco_marker_dictionary, get_default_charuco_board, \
+    charuco_base_board_square_length, charuco__baseboard_marker_length, charuco_board_dictionary_2
+from src.camera.image_handlers import ArucoImageHandler, BoardToBoardImageHandler
 
 
 class ArucoImageHandlerTest(unittest.TestCase):
@@ -28,7 +29,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
     def test_board_and_markers(self):
         # given
         frame = self.get_image('resources/image_with_markers_and_board.png')
-        aruco_image_handler = self.get_default_image_handler()
+        aruco_image_handler = self.get_default_aruco_image_handler()
 
         # when
         self.handle_frame(aruco_image_handler, frame)
@@ -47,7 +48,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
     def test_board_no_markers(self):
         # given
         frame = self.get_image('resources/image_only_board.png')
-        aruco_image_handler = self.get_default_image_handler()
+        aruco_image_handler = self.get_default_aruco_image_handler()
 
         # when
         self.handle_frame(aruco_image_handler, frame)
@@ -59,7 +60,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
     def test_no_board(self):
         # given
         frame = self.get_image('resources/image_no_board.png')
-        aruco_image_handler = self.get_default_image_handler()
+        aruco_image_handler = self.get_default_aruco_image_handler()
 
         # when
         self.handle_frame(aruco_image_handler, frame)
@@ -68,10 +69,61 @@ class ArucoImageHandlerTest(unittest.TestCase):
         detected_makers = aruco_image_handler.get_detected_markers()
         self.assertEqual([], detected_makers, "should not have gotten detected markers")
 
-    def get_default_image_handler(self):
+    def test_B2BeHandler_2_boards(self):
+        # given
+        frame = self.get_image('resources/2_boards.png')
+        handler = self.get_default_board_to_board_image_handler()
+
+        # when
+        self.handle_frame(handler, frame)
+
+        # then
+        relative_matrix, relative_tvec = handler.get_revlative_vecs()
+        self.assertIsNotNone(relative_matrix, "should have gotten a relative rotation matrix")
+        self.assertIsNotNone(relative_tvec, "should have gotten a relative rotation vector")
+
+    def test_B2BeHandler_1_boards(self):
+        # given
+        frame = self.get_image('resources/image_only_board.png')
+        handler = self.get_default_board_to_board_image_handler()
+
+        # when
+        self.handle_frame(handler, frame)
+
+        # then
+        relative_matrix, relative_tvec = handler.get_revlative_vecs()
+        self.assertIsNone(relative_matrix, "should have not gotten a relative rotation matrix")
+        self.assertIsNone(relative_tvec, "should have not gotten a relative rotation vector")
+
+    def test_B2BeHandler_no_boards(self):
+        # given
+        frame = self.get_image('resources/image_no_board.png')
+        handler = self.get_default_board_to_board_image_handler()
+
+        # when
+        self.handle_frame(handler, frame)
+
+        # then
+        relative_matrix, relative_tvec = handler.get_revlative_vecs()
+        self.assertIsNone(relative_matrix, "should have not gotten a relative rotation matrix")
+        self.assertIsNone(relative_tvec, "should have not gotten a relative rotation vector")
+
+    def get_default_aruco_image_handler(self):
         aruco_marker_length = 2.65
         return ArucoImageHandler(get_default_charuco_board(), self.cameraMatrix, self.distCoeffs,
-                                                aruco_marker_dictionary, charuco_board_dictionary, aruco_marker_length)
+                                 aruco_marker_dictionary, charuco_board_dictionary, aruco_marker_length)
+
+    def get_default_board_to_board_image_handler(self):
+        base_board = get_default_charuco_board(square_length=charuco_base_board_square_length,
+                                               marker_length=charuco__baseboard_marker_length)
+        target_board = get_default_charuco_board(square_length=charuco_base_board_square_length,
+                                                 marker_length=charuco__baseboard_marker_length,
+                                                 dictionary=charuco_board_dictionary_2)
+
+        handler = BoardToBoardImageHandler(base_board, target_board, self.cameraMatrix, self.distCoeffs,
+                                           charuco_board_dictionary,
+                                           charuco_board_dictionary_2, should_draw=False)
+        return handler
 
     @staticmethod
     def handle_frame(image_handler, frame):
