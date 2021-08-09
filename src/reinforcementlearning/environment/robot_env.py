@@ -18,7 +18,7 @@ from tf_agents.trajectories import time_step as ts
 class RobotEnv(py_environment.PyEnvironment):
 
     def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False, robot_controller=None,
-                 angle_control=False):
+                 angle_control=False, draw_debug_lines=False):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
@@ -75,6 +75,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self.distance = []
         self._current_pose = None
         self.angle_control = angle_control
+        self._draw_debug_lines = draw_debug_lines
 
     def set_target_reached_distance(self, val):
         self._target_reached_distance = val
@@ -84,6 +85,12 @@ class RobotEnv(py_environment.PyEnvironment):
 
     def disable_max_steps_to_take_before_failure(self):
         self._max_steps_to_take_before_failure = 10000000
+
+    def set_wait_time(self, val):
+        self._wait_time_per_step = val
+
+    def set_xyz_update_step_size(self, val):
+        self._xyz_update_step_size = val
 
     @property
     def current_angles(self):
@@ -364,7 +371,7 @@ class RobotEnv(py_environment.PyEnvironment):
                                                       repulsive_cutoff_distance=repulsive_cutoff_distance,
                                                       clip_force=6)
 
-        if self._use_gui:
+        if self._draw_debug_lines:
             self._attr_lines, self._rep_lines = draw_debug_lines(self._physics_client, np.array([c1, c2, c3]),
                                                                  attractive_forces, repulsive_forces,
                                                                  self._attr_lines, self._rep_lines,
