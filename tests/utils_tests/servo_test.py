@@ -76,7 +76,7 @@ class ServoWithOffsetFunctionTest(unittest.TestCase):
         # given
         def offset_function(all_angles):
             return all_angles[0]
-        servo = ServoWithOffsetFunction(0, 100, 0, pi, offset_function=offset_function)
+        servo = ServoWithOffsetFunction(0, 100, 0, pi, offset_function, offset_function)
 
         # when
         servo.set_target_position_from_angle(pi/2, [10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -86,7 +86,7 @@ class ServoWithOffsetFunctionTest(unittest.TestCase):
         self.assertEqual(40, target, "got a wrong target")
 
     def test_no_function(self):
-        self.assertRaises(ValueError, ServoWithOffsetFunction, 0, 1, 0, 1, None)
+        self.assertRaises(ValueError, ServoWithOffsetFunction, 0, 1, 0, 1, None, None)
 
 
 class Servo2Tests(unittest.TestCase):
@@ -162,7 +162,7 @@ class Servo3Test(unittest.TestCase):
 
         # then
         target = servo3.target_position
-        self.assertEqual(-10, target, "got a wrong target")
+        self.assertEqual(40, target, "got a wrong target")
 
     def test_2(self):
         # given

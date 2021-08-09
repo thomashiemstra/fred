@@ -79,26 +79,6 @@ class XboxPoseUpdaterTests(unittest.TestCase):
         self.assertIsNotNone(new_pose)
         self.assertTrue(new_pose.y < old_pose.y)
 
-    def test_move_positive_z(self):
-        state_mock = ControllerStateMock(lr_trigger=-1)
-        pose_updater = XboxPoseUpdater(state_mock, 10, 1, None)
-        old_pose = Pose(0, 0, 0)
-
-        new_pose = pose_updater.get_updated_pose_from_controller(old_pose, False, None)
-
-        self.assertIsNotNone(new_pose)
-        self.assertTrue(new_pose.z > old_pose.z)
-
-    def test_move_negative_z(self):
-        state_mock = ControllerStateMock(lr_trigger=1)
-        pose_updater = XboxPoseUpdater(state_mock, 10, 1, None)
-        old_pose = Pose(0, 0, 0)
-
-        new_pose = pose_updater.get_updated_pose_from_controller(old_pose, False, None)
-
-        self.assertIsNotNone(new_pose)
-        self.assertTrue(new_pose.z < old_pose.z)
-
     def test_move_positive_alpha(self):
         state_mock = ControllerStateMock(r_thumb_x=-1)
         pose_updater = XboxPoseUpdater(state_mock, 10, 1, None)

@@ -41,7 +41,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
         for marker in detected_makers:
             self.assertIsNotNone(marker, "marker should not be null")
             self.assertIsNotNone(marker.id, "maker should have it's id filled")
-            self.assertIsNotNone(marker.rvec, "Marker should have an rvec")
+            self.assertIsNotNone(marker.relative_rotation_matrix, "Marker should have an rvec")
             self.assertIsNotNone(marker.tvec, "Marker should have a tvec")
 
     def test_board_no_markers(self):

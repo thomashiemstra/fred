@@ -25,7 +25,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(5,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(17,), dtype=np.float32, minimum=-1, maximum=1, name='observation')
+            shape=(17,), dtype=np.float32, minimum=-2, maximum=2, name='observation')
 
         scenarios = scenarios_no_obstacles if scenarios is None else scenarios
 
