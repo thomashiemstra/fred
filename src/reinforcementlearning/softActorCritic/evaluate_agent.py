@@ -4,14 +4,14 @@ from time import sleep
 
 import tensorflow as tf
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.environment.scenario import sensible_scenarios
+from src.reinforcementlearning.environment.scenario import sensible_scenarios, whoop
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
 from tf_agents.environments import tf_py_environment
 
 
 def main():
-    checkpoint_dir = 'rs_01_grid'
+    checkpoint_dir = 'rs_01_grid_new_network'
     robot_env_no_obstacles = False
 
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -26,7 +26,8 @@ def main():
 
     use_gui = True
 
-    env = RobotEnvWithObstacles(use_gui=use_gui, scenarios=sensible_scenarios, is_eval=True)
+    env = RobotEnvWithObstacles(use_gui=use_gui, scenarios=test, is_eval=True)
+
     # env.set_step_size(2, 0.2, 10000)
 
     eval_py_env = tf_py_environment.TFPyEnvironment(env)
