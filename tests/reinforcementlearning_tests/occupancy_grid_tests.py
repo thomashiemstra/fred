@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 
 from src.reinforcementlearning.environment.occupancy_grid_util import is_point_in_obstacle, get_height_tallest_obstacle, \
-    create_hilbert_curve_from_obstacles
+    create_hilbert_curve_from_obstacles, create_occupancy_grid_from_obstacles
 from src.utils.obstacle import BoxObstacle
 
 
@@ -85,4 +85,38 @@ class TestHilbertCurve(unittest.TestCase):
             if element > 0:
                 all_zero = False
         self.assertFalse(all_zero, "At least some elements should be non zero when an obstacle is provided")
+
+
+class OccupancyGridTest(unittest.TestCase):
+
+    def test_empty_grid(self):
+        grid = create_occupancy_grid_from_obstacles(None, 10, 10, 1)
+
+        expected_grid = np.zeros((10, 10))
+
+        self.assertTrue(np.array_equal(grid, expected_grid),
+                        "did not get the expected array. Expected: {}, actual: {}".format(expected_grid, grid))
+
+    def test_simple_obstacle(self):
+        obstacle = BoxObstacle([1, 1, 40], [0, 2, 0])
+        grid = create_occupancy_grid_from_obstacles([obstacle], 4, 4, 1)
+
+        expected_grid = np.array(
+            [[0, 0, 0, 0],
+             [0, 1, 1, 0],
+             [0, 1, 1, 0],
+             [0, 0, 0, 0]]
+        )
+
+        self.assertTrue(np.array_equal(grid, expected_grid),
+                        "did not get the expected array. Expected: {}, actual: {}".format(expected_grid, grid))
+
+    def test_obstacle_out_of_field(self):
+        obstacle = BoxObstacle([1, 1, 40], [10, 10, 0])
+        grid = create_occupancy_grid_from_obstacles([obstacle], 4, 4, 1)
+
+        expected_grid = np.zeros((4, 4))
+
+        self.assertTrue(np.array_equal(grid, expected_grid),
+                        "did not get the expected array. Expected: {}, actual: {}".format(expected_grid, grid))
 
