@@ -122,16 +122,17 @@ class ObstacleIntegrationTests(unittest.TestCase):
         p.disconnect()
 
     def test_repulsive_vectors(self):
-        obstacle = BoxObstacle([10, 100, 50], [-32, 0, 0])
+        obstacle = BoxObstacle([10, 100, 50], [-35, 0, 0])
         obstacle.build(self.physics_client)
 
         self.simulated_robot.reset_to_pose(Pose(-20, 15, 10))
-        p.stepSimulation(self.physics_client)
+        for _ in range(10):
+            p.stepSimulation(self.physics_client)
         c1, c2, c3 = self.simulated_robot.control_points
 
         obstacles = np.array([obstacle.obstacle_id])
         rep_forces = get_repulsive_forces_world(self.simulated_robot.body_id, np.array([c1, c2, c3]),
-                                                obstacles, self.physics_client)
+                                                obstacles, self.physics_client, repulsive_cutoff_distance=10)
 
         control_point_1_vec = rep_forces[0]
         control_point_2_vec = rep_forces[1]
