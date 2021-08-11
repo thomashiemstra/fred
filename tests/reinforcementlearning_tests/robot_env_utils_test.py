@@ -158,9 +158,6 @@ class ObstacleIntegrationTests(unittest.TestCase):
                                msg="control point 2 should only point in the x direction, not also in the z direction")
 
 
-        print(obstacle)
-
-
 class AnglesTest(unittest.TestCase):
 
     def test_clipping_upper_bounds(self):
@@ -185,7 +182,7 @@ class AnglesTest(unittest.TestCase):
             self.assertEqual(0, angle, msg='angle should have been clipped to something bigger')
 
     def test_get_normalized_angles_upper_bound(self):
-        angles = [pi, 0.7 * pi,  2 * pi / 3, pi, 3 * pi / 4]
+        angles = [pi,  pi,  2 * pi / 3, pi, 3 * pi / 4]
 
         normalized_angles = get_normalized_current_angles(angles)
 
@@ -207,7 +204,7 @@ class AnglesTest(unittest.TestCase):
         self.assertEqual(-1, normalized_angles[4], msg="angle 4 should have been normalized to -1")
 
     def test_get_normalized_angles_5_angles_upper(self):
-        angles = [pi, 0.7 * pi, pi/2 * (1 + 1/3), pi, (3 * pi / 4)]
+        angles = [pi, pi, pi/2 * (1 + 1/3), pi, (3 * pi / 4)]
         normalized_angles = get_normalized_current_angles(angles)
 
         self.assertEqual(1, normalized_angles[0], msg="got a wrong value for angle 0")
@@ -232,7 +229,7 @@ class AnglesTest(unittest.TestCase):
         angles = get_de_normalized_current_angles(normalized_angles)
 
         self.assertAlmostEqual(pi, angles[0], places=2, msg="Got a wrong value for angle 0")
-        self.assertAlmostEqual(0.7 * pi, angles[1], places=2, msg="Got a wrong value for angle 1")
+        self.assertAlmostEqual(pi, angles[1], places=2, msg="Got a wrong value for angle 1")
         self.assertAlmostEqual(pi/2 * (1 + 1/3), angles[2], places=2, msg="Got a wrong value for angle 2")
         self.assertAlmostEqual(pi, angles[3], places=2, msg="Got a wrong value for angle 3")
         self.assertAlmostEqual((3 * pi / 4), angles[4], places=2, msg="Got a wrong value for angle 4")
@@ -243,7 +240,7 @@ class AnglesTest(unittest.TestCase):
         angles = get_de_normalized_current_angles(normalized_angles)
 
         self.assertAlmostEqual(pi, angles[0], places=2, msg="Got a wrong value for angle 0")
-        self.assertAlmostEqual(0.7 * pi, angles[1], places=2, msg="Got a wrong value for angle 1")
+        self.assertAlmostEqual(pi, angles[1], places=2, msg="Got a wrong value for angle 1")
         self.assertAlmostEqual(pi/2 * (1 + 1/3), angles[2], places=2, msg="Got a wrong value for angle 2")
         self.assertAlmostEqual(pi, angles[3], places=2, msg="Got a wrong value for angle 3")
         self.assertAlmostEqual((3 * pi / 4), angles[4], places=2, msg="Got a wrong value for angle 4")
