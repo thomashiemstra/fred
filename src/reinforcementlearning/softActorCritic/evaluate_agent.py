@@ -26,7 +26,7 @@ def main():
 
     use_gui = True
 
-    env = RobotEnvWithObstacles(use_gui=use_gui, scenarios=test, is_eval=True)
+    env = RobotEnvWithObstacles(use_gui=use_gui, scenarios=test, is_eval=True, draw_debug_lines=True)
 
     # env.set_step_size(2, 0.2, 10000)
 

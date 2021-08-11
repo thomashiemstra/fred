@@ -13,12 +13,12 @@ from tf_agents.trajectories import time_step as ts
 class RobotEnvWithObstacles(RobotEnv):
 
     def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False, robot_controller=None,
-                 angle_control=False):
+                 angle_control=False, draw_debug_lines=False):
         if scenarios is None:
             raise ValueError("RobotEnvWithObstacles should be initialized with scenarios, "
                              "otherwise we would default to no obstacle scenarios!")
         super().__init__(use_gui, raw_obs, is_eval=is_eval, scenarios=scenarios, robot_controller=robot_controller,
-                         angle_control=angle_control)
+                         angle_control=angle_control, draw_debug_lines=draw_debug_lines)
         self._hilbert_curve_iteration = 3
         self._grid_len_x = 40
         self._grid_len_y = 40

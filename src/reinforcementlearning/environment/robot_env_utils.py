@@ -34,7 +34,6 @@ def calculate_target_pose(x_3, y_3, z_3, t, d6):
     return point_1, point_2, point_3
 
 
-@jit(nopython=True)
 def get_attractive_force_world(control_points, target_points, attractive_cutoff_distance=2, weights=None):
     """Calculates the vectors pointing from the control points on the robot to the target points
     The norm of the vectors will be between 0 and attractive_cutoff_distance
@@ -58,15 +57,18 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
 
     if weights is None:
         weights = np.ones(number_of_control_points)
+    return calculate_forces(number_of_control_points, control_points, target_points, attractive_cutoff_distance, weights)
+
+
+@jit(nopython=True)
+def calculate_forces(number_of_control_points, control_points, target_points, attractive_cutoff_distance, weights):
     workspace_forces = np.zeros((number_of_control_points, 3))
 
     total_distance = 0
 
     for control_point_id in range(number_of_control_points):
-        if control_points[control_point_id] is None or target_points[control_point_id] is None:
-            continue
         vector = control_points[control_point_id] - target_points[control_point_id]
-        distance = np.linalg.norm(vector)
+        distance = np.sqrt(vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2])
         if distance == 0:
             pass
         elif distance > attractive_cutoff_distance:

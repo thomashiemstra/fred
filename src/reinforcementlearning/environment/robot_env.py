@@ -356,10 +356,15 @@ class RobotEnv(py_environment.PyEnvironment):
         _, target_point_2, target_point_3 = get_target_points(self._target_pose, self._robot_controller.robot_config.d6)
         # Control point 1 is not used for the attractive forces
         attractive_cutoff_dis = 10
-        attractive_forces, total_distance = get_attractive_force_world(
-            np.array([None, c2.position, c3.position], dtype=object),
-            np.array([None, target_point_2, target_point_3], dtype=object),
+        attractive_forces = np.zeros((3, 3))
+
+        calculated_forces, total_distance = get_attractive_force_world(
+            np.array([c2.position, c3.position], dtype=np.float64),
+            np.array([target_point_2, target_point_3], dtype=np.float64),
             attractive_cutoff_distance=attractive_cutoff_dis)
+
+        attractive_forces[1] = calculated_forces[0]
+        attractive_forces[2] = calculated_forces[1]
 
         # now the attractive foces will go from 1 down to 0 when the robot is within attractive_cutoff_dis of the target
         attractive_forces[1] /= attractive_cutoff_dis

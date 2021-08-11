@@ -72,23 +72,6 @@ class TestRobotEnvUtils(unittest.TestCase):
         self.assert_vectors(expected_vector_2, vector_res_2)
         self.assertEqual(1, distance, "Distance should be 1")
 
-    def test_get_attractive_force_world_with_None(self):
-        control_point = np.array([0, 0, 0])
-        target_point = np.array([0.5, 0, 0])
-
-        forces, distance = get_attractive_force_world(np.array([None, control_point]),
-                                                      np.array([target_point, target_point]), 1)
-        self.assertIsNotNone(forces, "forces should not be None")
-        self.assertIsNotNone(distance, "distance should not be None")
-        vector_res_1 = forces[0]
-        expected_vector_1 = np.array([0, 0, 0])
-        vector_res_2 = forces[1]
-        expected_vector_2 = np.array([0.5, 0, 0])
-
-        self.assert_vectors(expected_vector_1, vector_res_1)
-        self.assert_vectors(expected_vector_2, vector_res_2)
-        self.assertEqual(0.5, distance, "Distance should be 0.5")
-
     def test_get_target_points_1(self):
         pose = Pose(0, 20, 10)
 
