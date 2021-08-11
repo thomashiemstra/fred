@@ -1,6 +1,7 @@
 import numpy as np
 from numpy import arctan2, sin, cos, pi, power
 from numpy import sqrt
+from numba import jit
 
 
 def inverse_kinematics(pose, robot_config):
@@ -11,17 +12,12 @@ def inverse_kinematics(pose, robot_config):
     :param robot_config: link lengths
     :return: array of angles to reach this pose, this array starts at 1.
     """
-    # Link lengths
-    d1 = robot_config.d1
-    d4 = robot_config.d4
-    d6 = robot_config.d6
-    a2 = robot_config.a2
+    return calculate_ik(pose.x, pose.y, pose.z, robot_config.d1, robot_config.d6, robot_config.a2,
+                        robot_config.d4, pose.get_euler_matrix(), pose.flip)
 
-    # Target values
-    x, y, z = pose.x, pose.y, pose.z
-    t = pose.get_euler_matrix()
-    flip = pose.flip
 
+@jit(nopython=True)
+def calculate_ik(x, y, z, d1, d6, a2, d4, t, flip):
     # First find the position of the wrist
     xc = x - d6 * t[0, 2]
     yc = y - d6 * t[1, 2]
@@ -121,10 +117,10 @@ def forward_position_kinematics(angles, robot_config):
     p4[2] = d1 - d4 * cos(q2 + q3) + a2 * sin(q2)
 
     p6[0] = d6 * sin(q1) * sin(q4) * sin(q5) + cos(q1) * (
-                a2 * cos(q2) + (d4 + d6 * cos(q5)) * sin(q2 + q3) + d6 * cos(q2 + q3) * cos(q4) * sin(q5))
+            a2 * cos(q2) + (d4 + d6 * cos(q5)) * sin(q2 + q3) + d6 * cos(q2 + q3) * cos(q4) * sin(q5))
     p6[1] = cos(q3) * (d4 + d6 * cos(q5)) * sin(q1) * sin(q2) - d6 * (
-                cos(q4) * sin(q1) * sin(q2) * sin(q3) + cos(q1) * sin(q4)) * sin(q5) + cos(q2) * sin(q1) * (
-                        a2 + (d4 + d6 * cos(q5)) * sin(q3) + d6 * cos(q3) * cos(q4) * sin(q5))
+            cos(q4) * sin(q1) * sin(q2) * sin(q3) + cos(q1) * sin(q4)) * sin(q5) + cos(q2) * sin(q1) * (
+                    a2 + (d4 + d6 * cos(q5)) * sin(q3) + d6 * cos(q3) * cos(q4) * sin(q5))
     p6[2] = d1 - cos(q2 + q3) * (d4 + d6 * cos(q5)) + a2 * sin(q2) + d6 * cos(q4) * sin(q2 + q3) * sin(q5)
 
     return p1, p2, p3, p4, p6
@@ -139,9 +135,9 @@ def forward_orientation_kinematics(angles):
     q6 = angles[6]
 
     sx = cos(q6) * (cos(q4) * sin(q1) - cos(q1) * cos(q2 + q3) * sin(q4)) - (cos(q5) * sin(q1) * sin(q4) + cos(q1) * (
-                cos(q2 + q3) * cos(q4) * cos(q5) - sin(q2 + q3) * sin(q5))) * sin(q6)
+            cos(q2 + q3) * cos(q4) * cos(q5) - sin(q2 + q3) * sin(q5))) * sin(q6)
     sy = cos(q1) * (-cos(q4) * cos(q6) + cos(q5) * sin(q4) * sin(q6)) - sin(q1) * (
-                -sin(q2 + q3) * sin(q5) * sin(q6) + cos(q2 + q3) * (cos(q6) * sin(q4) + cos(q4) * cos(q5) * sin(q6)))
+            -sin(q2 + q3) * sin(q5) * sin(q6) + cos(q2 + q3) * (cos(q6) * sin(q4) + cos(q4) * cos(q5) * sin(q6)))
     sz = -cos(q6) * sin(q2 + q3) * sin(q4) - (cos(q4) * cos(q5) * sin(q2 + q3) + cos(q2 + q3) * sin(q5)) * sin(q6)
 
     ax = sin(q1) * sin(q4) * sin(q5) + cos(q1) * (cos(q5) * sin(q2 + q3) + cos(q2 + q3) * cos(q4) * sin(q5))
@@ -173,27 +169,40 @@ def jacobian_transpose_on_f(workspace_force, angles, robot_config, c1_location):
     c23 = cos(angles[2] + angles[3])
     s1, s2, s3, s4, s5 = sin(angles[1]), sin(angles[2]), sin(angles[3]), sin(angles[4]), sin(angles[5])
     s23 = sin(angles[2] + angles[3])
-    
+
     joint_forces = np.zeros(7)
 
     # first control point, somewhere between frame 3 and frame 4
     fx, fy, fz = workspace_force[0][x_comp], workspace_force[0][y_comp], workspace_force[0][z_comp]
-    joint_forces[1] += (fy*c1 - fx*s1)*(a2*c2 + c1_location*s23)
-    joint_forces[2] += a2*fz*c2 + (fx*c2 + fy*s1)*(c1_location*c23 - a2*s2) + c1_location*fz*s23
-    joint_forces[3] += c1_location*c23*(fx*c1 + fy*s1) + c1_location*fz*s23
+    joint_forces[1] += (fy * c1 - fx * s1) * (a2 * c2 + c1_location * s23)
+    joint_forces[2] += a2 * fz * c2 + (fx * c2 + fy * s1) * (c1_location * c23 - a2 * s2) + c1_location * fz * s23
+    joint_forces[3] += c1_location * c23 * (fx * c1 + fy * s1) + c1_location * fz * s23
 
     # second control point, origin of frame 4
     fx, fy, fz = workspace_force[1][x_comp], workspace_force[1][y_comp], workspace_force[1][z_comp]
-    joint_forces[1] += (fy*c1 - fx*s1)*(a2*c2 + d4*s23)
-    joint_forces[2] += a2*fz*c2 + (fx*c2 + fy*s1)*(d4*c23 - a2*s2) + d4*fz*s23
-    joint_forces[3] += d4*c23*(fx*c1 + fy*s1) + d4*fz*s23
+    joint_forces[1] += (fy * c1 - fx * s1) * (a2 * c2 + d4 * s23)
+    joint_forces[2] += a2 * fz * c2 + (fx * c2 + fy * s1) * (d4 * c23 - a2 * s2) + d4 * fz * s23
+    joint_forces[3] += d4 * c23 * (fx * c1 + fy * s1) + d4 * fz * s23
 
     # third control point, origin of frame 6
     fx, fy, fz = workspace_force[2][x_comp], workspace_force[2][y_comp], workspace_force[2][z_comp]
-    joint_forces[1] += (fy*c1 - fx*s1)*(a2*c2 + (d4 + d6*c5)*s23) + d6*(c23*c4*(fy*c1 - fx*s1) + (fx*c1 + fy*s1)*s4)*s5
-    joint_forces[2] += a2*fz*c2 + c23*(d4 + d6*c5)*(fx*c1 + fy*s1) + fz*(d4 + d6*c5)*s23 + d6*fz*c23*c4*s5 - (fx*c1 + fy*s1)*(a2*s2 + d6*c4*s23*s5)
-    joint_forces[3] += (d4 + d6*c5)*(c23*(fx*c1 + fy*s1) + fz*s23) + d6*c4*(fz*c23 - (fx*c1 + fy*s1)*s23)*s5
-    joint_forces[4] += -d6*(-fx*c4*s1 + (fy*c23*s1 + fz*s23)*s4 + c1*(fy*c4 + fx*c23*s4))*s5
-    joint_forces[5] += d6*c5*(c4*(c23*(fx*c1 + fy*s1) + fz*s23) + (-fy*c1 + fx*s1)*s4) + d6*(fz*c23 - (fx*c1 + fy*s1)*s23)*s5
+    joint_forces[1] += (fy * c1 - fx * s1) * (a2 * c2 + (d4 + d6 * c5) * s23) + d6 * (
+                c23 * c4 * (fy * c1 - fx * s1) + (fx * c1 + fy * s1) * s4) * s5
+    joint_forces[2] += a2 * fz * c2 + c23 * (d4 + d6 * c5) * (fx * c1 + fy * s1) + fz * (
+                d4 + d6 * c5) * s23 + d6 * fz * c23 * c4 * s5 - (fx * c1 + fy * s1) * (a2 * s2 + d6 * c4 * s23 * s5)
+    joint_forces[3] += (d4 + d6 * c5) * (c23 * (fx * c1 + fy * s1) + fz * s23) + d6 * c4 * (
+                fz * c23 - (fx * c1 + fy * s1) * s23) * s5
+    joint_forces[4] += -d6 * (-fx * c4 * s1 + (fy * c23 * s1 + fz * s23) * s4 + c1 * (fy * c4 + fx * c23 * s4)) * s5
+    joint_forces[5] += d6 * c5 * (c4 * (c23 * (fx * c1 + fy * s1) + fz * s23) + (-fy * c1 + fx * s1) * s4) + d6 * (
+                fz * c23 - (fx * c1 + fy * s1) * s23) * s5
 
     return joint_forces
+
+
+if __name__ == '__main__':
+    from src.kinematics.kinematics_utils import Pose
+    from src import global_constants
+
+    test_pose = Pose(-10, 25, 10)
+    for _ in range(10):
+        inverse_kinematics(test_pose, global_constants.dynamixel_robot_config)

@@ -1,4 +1,5 @@
 import numpy as np
+from numba import jit
 from numpy import pi
 import pybullet as p
 
@@ -16,10 +17,13 @@ def get_target_points(target_pose, d6):
     Returns:
       a 3 vector [x,y,z] for each control point on the robot
     """
-    x_3, y_3, z_3 = target_pose.x, target_pose.y, target_pose.z
+    return calculate_target_pose(target_pose.x, target_pose.y, target_pose.z, target_pose.get_euler_matrix(), d6)
+
+
+@jit(nopython=True)
+def calculate_target_pose(x_3, y_3, z_3, t, d6):
     point_3 = np.array([x_3, y_3, z_3])
 
-    t = target_pose.get_euler_matrix()
     x_2 = x_3 - d6 * t[0, 2]
     y_2 = y_3 - d6 * t[1, 2]
     z_2 = z_3 - d6 * t[2, 2]
@@ -30,6 +34,7 @@ def get_target_points(target_pose, d6):
     return point_1, point_2, point_3
 
 
+@jit(nopython=True)
 def get_attractive_force_world(control_points, target_points, attractive_cutoff_distance=2, weights=None):
     """Calculates the vectors pointing from the control points on the robot to the target points
     The norm of the vectors will be between 0 and attractive_cutoff_distance
@@ -65,9 +70,12 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
         if distance == 0:
             pass
         elif distance > attractive_cutoff_distance:
-            workspace_forces[control_point_id][0] = -attractive_cutoff_distance * weights[control_point_id] * vector[0] / distance
-            workspace_forces[control_point_id][1] = -attractive_cutoff_distance * weights[control_point_id] * vector[1] / distance
-            workspace_forces[control_point_id][2] = -attractive_cutoff_distance * weights[control_point_id] * vector[2] / distance
+            workspace_forces[control_point_id][0] = -attractive_cutoff_distance * weights[control_point_id] * vector[
+                0] / distance
+            workspace_forces[control_point_id][1] = -attractive_cutoff_distance * weights[control_point_id] * vector[
+                1] / distance
+            workspace_forces[control_point_id][2] = -attractive_cutoff_distance * weights[control_point_id] * vector[
+                2] / distance
         elif distance <= attractive_cutoff_distance:
             workspace_forces[control_point_id][0] = -weights[control_point_id] * vector[0]
             workspace_forces[control_point_id][1] = -weights[control_point_id] * vector[1]
@@ -148,8 +156,8 @@ def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces,
 
     for i in range(number_of_control_points):
         control_point_pos = control_points[i].position
-        attr_target = control_point_pos + line_size*attr_forces[i]
-        rep_target = control_point_pos + line_size*rep_forces[i]
+        attr_target = control_point_pos + line_size * attr_forces[i]
+        rep_target = control_point_pos + line_size * rep_forces[i]
 
         if attr_lines is None:
             new_attr_lines[i] = p.addUserDebugLine(control_point_pos / 100, attr_target / 100, lineColorRGB=[0, 1, 0],
@@ -218,3 +226,11 @@ def get_de_normalized_current_angles(normalized_angles):
     if array_length > 5:
         res.append(pi * normalized_angles[5])
     return res
+
+
+if __name__ == '__main__':
+    from src.kinematics.kinematics_utils import Pose
+    pose = Pose(-10, 25, 10)
+
+    for _ in range(10):
+        get_target_points(pose, 10)

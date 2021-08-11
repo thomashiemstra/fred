@@ -1,6 +1,31 @@
 import numpy as np
+from numba import jit
 from numpy import sin, cos, pi
 import json
+
+
+@jit(nopython=True)
+def calculate_euler_matrix_from_angles(alpha, beta, gamma):
+    orientation = np.eye(3, dtype=np.float64)
+
+    ca = cos(alpha)
+    cb = cos(beta)
+    cy = cos(gamma)
+    sa = sin(alpha)
+    sb = sin(beta)
+    sy = sin(gamma)
+    orientation[0, 0] = ca * sb * cy + sa * sy
+    orientation[1, 0] = sa * sb * cy - ca * sy
+    orientation[2, 0] = cb * cy
+
+    orientation[0, 1] = ca * cb
+    orientation[1, 1] = sa * cb
+    orientation[2, 1] = -sb
+
+    orientation[0, 2] = ca * sb * sy - sa * cy
+    orientation[1, 2] = sa * sb * sy + ca * cy
+    orientation[2, 2] = cb * sy
+    return orientation
 
 
 class Pose:
@@ -26,26 +51,7 @@ class Pose:
         """alpha is a turn around the world z-axis"""
         """beta is a turn around the world y-axis"""
         """gamma is a turn around the world x-axis"""
-        orientation = np.eye(3, dtype=np.float64)
-
-        ca = cos(self.alpha)
-        cb = cos(self.beta)
-        cy = cos(self.gamma)
-        sa = sin(self.alpha)
-        sb = sin(self.beta)
-        sy = sin(self.gamma)
-        orientation[0, 0] = ca * sb * cy + sa * sy
-        orientation[1, 0] = sa * sb * cy - ca * sy
-        orientation[2, 0] = cb * cy
-
-        orientation[0, 1] = ca * cb
-        orientation[1, 1] = sa * cb
-        orientation[2, 1] = -sb
-
-        orientation[0, 2] = ca * sb * sy - sa * cy
-        orientation[1, 2] = sa * sb * sy + ca * cy
-        orientation[2, 2] = cb * sy
-        return orientation
+        return calculate_euler_matrix_from_angles(self.alpha, self.beta, self.gamma)
 
     def reset_orientation(self):
         self.alpha = 0

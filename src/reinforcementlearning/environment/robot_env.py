@@ -76,6 +76,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._current_pose = None
         self.angle_control = angle_control
         self._draw_debug_lines = draw_debug_lines
+        self.obstacle_ids = []
 
     def set_target_reached_distance(self, val):
         self._target_reached_distance = val
@@ -203,6 +204,7 @@ class RobotEnv(py_environment.PyEnvironment):
                             physicsClientId=self._physics_client)
 
         self._obstacles, self._target_pose, self._start_pose = self._generate_obstacles_and_target_pose()
+        self.obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
         self._current_pose = copy(self._start_pose)
 
         if self._start_pose.x > self._start_pose.x:
@@ -363,11 +365,9 @@ class RobotEnv(py_environment.PyEnvironment):
         attractive_forces[1] /= attractive_cutoff_dis
         attractive_forces[2] /= attractive_cutoff_dis
 
-        obstacle_ids = [obstacle.obstacle_id for obstacle in self._obstacles] + [self._floor.obstacle_id]
-
         repulsive_cutoff_distance = 8
         repulsive_forces = get_repulsive_forces_world(self._robot_body_id, np.array([c1, c2, c3]),
-                                                      obstacle_ids, self._physics_client,
+                                                      self.obstacle_ids, self._physics_client,
                                                       repulsive_cutoff_distance=repulsive_cutoff_distance,
                                                       clip_force=6)
 
@@ -378,19 +378,11 @@ class RobotEnv(py_environment.PyEnvironment):
                                                                  line_size=6)
 
         total_observation = []
-
-        # attractive forces[0] is for a control point which is not considered for the attractive forces
-        # total_observation += self._get_normalized_vector_as_list(attractive_forces[1])
         total_observation += self._get_normalized_vector_as_list(attractive_forces[2])
-
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[0])
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[1])
         total_observation += self._get_normalized_vector_as_list(repulsive_forces[2])
-
         total_observation += self._get_normalized_pose()
-        # total_observation += get_normalized_current_angles(self._current_angles[1:6])
-
-        # return ts.transition(np.array(observation, dtype=np.float32), reward=reward, discount=1.0)
 
         return np.array(np.array(total_observation), dtype=np.float32), total_distance
 
