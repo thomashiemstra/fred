@@ -1,7 +1,6 @@
 import numpy as np
 from numba import jit
-from numpy import sin, cos, pi
-import json
+from numpy import sin, cos
 
 
 @jit(nopython=True)
@@ -95,24 +94,3 @@ class RobotConfig:
         self.a2 = self.initial_a2
         self.d4 = self.initial_d4
         self.d6 = self.initial_d6
-
-
-if __name__ == '__main__':
-    listx = []
-    listx.append(Pose(1, 1, 1))
-    listx.append(Pose(2, 2, 2))
-
-    to_serialize = list(map(lambda x: x.__dict__, listx))
-
-    print(json.dumps(to_serialize, indent=2))
-
-    with open('test.json', 'w') as outfile:
-        json.dump(to_serialize, outfile, indent=2)
-
-    # json_string = json.dumps(Pose(1.0, 2.0, 3.0, alpha=0.5).__dict__, indent=4)
-    # print(json_string)
-    # x = json.loads(json_string)
-    #
-    # p = Pose(0, 0, 0)
-    # p.__dict__ = x
-    # print(p)
