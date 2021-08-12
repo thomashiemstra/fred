@@ -12,7 +12,7 @@ def start_simulated_robot(use_gui=False, robot_config=global_constants.simulated
     current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
     if use_gui:
-        physics_client = p.connect(p.GUI, options="--width=1280 --height=720")
+        physics_client = p.connect(p.GUI, options="--width=1920 --height=1080")
     else:
         physics_client = p.connect(p.DIRECT)
     p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
