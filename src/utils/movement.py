@@ -57,14 +57,18 @@ class Movement(ABC):
     def is_robot_at_start_pose(start_pose, servo_controller):
         current_angles = servo_controller.get_current_angles()
         start_pose_angles = servo_controller.pose_to_angles(start_pose)
-        return np.allclose(current_angles, start_pose_angles, atol=0.1)
+        return np.allclose(current_angles, start_pose_angles, atol=0.4)
 
 
 class SplineMovement(Movement):
 
+    def __init__(self, poses, time, center=None, workspace_limits=None, s=None) -> None:
+        super().__init__(poses, time, center, workspace_limits)
+        self._s = s
+
     def _move_internal(self, poses, servo_controller):
         return b_spline_curve(poses, self.time, servo_controller,
-                              workspace_limits=self.workspace_limits, center=self.center)
+                              workspace_limits=self.workspace_limits, center=self.center, s=self._s)
 
     def check_workspace_limits(self, servo_controller, workspace_limits):
         try:

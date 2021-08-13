@@ -27,7 +27,7 @@ def get_usable_poses(poses, target_pose):
 
     for pose in poses:
         d = pose_to_pose_distance(current_pose, pose)
-        if 5 < d:
+        if d > 1:
             result.append(pose)
             current_pose = pose
 
@@ -48,7 +48,7 @@ def main():
 
     pose_recorder = PoseRecorder()
     robot_controller = start_simulated_robot(True)
-    scenario = sensible_scenarios[6]
+    scenario = sensible_scenarios[2]
 
     env = RobotEnvWithObstacles(use_gui=False, scenarios=sensible_scenarios, is_eval=True,
                                 draw_debug_lines=True, pose_recorder=pose_recorder)
@@ -71,12 +71,14 @@ def main():
 
     usable_poses = get_usable_poses(recoded_poses, scenario.target_pose)
 
-    b_spline_plot(usable_poses)
+    smoothing_factor = 1000
+    b_spline_plot(usable_poses, s=smoothing_factor)
 
-    spline_move = SplineMovement(usable_poses, 5)
+    spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
     physics_client = robot_controller.physics_client
     scenario.build_scenario(physics_client)
     robot_controller.reset_to_pose(usable_poses[0])
+    sleep(0.5)
 
     spline_move.move(robot_controller)
 

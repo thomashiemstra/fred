@@ -91,9 +91,10 @@ def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_ste
     return dx, dy, dz, actual_stop_pose
 
 
-def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None):
+def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=None, s=None):
     """
     Move along a B-spline defined by the poses provided
+    :param s: desired value for the smoothing factor s
     :param poses: array of Pose, knot points for the B-spline
     :param time: total time for the movement
     :param servo_controller:
@@ -101,7 +102,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     :param center: [x, y, z] the end effector will always be oriented towards this center point
     :return: final pose
     """
-    x_steps, y_steps, z_steps, total_steps, path_parameter = get_spline_step_arrays(poses, time)
+    x_steps, y_steps, z_steps, total_steps, alpha_steps, gamma_steps, path_parameter = get_spline_step_arrays(poses, time, s)
 
     start_pose = poses[0]
     stop_pose = poses[-1]
@@ -129,7 +130,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
         if center is not None:
             alpha, beta, gamma = get_angles_center(x, y, z, center)
         else:
-            alpha, beta, gamma = get_angles_no_center(start_pose, d_alpha, d_beta, d_gamma, path_parameter[i])
+            alpha, beta, gamma = alpha_steps[i], 0, gamma_steps[i]
 
         temp_pose = Pose(x, y, z, flip, alpha, beta, gamma)
 
@@ -147,13 +148,14 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
     return actual_stop_pose
 
 
-def b_spline_plot(poses):
-    x_steps, y_steps, z_steps, total_steps, path_parameter = get_spline_step_arrays(poses, 1)
+def b_spline_plot(poses, s=None):
+    x_steps, y_steps, z_steps, total_steps, alpha_steps, gamma_steps, path_parameter = get_spline_step_arrays(poses, 1, s)
     plot_curve(x_steps, y_steps, z_steps, poses)
 
 
-def b_spline_curve_calculate_only(poses, time, workspace_limits):
-    x_steps, y_steps, z_steps, total_steps, path_parameter = get_spline_step_arrays(poses, time)
+def b_spline_curve_calculate_only(poses, time, workspace_limits, s=None):
+    x_steps, y_steps, z_steps, total_steps, alpha_steps, gamma_steps, path_parameter = get_spline_step_arrays(poses,
+                                                                                                              time, s)
     if not check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):
         raise MovementException('curve goes outside of workspace limits!')
 
@@ -163,7 +165,7 @@ def b_spline_curve_calculate_only(poses, time, workspace_limits):
     return actual_stop_pose
 
 
-def get_spline_step_arrays(poses, time):
+def get_spline_step_arrays(poses, time, s=None):
     data_points = len(poses)
     if data_points < 2:
         raise ValueError("Not enough poses, need at least 2 for a b spline movement")
@@ -173,19 +175,22 @@ def get_spline_step_arrays(poses, time):
     x_poses = [pose.x for pose in poses]
     y_poses = [pose.y for pose in poses]
     z_poses = [pose.z for pose in poses]
+    alphas = [pose.alpha for pose in poses]
+    gammas = [pose.gamma for pose in poses]
 
-    s = data_points + np.sqrt(2 * data_points)
+    if s is None:
+        s = data_points + np.sqrt(2 * data_points)
 
     # noinspection PyTupleAssignmentBalance
-    tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=1000)
+    tck, u = splprep([x_poses, y_poses, z_poses, alphas, gammas], k=k_val, s=s)
 
     total_steps = ceil(time * src.global_constants.steps_per_second)
     lin = np.linspace(0, 1, total_steps)
     path_parameter = [get_curve_val(t) for t in lin]
 
-    x_steps, y_steps, z_steps = splev(path_parameter, tck)
+    x_steps, y_steps, z_steps, alpha_steps, gamma_steps = splev(path_parameter, tck)
 
-    return x_steps, y_steps, z_steps, total_steps, path_parameter
+    return x_steps, y_steps, z_steps, total_steps, alpha_steps, gamma_steps, path_parameter
 
 
 def check_workspace_limits(x_steps, y_steps, z_steps, total_steps, workspace_limits):

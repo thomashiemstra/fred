@@ -229,6 +229,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._traveled_distances = []
         self._done = False
         self._pose_recorder.clear_poses()
+        self._pose_recorder.add_pose(self._start_pose)
         return ts.restart(observation)
 
     @property
