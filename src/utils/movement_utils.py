@@ -62,6 +62,9 @@ def plot_curve(x, y, z, poses):
 
     fig2 = plt.figure(2)
     ax3d = fig2.add_subplot(111, projection='3d')
+    ax3d.set_xlim3d(-40, 40)
+    ax3d.set_ylim3d(0, 40)
+    ax3d.set_zlim3d(0, 40)
 
     pose_x = [pose.x for pose in poses]
     pose_y = [pose.y for pose in poses]
@@ -132,7 +135,7 @@ def b_spline_curve(poses, time, servo_controller, workspace_limits=None, center=
 
         rec_time, time_taken = servo_controller.move_to_pose(temp_pose)
 
-        print("rec time: {}, dt: {}".format(rec_time, dt))
+        # print("rec time: {}, dt: {}".format(rec_time, dt))
         sleep_time = np.maximum(dt, rec_time)
         sleep(sleep_time)
 
@@ -161,17 +164,20 @@ def b_spline_curve_calculate_only(poses, time, workspace_limits):
 
 
 def get_spline_step_arrays(poses, time):
-    if len(poses) < 2:
+    data_points = len(poses)
+    if data_points < 2:
         raise ValueError("Not enough poses, need at least 2 for a b spline movement")
 
-    k_val = min(len(poses) - 1, 3)
+    k_val = max(min(data_points - 1, 3), 5)
 
     x_poses = [pose.x for pose in poses]
     y_poses = [pose.y for pose in poses]
     z_poses = [pose.z for pose in poses]
 
+    s = data_points + np.sqrt(2 * data_points)
+
     # noinspection PyTupleAssignmentBalance
-    tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=2)
+    tck, u = splprep([x_poses, y_poses, z_poses], k=k_val, s=1000)
 
     total_steps = ceil(time * src.global_constants.steps_per_second)
     lin = np.linspace(0, 1, total_steps)

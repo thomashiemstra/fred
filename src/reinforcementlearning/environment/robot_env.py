@@ -4,6 +4,8 @@ from time import sleep
 
 import numpy as np
 import pybullet as p
+
+from src.reinforcementlearning.environment.pose_recorder import DummyPoseRecorder
 from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
     draw_debug_lines, get_repulsive_forces_world, \
     get_clipped_state
@@ -18,7 +20,7 @@ from tf_agents.trajectories import time_step as ts
 class RobotEnv(py_environment.PyEnvironment):
 
     def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False, robot_controller=None,
-                 angle_control=False, draw_debug_lines=False):
+                 angle_control=False, draw_debug_lines=False, pose_recorder=None):
         super().__init__()
         self._use_gui = use_gui
         self._raw_obs = raw_obs
@@ -77,6 +79,10 @@ class RobotEnv(py_environment.PyEnvironment):
         self.angle_control = angle_control
         self._draw_debug_lines = draw_debug_lines
         self.obstacle_ids = []
+        if pose_recorder is None:
+            self._pose_recorder = DummyPoseRecorder()
+        else:
+            self._pose_recorder = pose_recorder
 
     def set_target_reached_distance(self, val):
         self._target_reached_distance = val
@@ -222,6 +228,7 @@ class RobotEnv(py_environment.PyEnvironment):
         self._steps_taken = 0
         self._traveled_distances = []
         self._done = False
+        self._pose_recorder.clear_poses()
         return ts.restart(observation)
 
     @property
@@ -269,6 +276,7 @@ class RobotEnv(py_environment.PyEnvironment):
         else:
             prev_x, prev_y, prev_z = self._current_pose.x, self._current_pose.y, self._current_pose.z
             self._update_current_pose_and_clip(action)
+            self._pose_recorder.add_pose(self._current_pose)
             recommended_time, _ = self._robot_controller.move_to_pose(self._current_pose)
 
         self._advance_simulation(recommended_time)
