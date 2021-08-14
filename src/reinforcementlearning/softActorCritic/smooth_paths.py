@@ -27,7 +27,7 @@ def get_usable_poses(poses, target_pose):
 
     for pose in poses:
         d = pose_to_pose_distance(current_pose, pose)
-        if d > 1:
+        if d > 5:
             result.append(pose)
             current_pose = pose
 
@@ -48,7 +48,6 @@ def main():
 
     pose_recorder = PoseRecorder()
     robot_controller = start_simulated_robot(True)
-    scenario = sensible_scenarios[2]
 
     env = RobotEnvWithObstacles(use_gui=False, scenarios=sensible_scenarios, is_eval=True,
                                 draw_debug_lines=True, pose_recorder=pose_recorder)
@@ -58,29 +57,34 @@ def main():
         tf_agent = create_agent(eval_py_env, None, robot_env_no_obstacles)
         initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
 
-    env.set_scenario(scenario)
+    scenario = None
+    physics_client = robot_controller.physics_client
+    for _ in range(len(sensible_scenarios)):
+        run_agent(eval_py_env, tf_agent)
+
+        recoded_poses = pose_recorder.get_recorded_poses()
+
+        if scenario is not None:
+            scenario.destroy_scenario(physics_client)
+
+        scenario = env.get_current_scenario()
+        usable_poses = get_usable_poses(recoded_poses, scenario.target_pose)
+
+        smoothing_factor = 1000
+        # b_spline_plot(usable_poses, s=smoothing_factor)
+
+        spline_move = SplineMovement(usable_poses, 2, s=smoothing_factor)
+        scenario.build_scenario(physics_client)
+        robot_controller.reset_to_pose(usable_poses[0])
+
+        spline_move.move(robot_controller)
+
+
+def run_agent(eval_py_env, tf_agent):
     time_step = eval_py_env.reset()
     while not time_step.is_last():
         action_step = tf_agent.policy.action(time_step)
         time_step = eval_py_env.step(action_step.action)
-
-    recoded_poses = pose_recorder.get_recorded_poses()
-
-    for pose in recoded_poses:
-        print(pose)
-
-    usable_poses = get_usable_poses(recoded_poses, scenario.target_pose)
-
-    smoothing_factor = 1000
-    b_spline_plot(usable_poses, s=smoothing_factor)
-
-    spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
-    physics_client = robot_controller.physics_client
-    scenario.build_scenario(physics_client)
-    robot_controller.reset_to_pose(usable_poses[0])
-    sleep(0.5)
-
-    spline_move.move(robot_controller)
 
 
 if __name__ == '__main__':

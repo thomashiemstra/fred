@@ -27,7 +27,6 @@ class Movement(ABC):
     def go_to_start_of_move(self, servo_controller, time=None):
         if time is None:
             time = 4
-        print(self.poses[0])
         from_current_angles_to_pose(self.poses[0], servo_controller, time)
 
     def move(self, servo_controller):

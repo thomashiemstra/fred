@@ -110,6 +110,9 @@ class RobotEnv(py_environment.PyEnvironment):
     def set_scenario(self, scenario):
         self._externally_set_scenario = scenario
 
+    def get_current_scenario(self):
+        return self._current_scenario
+
     @staticmethod
     def get_random_id(max_range):
         return random.randint(0, max_range - 1)
