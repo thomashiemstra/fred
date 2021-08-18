@@ -44,8 +44,8 @@ def start():
 
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     success = xbox_robot_controller.start()
-    if success:
-        xbox_robot_controller.servo_controller.change_status(True)
+    # if success:
+    #     xbox_robot_controller.servo_controller.change_status(True)
     resp = jsonify(success=success)
     return resp
 
@@ -60,7 +60,7 @@ def stop():
             return "already stopped"
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     xbox_robot_controller.stop()
-    xbox_robot_controller.servo_controller.change_status(False)
+    # xbox_robot_controller.servo_controller.change_status(False)
 
     resp = jsonify(success=True)
     return resp

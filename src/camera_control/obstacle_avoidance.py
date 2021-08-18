@@ -18,6 +18,7 @@ from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, in
 from src.reinforcementlearning.softActorCritic.smooth_paths import run_agent, get_usable_poses
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement import SplineMovement
+from src.utils.movement_exception import MovementException
 
 
 class ObstacleAvoidance:
@@ -27,8 +28,8 @@ class ObstacleAvoidance:
         self.robot = robot
         self.lock = threading.RLock()
         self.done = False
-        self.start_pose = Pose(-25, 35, 10)
-        self.target_pose = Pose(25, 35, 10)
+        self.start_pose = Pose(-25, 25, 10)
+        self.target_pose = Pose(25, 25, 10)
         self.env = None
         self.tf_env = None
         self.eval_tf_env = None
@@ -135,9 +136,11 @@ class ObstacleAvoidance:
 
         spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
 
-        self.robot.reset_to_pose(usable_poses[0])
-
-        spline_move.move(self.robot)
+        # self.robot.reset_to_pose(self.start_pose)
+        try:
+            spline_move.move(self.robot)
+        except MovementException:
+            print("unable to perform move")
 
     @synchronized_with_lock("lock")
     def obstacle_avoidance_gradient_descent(self):

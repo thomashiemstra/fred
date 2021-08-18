@@ -17,10 +17,12 @@ def reset_to_scenario(env, scenario):
     env.reset()
 
 
-start_pose = Pose(-30, 25, 10)
-end_pose = Pose(30, 25, 10)
-scenario = Scenario([BoxObstacle([10, 40, 30], [0, 40, 0])],
-             start_pose, end_pose)
+# start_pose = Pose(-30, 25, 10)
+# end_pose = Pose(30, 25, 10)
+# scenario = Scenario([BoxObstacle([10, 40, 30], [0, 40, 0])],
+#              start_pose, end_pose)
+
+scenario = sensible_scenarios[7]
 
 env = RobotEnvWithObstacles(use_gui=True, scenarios=[scenario], angle_control=True, is_eval=True)
 

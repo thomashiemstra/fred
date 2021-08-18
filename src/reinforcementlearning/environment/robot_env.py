@@ -220,7 +220,7 @@ class RobotEnv(py_environment.PyEnvironment):
             print("flipped scenario: start_pose={} stop_pose={}".format(self._start_pose, self._target_pose))
             self._target_pose, self._start_pose = self._start_pose, self._target_pose
 
-        self._create_visual_target_spheres(self._target_pose)
+        # self._create_visual_target_spheres(self._target_pose)
 
         self._robot_controller.reset_to_pose(self._start_pose)
         self._advance_simulation(0)

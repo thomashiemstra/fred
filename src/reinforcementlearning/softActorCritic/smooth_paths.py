@@ -24,6 +24,7 @@ def pose_to_pose_distance(p1, p2):
 def get_usable_poses(poses, target_pose):
     result = []
     current_pose = poses[0]
+    result.append(current_pose)
 
     for pose in poses[:-2]:
         d = pose_to_pose_distance(current_pose, pose)
@@ -59,7 +60,7 @@ def main():
     pose_recorder = PoseRecorder()
     robot_controller = start_simulated_robot(True)
 
-    env = RobotEnvWithObstacles(use_gui=False, scenarios=[sensible_scenarios[8]], is_eval=True,
+    env = RobotEnvWithObstacles(use_gui=False, scenarios=[sensible_scenarios[7]], is_eval=True,
                                 draw_debug_lines=True, pose_recorder=pose_recorder)
     eval_py_env = tf_py_environment.TFPyEnvironment(env)
 
@@ -69,7 +70,7 @@ def main():
 
     scenario = None
     physics_client = robot_controller.physics_client
-    for _ in range(len(sensible_scenarios)):
+    for _ in range(10000):
         run_agent(eval_py_env, tf_agent)
 
         recoded_poses = pose_recorder.get_recorded_poses()

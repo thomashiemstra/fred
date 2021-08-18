@@ -259,7 +259,7 @@ sensible_scenarios = [
               BoxObstacle([10, 40, 25], [5, 32, 0])],
              start_pose, end_pose),
 
-    Scenario([BoxObstacle([10, 40, 25], [-5, 34, 0]),
+    Scenario([BoxObstacle([10, 40, 25], [-5, 38, 0]),
               BoxObstacle([10, 10, 40], [5, 40, 0]),
               BoxObstacle([40, 10, 20], [-20, 40, 0])],
              start_pose, end_pose),
