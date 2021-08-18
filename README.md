@@ -9,7 +9,7 @@ The idea is to train an agent using reinforcement learning to perform this task 
 Gradient descent (left) vs trained agent (right):
 
 ![Alt text](media/gd.gif)
-![Alt text](media/rl.gif)
+![Alt text](media/RL.gif)
 
 With gradient descent the robot simply gets stuck. With the help of the trained agent a smooth path is found to the goal. But what's the fun of doing this only in a simulation? Can this be deployed to an actual robot arm? Of course:
 
