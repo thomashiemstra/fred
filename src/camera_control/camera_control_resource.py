@@ -109,6 +109,38 @@ def start_aruco():
     return resp
 
 
+@camera_api.route('/disable_aruco_draw', methods=['POST'])
+def disable_aruco_draw():
+    global object_handler, started
+
+    with api_lock:
+        if not started:
+            print("camera not started!")
+            return jsonify(success=False)
+        if object_handler.get_aruco_image_handler() is None:
+            print("aruco image handler not started")
+            return jsonify(success=False)
+
+    object_handler.get_aruco_image_handler().disable_draw()
+    return jsonify(success=True)
+
+
+@camera_api.route('/enable_aruco_draw', methods=['POST'])
+def enable_aruco_draw():
+    global object_handler, started
+
+    with api_lock:
+        if not started:
+            print("camera not started!")
+            return jsonify(success=False)
+        if object_handler.get_aruco_image_handler() is None:
+            print("aruco image handler not started")
+            return jsonify(success=False)
+
+    object_handler.get_aruco_image_handler().enable_draw()
+    return jsonify(success=True)
+
+
 @camera_api.route('/start_board_to_board', methods=['POST'])
 def start_board_to_board():
     global started, object_handler

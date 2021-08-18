@@ -107,10 +107,22 @@ class ArucoImageHandler(ImageHandler):
 
         self.populate_detected_makers(ids, relative_rotation_matrices, relative_tvecs)
 
-        if self.should_draw:
+        if self.should_draw_markers():
             aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
             # self.draw_marker_axis(frame, marker_rvecs, marker_tvecs, ids)
             aruco.drawDetectedMarkers(frame, corners, ids)
+
+    @synchronized_with_lock("lock")
+    def should_draw_markers(self):
+        return self.should_draw
+
+    @synchronized_with_lock("lock")
+    def disable_draw(self):
+        self.should_draw = False
+
+    @synchronized_with_lock("lock")
+    def enable_draw(self):
+        self.should_draw = True
 
     def draw_marker_axis(self, frame, rvec, tvecs, marker_ids):
         for i in range(len(marker_ids)):

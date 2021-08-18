@@ -43,6 +43,11 @@
             <div class="col-sm-4">
                 <h4>Start aruco marker detection</h4>
                 <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_aruco')">Start</button>
+                <h6>start/stop marker drawing:</h6>
+                  <div class="btn-group">
+                    <button id="enableArucoDraw" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/enable_aruco_draw')">On</button>
+                    <button id="disableArucoDraw" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/disable_aruco_draw')">Off</button>
+                  </div>
             </div>
         </div>
 
