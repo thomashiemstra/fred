@@ -25,7 +25,7 @@ def get_usable_poses(poses, target_pose):
     result = []
     current_pose = poses[0]
 
-    for pose in poses:
+    for pose in poses[:-2]:
         d = pose_to_pose_distance(current_pose, pose)
         if d > 5:
             result.append(pose)
@@ -33,6 +33,16 @@ def get_usable_poses(poses, target_pose):
 
     result.append(target_pose)
     return result
+
+
+def run_agent(eval_py_env, tf_agent, initial_state=None):
+    if initial_state is None:
+        time_step = eval_py_env.reset()
+    else:
+        time_step = initial_state
+    while not time_step.is_last():
+        action_step = tf_agent.policy.action(time_step)
+        time_step = eval_py_env.step(action_step.action)
 
 
 def main():
@@ -49,7 +59,7 @@ def main():
     pose_recorder = PoseRecorder()
     robot_controller = start_simulated_robot(True)
 
-    env = RobotEnvWithObstacles(use_gui=False, scenarios=sensible_scenarios, is_eval=True,
+    env = RobotEnvWithObstacles(use_gui=False, scenarios=[sensible_scenarios[8]], is_eval=True,
                                 draw_debug_lines=True, pose_recorder=pose_recorder)
     eval_py_env = tf_py_environment.TFPyEnvironment(env)
 
@@ -73,18 +83,11 @@ def main():
         smoothing_factor = 1000
         # b_spline_plot(usable_poses, s=smoothing_factor)
 
-        spline_move = SplineMovement(usable_poses, 2, s=smoothing_factor)
+        spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
         scenario.build_scenario(physics_client)
         robot_controller.reset_to_pose(usable_poses[0])
 
         spline_move.move(robot_controller)
-
-
-def run_agent(eval_py_env, tf_agent):
-    time_step = eval_py_env.reset()
-    while not time_step.is_last():
-        action_step = tf_agent.policy.action(time_step)
-        time_step = eval_py_env.step(action_step.action)
 
 
 if __name__ == '__main__':

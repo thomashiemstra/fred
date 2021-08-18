@@ -6,6 +6,7 @@ from src.camera_control.marker_obstacle_relations import get_obstacle_from_marke
 from src.global_constants import sac_network_weights
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.kinematics.kinematics_utils import Pose
+from src.reinforcementlearning.environment.pose_recorder import PoseRecorder
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
 from src.reinforcementlearning.environment.scenario import Scenario
 import tensorflow as tf
@@ -14,7 +15,9 @@ import numpy as np
 from time import sleep
 
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, initialize_and_restore_train_checkpointer
+from src.reinforcementlearning.softActorCritic.smooth_paths import run_agent, get_usable_poses
 from src.utils.decorators import synchronized_with_lock
+from src.utils.movement import SplineMovement
 
 
 class ObstacleAvoidance:
@@ -28,11 +31,13 @@ class ObstacleAvoidance:
         self.target_pose = Pose(25, 35, 10)
         self.env = None
         self.tf_env = None
+        self.eval_tf_env = None
         self.control_point_1_position = 11.2
         self.stopped = False
         self.thread = None
         self._initial_state = None
         self.tf_agent = None
+        self.pose_recorder = PoseRecorder()
 
     def start_sac(self):
         tf.compat.v1.enable_v2_behavior()
@@ -70,7 +75,7 @@ class ObstacleAvoidance:
         self.set_stopped(False)
 
         obstacles = self._find_obstacles()
-        self.env, self.tf_env = self.get_env(obstacles)
+        self.env, self.tf_env, self.eval_tf_env = self.get_env(obstacles)
         self._initial_state = self.tf_env.reset()
 
     def get_env(self, obstacles):
@@ -78,12 +83,15 @@ class ObstacleAvoidance:
         env = RobotEnvWithObstacles(scenarios=[scenario],
                                     robot_controller=self.robot, is_eval=True,
                                     use_gui=True)
+        eval_env = RobotEnvWithObstacles(scenarios=[scenario],
+                                         use_gui=False,
+                                         pose_recorder=self.pose_recorder)
         env.set_target_reached_distance(10)
         env.disable_max_steps_to_take_before_failure()
         env.set_xyz_update_step_size(1)
 
         tf_env = tf_py_environment.TFPyEnvironment(env)
-        return env, tf_env
+        return env, tf_env, eval_env
 
     def enable_servos(self):
         self.robot.enable_servos()
@@ -117,19 +125,19 @@ class ObstacleAvoidance:
         if self.tf_agent is None:
             self.tf_agent = self.start_sac()
 
-        state = self._initial_state
-        self.env.set_angle_control(False)
+        run_agent(self.eval_tf_env, self.tf_agent, self._initial_state)
+        recoded_poses = self.pose_recorder.get_recorded_poses()
 
-        while not self.is_stopped():
-            action_step = self.tf_agent.policy.action(state)
-            state = self.tf_env.step(action_step.action)
+        usable_poses = get_usable_poses(recoded_poses, self.target_pose)
 
-            if state.step_type == 2:
-                if state.reward == 0:
-                    print("stuck")
-                else:
-                    print("goal reached!")
-                break
+        smoothing_factor = 1000
+        # b_spline_plot(usable_poses, s=smoothing_factor)
+
+        spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
+
+        self.robot.reset_to_pose(usable_poses[0])
+
+        spline_move.move(self.robot)
 
     @synchronized_with_lock("lock")
     def obstacle_avoidance_gradient_descent(self):
