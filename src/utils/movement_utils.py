@@ -170,7 +170,7 @@ def get_spline_step_arrays(poses, time, s=None):
     if data_points < 2:
         raise ValueError("Not enough poses, need at least 2 for a b spline movement")
 
-    k_val = max(min(data_points - 1, 3), 5)
+    k_val = min(data_points - 1, 5)
 
     x_poses = [pose.x for pose in poses]
     y_poses = [pose.y for pose in poses]
