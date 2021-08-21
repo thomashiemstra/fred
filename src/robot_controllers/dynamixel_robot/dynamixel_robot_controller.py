@@ -4,11 +4,12 @@ from timeit import default_timer as timer
 
 import numpy as np
 
+from src.global_constants import SERVO_1_LOW_CURRENT, SERVO_2_LOW_CURRENT, SERVO_1_HIGH_CURRENT, SERVO_2_HIGH_CURRENT
 from src.kinematics.kinematics import inverse_kinematics, forward_position_kinematics
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
-from src.robot_controllers.dynamixel_robot.servo_configurations import servo_configs
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
+from src.robot_controllers.dynamixel_robot.servo_configurations import servo_configs
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import from_current_angles_to_pose
@@ -67,20 +68,20 @@ class DynamixelRobotController(AbstractRobotController):
             self.disable_servos()
             return
 
-        self.base_servo_handler.set_goal_current(1, 10)
-        self.base_servo_handler.set_goal_current(2, 10)
+        self.base_servo_handler.set_goal_current(1, SERVO_1_LOW_CURRENT)
+        self.base_servo_handler.set_goal_current(2, SERVO_2_LOW_CURRENT)
 
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
         self.gripper_servo_handler.set_torque(enable=True)
 
     def set_servo_1_and_2_low_current(self):
-        self.base_servo_handler.set_goal_current(1, 10)
-        self.base_servo_handler.set_goal_current(2, 10)
+        self.base_servo_handler.set_goal_current(1, SERVO_1_LOW_CURRENT)
+        self.base_servo_handler.set_goal_current(2, SERVO_2_LOW_CURRENT)
 
     def set_servo_1_and_2_full_current(self):
-        self.base_servo_handler.set_goal_current(1, 1000)
-        self.base_servo_handler.set_goal_current(2, 1000)
+        self.base_servo_handler.set_goal_current(1, SERVO_1_HIGH_CURRENT)
+        self.base_servo_handler.set_goal_current(2, SERVO_2_HIGH_CURRENT)
 
     def safety_check(self):
         positions = self.get_current_positions()
