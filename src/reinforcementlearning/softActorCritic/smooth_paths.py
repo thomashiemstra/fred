@@ -60,7 +60,7 @@ def main():
     pose_recorder = PoseRecorder()
     robot_controller = start_simulated_robot(True)
 
-    env = RobotEnvWithObstacles(use_gui=False, scenarios=[sensible_scenarios[7]], is_eval=True,
+    env = RobotEnvWithObstacles(use_gui=False, scenarios=sensible_scenarios, is_eval=True,
                                 draw_debug_lines=True, pose_recorder=pose_recorder)
     eval_py_env = tf_py_environment.TFPyEnvironment(env)
 
@@ -70,7 +70,7 @@ def main():
 
     scenario = None
     physics_client = robot_controller.physics_client
-    for _ in range(10000):
+    for _ in range(len(sensible_scenarios)):
         run_agent(eval_py_env, tf_agent)
 
         recoded_poses = pose_recorder.get_recorded_poses()
@@ -84,7 +84,7 @@ def main():
         smoothing_factor = 1000
         # b_spline_plot(usable_poses, s=smoothing_factor)
 
-        spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
+        spline_move = SplineMovement(usable_poses, 2, s=smoothing_factor)
         scenario.build_scenario(physics_client)
         robot_controller.reset_to_pose(usable_poses[0])
 
