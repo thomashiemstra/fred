@@ -254,7 +254,11 @@ def create_move(servo_controller, poses, speed, center, workspace_limits):
         return PoseToPoseMovement(poses, time, center, workspace_limits)  # orientation adjustment
 
     move = SplineMovement(poses, time, center, workspace_limits)
-    is_ok = move.check_workspace_limits(servo_controller, workspace_limits)
+    try:
+        is_ok = move.check_workspace_limits(servo_controller, workspace_limits)
+    except MovementException:
+        print("invalid move")
+        return None
     return move if is_ok else None
 
 
