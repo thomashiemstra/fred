@@ -27,6 +27,7 @@ class ObstacleAvoidance:
         self.aruco_image_handler = aruco_image_handler
         self.robot = robot
         self.lock = threading.RLock()
+        self.stop_lock = threading.RLock()
         self.done = False
         self.start_pose = Pose(-25, 25, 10)
         self.target_pose = Pose(25, 25, 10)
@@ -49,11 +50,11 @@ class ObstacleAvoidance:
             initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
         return tf_agent
 
-    @synchronized_with_lock("lock")
+    @synchronized_with_lock("stop_lock")
     def is_stopped(self):
         return self.stopped
 
-    @synchronized_with_lock("lock")
+    @synchronized_with_lock("stop_lock")
     def set_stopped(self, val):
         self.stopped = val
 
@@ -117,6 +118,8 @@ class ObstacleAvoidance:
 
         self.thread = threading.Thread(target=self.__start_sac)
         self.thread.start()
+        self.thread.join()
+        self.stop()
 
     def __start_sac(self):
         if self.tf_env is None:
@@ -142,6 +145,17 @@ class ObstacleAvoidance:
         except MovementException:
             print("unable to perform move")
 
+        ans = input("Move back the way you came? y/n")
+        if ans == 'y':
+            pass
+        else:
+            return
+
+        try:
+            spline_move.move_reversed(self.robot)
+        except MovementException:
+            print("unable to perform reverse move")
+
     @synchronized_with_lock("lock")
     def obstacle_avoidance_gradient_descent(self):
         if self.thread is not None:
@@ -150,6 +164,8 @@ class ObstacleAvoidance:
 
         self.thread = threading.Thread(target=self.__start_gradient_descent)
         self.thread.start()
+        self.thread.join()
+        self.stop()
 
     def __start_gradient_descent(self):
         if self.tf_env is None:
