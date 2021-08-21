@@ -98,13 +98,10 @@ class ServoHandler(object):
 
         return self.__write_and_clear()
 
-    def set_goal_current(self, val):
+    def set_goal_current(self, servo_id, val):
         self.group_bulk_write.clearParam()
-
-        for servo_id in self.servo_map:
-            servo = self.servo_map[servo_id]
-            self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
-                                self.config.LEN_GOAL_POSITION, servo_id, val)
+        self.__add_to_write(self.config.ADDR_GOAL_CURRENT,
+                            self.config.LEN_GOAL_POSITION, servo_id, val)
 
         return self.__write_and_clear()
 

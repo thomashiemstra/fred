@@ -38,3 +38,11 @@ class AbstractRobotController(ABC):
     @abstractmethod
     def reset_to_pose(self, pose):
         pass
+
+    @abstractmethod
+    def set_servo_1_and_2_low_current(self):
+        pass
+
+    @abstractmethod
+    def set_servo_1_and_2_full_current(self):
+        pass

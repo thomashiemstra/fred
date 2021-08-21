@@ -13,3 +13,29 @@ def get_recommended_wait_time(current_angles, new_angles):
         recommended_time = np.maximum(time, recommended_time)
 
     return recommended_time
+
+
+def servo_1_check(positions):
+    if positions[1] > 2500 or positions[1] < 0:
+        print()
+        print("------------------------------------------------------------------------------")
+        ans = input("DANGER servo 1 might be below the 0 degree line, are you sure!? y/n")
+        if ans == 'y':
+            return True
+        else:
+            return False
+    else:
+        return True
+
+
+def servo_2_check(positions):
+    if positions[2] > 2500 or positions[2] < 0:
+        print()
+        print("------------------------------------------------------------------------------")
+        ans = input("DANGER servo 2 might be below the 0 degree line, are you sure!? y/n")
+        if ans == 'y':
+            return True
+        else:
+            return False
+    else:
+        return True

@@ -21,7 +21,11 @@
       <div class="jumbotron text-center" style="background-color:lavender;">
         {% block title -%}
         {%- endblock title %}
-      robot status: &emsp; <input id="status-button" type="checkbox" disabled data-toggle="toggle" data-on="Busy" data-off="Idle" data-onstyle="danger" data-offstyle="success">
+        Robot servo 1 and 2 current:
+      <div class="btn-group">
+        <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/robot_full_force')">Full</button>
+        <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/robot_low_force')">Low</button>
+      </div>
     </div>
 
 

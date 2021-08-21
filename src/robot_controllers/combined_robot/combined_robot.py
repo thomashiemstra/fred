@@ -45,3 +45,9 @@ class CombinedRobot(AbstractRobotController):
     def reset_to_pose(self, pose):
         self.simulated_robot.reset_to_pose(pose)
         self.dynamixel_robot.reset_to_pose(pose)
+
+    def set_servo_1_and_2_low_current(self):
+        self.dynamixel_robot.set_servo_1_and_2_low_current()
+
+    def set_servo_1_and_2_full_current(self):
+        self.dynamixel_robot.set_servo_1_and_2_full_current()

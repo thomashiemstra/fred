@@ -12,7 +12,7 @@ from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixe
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import from_current_angles_to_pose
-from src.utils.robot_controller_utils import get_recommended_wait_time
+from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
 
 
 # Facade for the robot as a whole, abstracting away the servo handling
@@ -67,22 +67,24 @@ class DynamixelRobotController(AbstractRobotController):
             self.disable_servos()
             return
 
+        self.base_servo_handler.set_goal_current(1, 10)
+        self.base_servo_handler.set_goal_current(2, 10)
+
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
         self.gripper_servo_handler.set_torque(enable=True)
 
+    def set_servo_1_and_2_low_current(self):
+        self.base_servo_handler.set_goal_current(1, 10)
+        self.base_servo_handler.set_goal_current(2, 10)
+
+    def set_servo_1_and_2_full_current(self):
+        self.base_servo_handler.set_goal_current(1, 1000)
+        self.base_servo_handler.set_goal_current(2, 1000)
+
     def safety_check(self):
         positions = self.get_current_positions()
-        if positions[2] > 3000 or positions[2] < 0:
-            print()
-            print("------------------------------------------------------------------------------")
-            ans = input("DANGER servo 2 might be below the 0 degree line, are you sure!? y/n")
-            if ans == 'y':
-                return True
-            else:
-                return False
-        else:
-            return True
+        return servo_1_check(positions) and servo_2_check(positions)
 
     def disable_servos(self):
         self.base_servo_handler.set_torque(enable=False)

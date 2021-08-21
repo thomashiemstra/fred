@@ -2,7 +2,7 @@ import json
 
 from flask import Flask, render_template, request, Response
 
-from src import global_objects
+from src import global_objects, global_constants
 from src.global_constants import dynamixel_robot_arm_port
 from src.global_objects import get_robot
 from src.xbox_control.xbox_control_resource import xbox_api
@@ -80,6 +80,20 @@ def start_camera_recording():
 def stop_camera():
     camera = global_objects.get_camera()
     camera.stop_camera()
+    return jsonify(success=True)
+
+
+@app.route('/robot_full_force', methods=['POST'])
+def full_force():
+    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
+    robot.set_servo_1_and_2_full_current()
+    return jsonify(success=True)
+
+
+@app.route('/robot_low_force', methods=['POST'])
+def low_force():
+    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
+    robot.set_servo_1_and_2_low_current()
     return jsonify(success=True)
 
 
