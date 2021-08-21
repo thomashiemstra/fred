@@ -26,7 +26,7 @@ def main():
 
     use_gui = True
 
-    env = RobotEnvWithObstacles(use_gui=use_gui, scenarios=sensible_scenarios, is_eval=True, draw_debug_lines=True)
+    env = RobotEnvWithObstacles(use_gui=use_gui, scenarios=[sensible_scenarios[7]], is_eval=True)
 
     eval_py_env = tf_py_environment.TFPyEnvironment(env)
 
@@ -44,6 +44,7 @@ def main():
             reward += time_step.reward
             sleep(0.05)
         print("reward for episode {} is= {}".format(i, reward))
+        sleep(2)
 
     print("whoop")
 
