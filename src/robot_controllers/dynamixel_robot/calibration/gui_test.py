@@ -157,6 +157,7 @@ create_button(root, "-90", 5, 4, command=move_to_minus_90)
 def enable():
     robot.enable_servos()
     robot.move_servos(all_angles)
+    robot.set_servo_1_and_2_full_current()
 
 
 create_button(root, "enable servos", 6, 3, command=enable)

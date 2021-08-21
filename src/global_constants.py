@@ -8,8 +8,8 @@ dynamixel_robot_arm_port = '/dev/ttyUSB0' if is_linux() else 'COM3'
 dynamixel_robot_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
 simulated_robot_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
 
-SERVO_1_LOW_CURRENT = 10
-SERVO_2_LOW_CURRENT = 70
+SERVO_1_LOW_CURRENT = 40
+SERVO_2_LOW_CURRENT = 150
 SERVO_1_HIGH_CURRENT = 1193
 SERVO_2_HIGH_CURRENT = 2047
 
