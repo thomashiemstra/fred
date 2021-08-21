@@ -27,12 +27,16 @@ def get_obstacle_from_marker(found_marker):
     location = np.array([x, y, z])
 
     if marker_id == 29:
-        return BoxObstacle(np.array([13, 12, 35]), location, alpha=alpha, color=RED_COLOR)
+        return BoxObstacle(np.array([13, 12, 35]), location, alpha=alpha)
     if marker_id == 17:
-        return BoxObstacle(np.array([23, 8, 21]), location, alpha=alpha, color=RED_COLOR)
+        return BoxObstacle(np.array([23, 8, 21]), location, alpha=alpha)
     if marker_id == 26:
-        return BoxObstacle(np.array([19, 5, 15]), location, alpha=alpha, color=RED_COLOR)
+        return BoxObstacle(np.array([19, 5, 15]), location, alpha=alpha)
     if marker_id == 27:
-        return BoxObstacle(np.array([8, 16, 12]), location, alpha=alpha, color=RED_COLOR)
+        return BoxObstacle(np.array([8, 16, 12]), location, alpha=alpha)
+    if marker_id == 14:
+        return BoxObstacle(np.array([7, 18, 18]), location, alpha=alpha)
+    if marker_id == 22:
+        return BoxObstacle(np.array([10, 8, 30]), location, alpha=alpha)
     elif marker_id in block_ids:
-        return BoxObstacle(np.array([2.7, 2.7, 2.7]), location, alpha=alpha, color=GREEN_COLOR)
+        return BoxObstacle(np.array([2.7, 2.7, 2.7]), location, alpha=alpha, color=BLUE_COLOR)
