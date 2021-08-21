@@ -4,7 +4,9 @@ Table of Contents
 -----------------
   * [Obstacle avoidance with reinforcement learning](#Obstacle-avoidance-with-reinforcement-learning)
   * [Algorithm details](#Algorithm-details)
-  * [deploying in the real world](#deploying-in-the-real-world)
+  * [deploying in the real world with machine vision](#deploying-in-the-real-world-with-machine-vision)
+  * [inverse kinematics](#inverse-kinematics)
+  * [record and play back with a controller](#record-and-play-back-with-a-controller)
 
 ## Obstacle avoidance with reinforcement learning
 Using deep reinforcement learning the robot can reach the goal whilst avoiding obstacles, it even outperforms a classical method (gradient descent). 
@@ -30,13 +32,14 @@ These vectors originate from control points that have to be chosen manually:
 
 If the net force on the robot is zero it gets stuck. I cannot "see" the obstacle except when it gets close to it.
 
-
-This is where the idea of using reinforcement learning came from, we can give the neural network the same inputs, but we can also make it aware of the obstacles it's about to face. 
-In theory, it could then plan its movement ahead and avoid the obstacle without getting stuck. The idea is to take the obstacles and turn them into an occupancy grid which is then 
-fed into the neural network as an image:
+This is where the idea of using reinforcement learning came from. We can give the agent the same inputs as gradient descent, 
+but we can also make it aware of its current position and obstacles it's about to face, both their size and location. 
+In theory, it could then plan its movement ahead and avoid the obstacle without getting stuck. The idea is to take the obstacles 
+and turn them into an occupancy grid which is then fed into the network as an image using convolutional filters 
+(here color corresponds to the height of the obstacle):
 ![Alt text](media/grid_conversion.png)
 
-The attractive vectors, repulsive vectors and the occupancy grid should be all the information needed to reach the goal, and it turns out it is.
+The attractive vectors, repulsive vectors, current location and the occupancy grid should be all the information needed to reach the goal, and it turns out it is.
 The specific algorithm used here is the soft actor critic method ([Soft Actor Critic__ Haarnoja et al., 2018](https://arxiv.org/abs/1812.05905)).
 
 The agent controls the robot by updating its target position and orientation (pose). Giving the agent direct control over the angels of the robot would mean it has to figure out inverse kinematics as well, but since I have the algorithm for inverse kinematics there is no need for this.
@@ -46,7 +49,7 @@ Raw movement (left) vs smoothed movement (right):
 
 <p float="left">
   <img src="media/rl_raw.gif" width="335" />
-  <img src="media/rl.gif" width="335" />
+  <img src="media/RL.gif" width="335" />
 </p>
 
 Here is the agent solving all the training scenarios:
@@ -56,9 +59,34 @@ Here is the agent solving all the training scenarios:
   <img src="media/solve_2.gif" width="335" />
 </p>
 
+Finally a few examples of the agent solving scenarios that were not part of the training set:
+![Alt text](media/new_scenarios.gif)
 
-## deploying in the real world
 
+
+## deploying in the real world with machine vision
+After converting the agent's output to a B-spline we have a simple path the robot has to follow. 
+The hard part is converting the obstacles in the real world to the digital world. 
+This is achieved by using machine vision, specifically opencv with the 
+[aruco library](https://docs.opencv.org/4.5.2/d5/dae/tutorial_aruco_detection.html).
+With the aruco library it is then possible to get the relative position and rotation of the markers and the board relative 
+to the camera. Using linear algebra it is then trivial to get the position of the markers relative to the board. 
+The board is at a known position relative to the robot which means we now know the position of the markers with respect 
+to the robot, because each marker has a unique ID I have simply hard coded which obstacle is attached to which marker. 
+For example marker 29 is a box of 12 by 12 by 35 centimeters. The camera image is then transformed:
+
+![Alt text](media/vision_conversion.png)
+
+
+## inverse kinematics
+For the mathematical details of the inverse kinematics of this robot see [ik_documentation.pdf](documentation/ik_documentation.pdf)
+
+powered by: "Lorenzo Sciavicco and Bruno Siciliano. Modelling and control of robot
+manipulators. Springer Science & Business Media, 2012."
+
+## record and play back with a controller
+Using inverse kinematics and B-spline path planning it's easy to program a path for the robot using a controller:
+![Alt text](media/controller.gif)
 
 ## Reinforcement learning training with docker
 If you want to save yourself the pain of installing cuda, there is always docker. 
