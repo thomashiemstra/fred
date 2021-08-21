@@ -4,9 +4,9 @@ Table of Contents
 -----------------
   * [Obstacle avoidance with reinforcement learning](#Obstacle-avoidance-with-reinforcement-learning)
   * [Algorithm details](#Algorithm-details)
-  * [deploying in the real world with machine vision](#deploying-in-the-real-world-with-machine-vision)
-  * [inverse kinematics](#inverse-kinematics)
-  * [record and play back with a controller](#record-and-play-back-with-a-controller)
+  * [Deploying in the real world with machine vision](#Deploying-in-the-real-world-with-machine-vision)
+  * [Inverse kinematics](#Inverse-kinematics)
+  * [Record and play back with a controller](#Record-and-play-back-with-a-controller)
 
 ## Obstacle avoidance with reinforcement learning
 Using deep reinforcement learning the robot can reach the goal whilst avoiding obstacles, it even outperforms a classical method (gradient descent). 
@@ -64,7 +64,7 @@ Finally a few examples of the agent solving scenarios that were not part of the 
 
 
 
-## deploying in the real world with machine vision
+## Deploying in the real world with machine vision
 After converting the agent's output to a B-spline we have a simple path the robot has to follow. 
 The hard part is converting the obstacles in the real world to the digital world. 
 This is achieved by using machine vision, specifically opencv with the 
@@ -78,13 +78,13 @@ For example marker 29 is a box of 12 by 12 by 35 centimeters. The camera image i
 ![Alt text](media/vision_conversion.png)
 
 
-## inverse kinematics
-For the mathematical details of the inverse kinematics of this robot see [ik_documentation.pdf](documentation/ik_documentation.pdf)
+## Inverse kinematics
+The inverse kinematics is based on chapter 2 of "Lorenzo Sciavicco and Bruno Siciliano. Modelling and control of robot
+manipulators. Springer Science & Business Media, 2012." For the mathematical details of the inverse kinematics of this robot see [ik_documentation.pdf](documentation/ik_documentation.pdf)
 
-powered by: "Lorenzo Sciavicco and Bruno Siciliano. Modelling and control of robot
-manipulators. Springer Science & Business Media, 2012."
 
-## record and play back with a controller
+
+## Record and play back with a controller
 Using inverse kinematics and B-spline path planning it's easy to program a path for the robot using a controller:
 ![Alt text](media/controller.gif)
 
@@ -100,3 +100,15 @@ docker run -it --gpus all --rm -v /home/thomas/PycharmProjects/fred/src:/tf/src 
 
 once in docker:
 python src/reinforcementlearning/softActorCritic/soft_actor_critic.py --root_dir=test
+
+░░░░░░░█▐▓▓░████▄▄▄█▀▄▓▓▓▌█ Epic code  
+░░░░░▄█▌▀▄▓▓▄▄▄▄▀▀▀▄▓▓▓▓▓▌█  
+░░░▄█▀▀▄▓█▓▓▓▓▓▓▓▓▓▓▓▓▀░▓▌█  
+░░█▀▄▓▓▓███▓▓▓███▓▓▓▄░░▄▓▐█▌ level is so high  
+░█▌▓▓▓▀▀▓▓▓▓███▓▓▓▓▓▓▓▄▀▓▓▐█  
+▐█▐██▐░▄▓▓▓▓▓▀▄░▀▓▓▓▓▓▓▓▓▓▌█▌  
+█▌███▓▓▓▓▓▓▓▓▐░░▄▓▓███▓▓▓▄▀▐█ much quality  
+█▐█▓▀░░▀▓▓▓▓▓▓▓▓▓██████▓▓▓▓▐█  
+▌▓▄▌▀░▀░▐▀█▄▓▓██████████▓▓▓▌█▌  
+▌▓▓▓▄▄▀▀▓▓▓▀▓▓▓▓▓▓▓▓█▓█▓█▓▓▌█▌ Wow.  
+█▐▓▓▓▓▓▓▄▄▄▓▓▓▓▓▓█▓█▓█▓█▓▓▓▐█  
