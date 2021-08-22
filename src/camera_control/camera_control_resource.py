@@ -152,8 +152,8 @@ def start_board_to_board():
         if object_handler.get_aruco_image_handler() is not None:
             print("let's not start 2 detectors at the same time, aruco already started!")
             return jsonify(success=True)
-        if object_handler.get_obstacle_avoidance is not None:
-            print('already started')
+        if object_handler.get_obstacle_avoidance() is not None:
+            print('already started obstacle avoidance')
             return jsonify(success=True)
 
     camera = global_objects.get_camera()
@@ -173,7 +173,7 @@ def start_board_to_board_controller():
         if not started:
             print("camera not started!")
             return jsonify(success=False)
-        if not object_handler.get_board_to_board_handler() is None:
+        if object_handler.get_board_to_board_handler() is None:
             print('no board to board image handler started')
             return jsonify(success=True)
 
