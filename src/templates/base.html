@@ -21,11 +21,6 @@
       <div class="jumbotron text-center" style="background-color:lavender;">
         {% block title -%}
         {%- endblock title %}
-        Robot servo 1 and 2 current:
-      <div class="btn-group">
-        <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/robot_full_force')">Full</button>
-        <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/robot_low_force')">Low</button>
-      </div>
     </div>
 
 

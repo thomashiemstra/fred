@@ -23,6 +23,7 @@ class ServoEncoder(json.JSONEncoder):
                 "d": o.d,
                 "offset": o.constant_offset,
                 "goal_current": o.goal_current,
+                "operating_mode" : o.operating_mode,
                 "class": "servo"
             }
         else:
@@ -48,7 +49,8 @@ class ServoDecoder(json.JSONDecoder):
                 dictionary["i"],
                 dictionary["d"],
                 dictionary["offset"],
-                dictionary["goal_current"]
+                dictionary["goal_current"],
+                dictionary["operating_mode"]
             )
         else:
             return dictionary
@@ -60,8 +62,8 @@ class Servo:
     target_position = 0
     current_position = -1  # set by the servo handler
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=100, profile_acceleration=50,
-                 p=1000, i=600, d=500, offset=0, goal_current=None):
+    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
+                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None):
         self.p = p
         self.i = i
         self.d = d
@@ -69,6 +71,7 @@ class Servo:
         self.min_angle = min_angle
         self.min_position = min_position
         self.max_position = max_position
+        self.operating_mode = operating_mode
         self.profile_velocity = profile_velocity
         self.profile_acceleration = profile_acceleration
         self.constant_offset = offset
@@ -76,10 +79,11 @@ class Servo:
         self.unmodified_target_position = 0
 
     def __str__(self):
-        return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} " \
+        return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
                "profile_velocity={} profile_acceleration={} offset={} goal_current={}" \
             .format(self.p, self.i, self.d, self.max_angle, self.min_angle, self.min_position, self.max_position,
-                    self.profile_velocity, self.profile_acceleration, self.constant_offset, self.goal_current)
+                    self.operating_mode, self.profile_velocity, self.profile_acceleration, self.constant_offset,
+                    self.goal_current)
 
     # updates the target position of this servo
     def set_target_position_from_angle(self, angle, all_angles=None):
@@ -116,10 +120,11 @@ class AdjustmentDirections(Enum):
 
 class ServoWithOffsetFunction(Servo):
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, offset_function_up, offset_function_down, profile_velocity=100,
-                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None):
-        super().__init__(min_position, max_position, min_angle, max_angle, profile_velocity, profile_acceleration, p, i,
-                         d, offset, goal_current)
+    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, offset_function_up,
+                 offset_function_down, profile_velocity=100, profile_acceleration=50, p=1000, i=600, d=500,
+                 offset=0, goal_current=None):
+        super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
+                         profile_acceleration, p, i, d, offset, goal_current)
         if offset_function_up is None or offset_function_down is None:
             raise ValueError("Should have gotten offset functions")
         self.offset_function_up = offset_function_up
@@ -153,10 +158,10 @@ class ServoWithOffsetFunction(Servo):
 
 class Servo2(Servo):
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=100, profile_acceleration=50,
-                 p=1000, i=600, d=500, offset=0, goal_current=None, dynamic_offsets=None):
-        super().__init__(min_position, max_position, min_angle, max_angle, profile_velocity, profile_acceleration, p, i,
-                         d, offset, goal_current)
+    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
+                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None, dynamic_offsets=None):
+        super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
+                         profile_acceleration, p, i, d, offset, goal_current)
         self.dynamic_offsets = dynamic_offsets
         self.dynamic_offsets_info = self._get_dynamic_offsets_info(dynamic_offsets)
         self.angle2_lookup_min = self.dynamic_offsets_info['min']
@@ -210,10 +215,10 @@ class Servo2(Servo):
 
 class Servo3(Servo):
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, profile_velocity=100, profile_acceleration=50,
-                 p=1000, i=600, d=500, offset=0, goal_current=None, dynamic_offsets=None):
-        super().__init__(min_position, max_position, min_angle, max_angle, profile_velocity, profile_acceleration, p, i,
-                         d, offset, goal_current)
+    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
+                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None, dynamic_offsets=None):
+        super().__init__(min_position, max_position, min_angle, max_angle, operating_mode,
+                         profile_velocity, profile_acceleration, p, i, d, offset, goal_current)
         self.dynamic_offsets = dynamic_offsets
         self.angle_lookup_min, self.angle_lookup_max = self._get_dynamic_offsets_info(dynamic_offsets)
 

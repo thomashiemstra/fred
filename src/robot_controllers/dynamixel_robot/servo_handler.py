@@ -105,6 +105,15 @@ class ServoHandler(object):
 
         return self.__write_and_clear()
 
+    def set_configured_operating_mode(self):
+        for servo_id in self.servo_map:
+            servo = self.servo_map[servo_id]
+            operating_mode = servo.operating_mode
+            self.set_operating_mode(servo_id, operating_mode)
+
+    def set_operating_mode(self, servo_id, mode):
+        utils.write_1_byte(self.packet_handler, self.port_handler, self.config.ADDR_OPERATING_MODE, servo_id, mode)
+
     def set_pid(self):
         """set the velocity profile of the servos, this get's wiped after a reboot"""
         self.group_bulk_write.clearParam()

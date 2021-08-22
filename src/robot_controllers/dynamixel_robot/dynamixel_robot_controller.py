@@ -4,7 +4,6 @@ from timeit import default_timer as timer
 
 import numpy as np
 
-from src.global_constants import SERVO_1_LOW_CURRENT, SERVO_2_LOW_CURRENT, SERVO_1_HIGH_CURRENT, SERVO_2_HIGH_CURRENT
 from src.kinematics.kinematics import inverse_kinematics, forward_position_kinematics
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
@@ -49,18 +48,27 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler = ServoHandler(gripper_servos, cfg, port_handler,
                                                   packet_handler, group_bulk_write, group_bulk_read)
 
+        self.initialize_servos_or_exit()
+        self._current_angles = self.get_current_angles_or_exit()
+        self.status = False
+        self.lock = threading.RLock()
+
+        self.gripper_state = 0  # 0 is completely open 100 is completely closed
+
+    def initialize_servos_or_exit(self):
         success = self.set_velocity_profile()
         success = success & self.set_pid()
+        success = success & self.set_control_mode()
         if not success:
             print('failed to setup the dynamixel robot, exiting')
             sys.exit()
-        self.status = False
-        self.lock = threading.RLock()
-        self._current_angles = self.get_current_angles()
-        if self._current_angles is None:
+
+    def get_current_angles_or_exit(self):
+        angles = self.get_current_angles()
+        if angles is None:
             print('failed to setup the dynamixel robot, exiting')
             sys.exit()
-        self.gripper_state = 0  # 0 is completely open 100 is completely closed
+        return angles
 
     def enable_servos(self):
         if not self.safety_check():
@@ -68,20 +76,9 @@ class DynamixelRobotController(AbstractRobotController):
             self.disable_servos()
             return
 
-        self.base_servo_handler.set_goal_current(1, SERVO_1_LOW_CURRENT)
-        self.base_servo_handler.set_goal_current(2, SERVO_2_LOW_CURRENT)
-
         self.base_servo_handler.set_torque(enable=True)
         self.wrist_servo_handler.set_torque(enable=True)
         self.gripper_servo_handler.set_torque(enable=True)
-
-    def set_servo_1_and_2_low_current(self):
-        self.base_servo_handler.set_goal_current(1, SERVO_1_LOW_CURRENT)
-        self.base_servo_handler.set_goal_current(2, SERVO_2_LOW_CURRENT)
-
-    def set_servo_1_and_2_full_current(self):
-        self.base_servo_handler.set_goal_current(1, SERVO_1_HIGH_CURRENT)
-        self.base_servo_handler.set_goal_current(2, SERVO_2_HIGH_CURRENT)
 
     def safety_check(self):
         positions = self.get_current_positions()
@@ -163,6 +160,12 @@ class DynamixelRobotController(AbstractRobotController):
         success = success & self.wrist_servo_handler.set_configured_goal_current()
         success = success & self.gripper_servo_handler.set_configured_goal_current()
         return success
+
+    def set_control_mode(self):
+        self.base_servo_handler.set_configured_operating_mode()
+        self.wrist_servo_handler.set_configured_operating_mode()
+        self.gripper_servo_handler.set_configured_operating_mode()
+        return True
 
     def set_pid(self):
         success = self.base_servo_handler.set_pid()

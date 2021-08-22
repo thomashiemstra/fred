@@ -12,8 +12,16 @@ def set_torque(packet_handler, port_handler, config, servo_id, enable):
         print("%s" % packet_handler.getTxRxResult(comm_result))
     elif error != 0:
         print("%s" % packet_handler.getRxPacketError(error))
-    else:
+    elif enable:
         print("Dynamixel#%d has been successfully connected" % servo_id)
+
+
+def write_1_byte(packet_handler, port_handler, address, servo_id, mode):
+    comm_result, error = packet_handler.write1ByteTxRx(port_handler, servo_id, address, mode)
+    if comm_result != dynamixel.COMM_SUCCESS:
+        print("%s" % packet_handler.getTxRxResult(comm_result))
+    elif error != 0:
+        print("%s" % packet_handler.getRxPacketError(error))
 
 
 def add_group_write(group_bulk_write, servo_id, address, address_len, value):

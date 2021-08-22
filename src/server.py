@@ -83,20 +83,6 @@ def stop_camera():
     return jsonify(success=True)
 
 
-@app.route('/robot_full_force', methods=['POST'])
-def full_force():
-    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
-    robot.set_servo_1_and_2_full_current()
-    return jsonify(success=True)
-
-
-@app.route('/robot_low_force', methods=['POST'])
-def low_force():
-    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
-    robot.set_servo_1_and_2_low_current()
-    return jsonify(success=True)
-
-
 def start_server():
     app.run(debug=False, host='0.0.0.0')
 

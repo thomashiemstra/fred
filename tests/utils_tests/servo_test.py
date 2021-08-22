@@ -1,5 +1,6 @@
 import unittest
 
+from src.global_constants import EXTENDED_POSITION_CONTROL
 from src.robot_controllers.dynamixel_robot.servo import Servo, Servo2, Servo3, ServoWithOffsetFunction
 from numpy import pi
 
@@ -8,7 +9,7 @@ class ServoTest(unittest.TestCase):
 
     def test_get_angle_from_position_1(self):
         # given
-        servo = Servo(0, 100, 0, 100)
+        servo = Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL)
 
         # when
         angle = servo.get_angle_from_position(50)
@@ -18,7 +19,7 @@ class ServoTest(unittest.TestCase):
 
     def test_get_angle_from_position_2(self):
         # given
-        servo = Servo(0, 100, 0, 200)
+        servo = Servo(0, 100, 0, 200, EXTENDED_POSITION_CONTROL)
 
         # when
         angle = servo.get_angle_from_position(100)
@@ -28,7 +29,7 @@ class ServoTest(unittest.TestCase):
 
     def test_get_angle_from_position_3(self):
         # given
-        servo = Servo(0, 50, 0, 100)
+        servo = Servo(0, 50, 0, 100, EXTENDED_POSITION_CONTROL)
 
         # when
         angle = servo.get_angle_from_position(25)
@@ -38,7 +39,7 @@ class ServoTest(unittest.TestCase):
 
     def test_set_target_position_from_angle_1(self):
         # given
-        servo = Servo(0, 100, 0, 100)
+        servo = Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL)
 
         # when
         servo.set_target_position_from_angle(50)
@@ -49,7 +50,7 @@ class ServoTest(unittest.TestCase):
 
     def test_set_target_position_from_angle_2(self):
         # given
-        servo = Servo(0, 50, 0, 100)
+        servo = Servo(0, 50, 0, 100, EXTENDED_POSITION_CONTROL)
 
         # when
         servo.set_target_position_from_angle(40)
@@ -60,7 +61,7 @@ class ServoTest(unittest.TestCase):
 
     def test_set_target_position_from_angle_3(self):
         # given
-        servo = Servo(0, 100, 0, 200)
+        servo = Servo(0, 100, 0, 200, EXTENDED_POSITION_CONTROL)
 
         # when
         servo.set_target_position_from_angle(50)
@@ -76,7 +77,7 @@ class ServoWithOffsetFunctionTest(unittest.TestCase):
         # given
         def offset_function(all_angles):
             return all_angles[0]
-        servo = ServoWithOffsetFunction(0, 100, 0, pi, offset_function, offset_function)
+        servo = ServoWithOffsetFunction(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, offset_function, offset_function)
 
         # when
         servo.set_target_position_from_angle(pi/2, [10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -86,7 +87,7 @@ class ServoWithOffsetFunctionTest(unittest.TestCase):
         self.assertEqual(40, target, "got a wrong target")
 
     def test_no_function(self):
-        self.assertRaises(ValueError, ServoWithOffsetFunction, 0, 1, 0, 1, None, None)
+        self.assertRaises(ValueError, ServoWithOffsetFunction, 0, 1, 0, 1, EXTENDED_POSITION_CONTROL, None, None)
 
 
 class Servo2Tests(unittest.TestCase):
@@ -94,7 +95,7 @@ class Servo2Tests(unittest.TestCase):
     def test_1(self):
         # given
         offset = {"0.0": {"0.0": -10}}
-        servo2 = Servo2(0, 100, 0, 100, dynamic_offsets=offset)
+        servo2 = Servo2(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.0
@@ -108,7 +109,7 @@ class Servo2Tests(unittest.TestCase):
     def test_2(self):
         # given
         offset = {"0.2": {"0.0": -10}}
-        servo2 = Servo2(0, 100, 0, pi, dynamic_offsets=offset)
+        servo2 = Servo2(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.25 * pi
@@ -122,7 +123,7 @@ class Servo2Tests(unittest.TestCase):
     def test_3(self):
         # given
         offset = {"0.0": {"0.0": -10}, "0.1": {"0.0": -5}}
-        servo2 = Servo2(0, 100, 0, pi, dynamic_offsets=offset)
+        servo2 = Servo2(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.25 * pi
@@ -136,7 +137,7 @@ class Servo2Tests(unittest.TestCase):
     def test_4(self):
         # given
         offset = {"0.1": {"0.0": -5}}
-        servo2 = Servo2(0, 100, 0, pi, dynamic_offsets=offset)
+        servo2 = Servo2(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.0
@@ -153,7 +154,7 @@ class Servo3Test(unittest.TestCase):
     def test_1(self):
         # given
         offset = {"0.4": 1, "0.5": 10, "0.6": 2}
-        servo3 = Servo3(0, 100, 0, pi, dynamic_offsets=offset)
+        servo3 = Servo3(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.0
@@ -167,7 +168,7 @@ class Servo3Test(unittest.TestCase):
     def test_2(self):
         # given
         offset = {"0.4": 1, "0.5": 10, "0.6": 2}
-        servo3 = Servo3(0, 100, 0, pi, dynamic_offsets=offset)
+        servo3 = Servo3(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.2 * pi
@@ -181,7 +182,7 @@ class Servo3Test(unittest.TestCase):
     def test_3(self):
         # given
         offset = {"0.4": 1, "0.5": 10, "0.6": 2}
-        servo3 = Servo3(0, 100, 0, pi, dynamic_offsets=offset)
+        servo3 = Servo3(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offset)
 
         # when
         angle2 = 0.5 * pi

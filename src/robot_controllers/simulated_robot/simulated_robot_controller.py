@@ -128,9 +128,4 @@ class SimulatedRobotController(AbstractRobotController):
     def get_servo_position(self, servo_id):
         pass
 
-    def set_servo_1_and_2_low_current(self):
-        pass
-
-    def set_servo_1_and_2_full_current(self):
-        pass
 

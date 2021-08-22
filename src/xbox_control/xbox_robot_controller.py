@@ -103,7 +103,7 @@ class XboxRobotController:
         # The robot could be anywhere, first move it from it's current position to the target pose
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
 
-        from_current_angles_to_pose(self.current_pose, self.servo_controller, 1)
+        from_current_angles_to_pose(self.current_pose, self.servo_controller, 3)
         self.servo_controller.set_gripper(self.gripper_state)
 
         # self.current_pose = pose_to_pose(self.current_pose, Pose(0, 25, 10), self.servo_controller, 2)
