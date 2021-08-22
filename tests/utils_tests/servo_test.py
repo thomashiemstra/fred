@@ -70,6 +70,29 @@ class ServoTest(unittest.TestCase):
         target = servo.target_position
         self.assertEqual(25, target, "got a wrong target")
 
+    def test_constant_offset_angle_conversion(self):
+        # given
+        servo = Servo(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, offset=10)
+
+        # when
+        angle = pi/2
+        servo.set_target_position_from_angle(angle)
+
+        # then
+        self.assertEqual(60, servo.target_position)
+
+    def test_constant_offset_angle_conversion_back_to_angle(self):
+        # given
+        servo = Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, offset=10)
+
+        # when
+        angle = 30
+        servo.set_target_position_from_angle(angle)
+
+        # then
+        servo_target = servo.target_position
+        self.assertEqual(angle, servo.get_angle_from_position(servo_target))
+
 
 class ServoWithOffsetFunctionTest(unittest.TestCase):
 
