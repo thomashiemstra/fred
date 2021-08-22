@@ -98,7 +98,9 @@ class ArucoImageHandler(ImageHandler):
 
         ids, marker_rvecs, marker_tvecs, corners = self.detect_markers(gray, frame, self.parameters)
         if ids is None:
+            self.clear_detected_markers()
             return
+
         relative_tvecs, relative_rotation_matrices = self.find_relative_vectors_of_markers_with_respect_to_board(
             board_rvec,
             board_tvec, ids,
@@ -202,6 +204,10 @@ class ArucoImageHandler(ImageHandler):
             self.detected_markers.append(DetectedMarker(id, relative_rotation_matrix, tvec))
 
     @synchronized_with_lock("lock")
+    def clear_detected_markers(self):
+        self.detected_markers = []
+
+    @synchronized_with_lock("lock")
     def get_detected_markers(self):
         return [detected_marker.copy() for detected_marker in self.detected_markers]
 
@@ -215,7 +221,7 @@ def get_default_board_to_board_image_handler():
 
     cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data.json')
     handler = BoardToBoardImageHandler(base_board, target_board, cameraMatrix, distCoeffs, charuco_board_dictionary,
-                                       charuco_board_dictionary_2, should_draw=False)
+                                       charuco_board_dictionary_2, should_draw=True)
     return handler
 
 
