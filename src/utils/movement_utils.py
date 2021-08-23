@@ -1,16 +1,17 @@
 from __future__ import division
+
+from copy import copy
 from math import ceil
 from time import sleep
+
 import numpy as np
+from scipy.interpolate import splev, splprep
 
 import src.global_constants
 from src.kinematics.kinematics import inverse_kinematics
 from src.kinematics.kinematics_utils import Pose
-import logging as log
-from scipy.interpolate import splev, splprep
-from copy import copy
-
 from src.utils.movement_exception import MovementException
+
 
 def pose_to_pose(start_pose, stop_pose, servo_controller, time=None):
     robot_config = servo_controller.robot_config
@@ -47,9 +48,17 @@ def angles_to_angles(start_angles, stop_angles, time, servo_controller):
         servo_controller.move_servos(current_angles)
 
 
+def already_at_target_angles(current_angles, target_angles):
+    return np.linalg.norm(current_angles - target_angles) < 0.2
+
+
 def from_current_angles_to_pose(pose, servo_controller, time):
     current_angles = servo_controller.get_current_angles()
     target_angles = servo_controller.pose_to_angles(pose)
+
+    if already_at_target_angles(current_angles, target_angles):
+        return
+
     angles_to_angles(current_angles, target_angles, time, servo_controller)
 
 
