@@ -27,6 +27,7 @@ class CameraCapture:
         self.lock = threading.RLock()
         self.image_handlers_lock = threading.RLock()
         self._image_handlers = image_handlers
+        self._thread = None
 
     @synchronized_with_lock("lock")
     def start_camera(self):
@@ -46,9 +47,9 @@ class CameraCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CaptureConfig.screen_width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
 
-        thread = threading.Thread(target=self.__capture_camera)
+        self._thread = threading.Thread(target=self.__capture_camera)
         self._running = True
-        thread.start()
+        self._thread.start()
 
     @synchronized_with_lock("lock")
     def start_camera_recording(self):
@@ -56,7 +57,7 @@ class CameraCapture:
             print("camera already running")
             return
 
-        self._cap = cv2.VideoCapture(self._camera)
+        self._cap = cv2.VideoCapture(self._camera, cv2.CAP_DSHOW)
         if not self._cap.isOpened():
             print("no camera connected!")
             return
@@ -67,13 +68,16 @@ class CameraCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CaptureConfig.screen_width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
 
-        thread = threading.Thread(target=self.__capture_camera)
+        self._thread = threading.Thread(target=self.__capture_camera)
         self._running = True
-        thread.start()
+        self._thread.start()
 
     @synchronized_with_lock("lock")
     def stop_camera(self):
+        if self._thread is None:
+            return
         self._running = False
+        self._thread.join()
 
     def __capture_camera(self):
         while True:
