@@ -180,7 +180,6 @@ def start_board_to_board_controller():
     board_to_board_handler = object_handler.get_board_to_board_handler()
     controller = get_board_to_board_controller(board_to_board_handler)
     controller.start()
-    print("board to board controller stopped")
     return jsonify(success=True)
 
 
