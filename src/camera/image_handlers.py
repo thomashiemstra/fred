@@ -267,8 +267,8 @@ class BoardToBoardImageHandler(ImageHandler):
         self.populate_relative_vecs(relative_rotation_matrix, relative_tvec)
 
         if self.should_draw:
-            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
-            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, target_board_rvec, target_board_tvec, length=50)
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=5)
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, target_board_rvec, target_board_tvec, length=5)
 
     @staticmethod
     def board_not_detected(board_rvec, board_tvec, retval):
@@ -306,7 +306,8 @@ class BoardToBoardImageHandler(ImageHandler):
         if self.board_not_detected(rvec, tvec, retval):
             return False, None, None
 
-        self._previous_board_rvec, self._previous_board_tvec = rvec, tvec
+        if board is self.board:
+            self._previous_board_rvec, self._previous_board_tvec = rvec, tvec
         return retval, rvec, tvec
 
     @staticmethod
