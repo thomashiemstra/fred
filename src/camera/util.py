@@ -8,7 +8,7 @@ import numpy as np
 class CaptureConfig:
     screen_width = 1920
     screen_height = 1080
-    fps = 30
+    fps = 60
     marker_size = 20
     image_format = cv2.VideoWriter_fourcc(*'MJPG')
     FOURCC =  cv2.VideoWriter.fourcc('m', 'j', 'p', 'g')
