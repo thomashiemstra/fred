@@ -8,13 +8,15 @@
 
 {% block content %}
 
+
+
     <div class="container">
         <div class="row">
             <div class="col-sm-4">
 
             </div>
             <div class="col-sm-4">
-                <h2>Robot controll</h2>
+           <h2>Robot controll</h2>
                   <div class="btn-group">
                     <button id="toggleRobotOn" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/enable_servos')">On</button>
                     <button id="toggleRobotOff" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/disable_servos')">Off</button>
@@ -25,7 +27,7 @@
             </div>
         </div>
 
-    <div class="container">
+        <hr class="my-12"/>
         <div class="row">
             <div class="col-sm-4">
                 <h2>Instructions:</h2>
@@ -51,6 +53,7 @@
             </div>
         </div>
 
+        <hr class="my-12"/>
         <div class="row">
             <div class="col-sm-4">
                 <h2>Start obstacle avoidance</h2>
@@ -59,7 +62,6 @@
             <div class="col-sm-4">
                 <div class="btn-group">
                     <h2>Create scenario</h2>
-                    <br>
                     <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/create_and_set_scenario')">Create</button>
                 </div>
             </div>
@@ -78,21 +80,30 @@
             </div>
         </div>
 
+        <hr class="my-12"/>
         <div class="row">
             <div class="col-sm-4">
                 <h2>Start board to board detection</h2>
                 <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_board_to_board')">Start</button>
             </div>
             <div class="col-sm-4">
+                <h2>board to board controller</h2>
                 <div class="btn-group">
                     <button type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/start_board_to_board_controller')">On</button>
                     <button type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/stop_board_to_board_controller')">Off</button>
                 </div>
             </div>
             <div class="col-sm-4">
-
+                <div>
+                    Set Kalman Filter
+                    <br>
+                    <div class="btn-group">
+                        <button id="startFilter" type="button" class="btn btn-success" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/enable_filter_board_to_board_controller')">On</button>
+                        <button id="stopFilter" type="button" class="btn btn-danger" onclick="emptyPostRequest('http://127.0.0.1:5000/camera/disable_filter_board_to_board_controller')">Off</button>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
+
 
 {% endblock %}

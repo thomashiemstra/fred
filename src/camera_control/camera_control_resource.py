@@ -187,8 +187,36 @@ def start_board_to_board_controller():
 def stop_board_to_board_controller():
     global object_handler
     board_to_board_handler = object_handler.get_board_to_board_handler()
+    if board_to_board_handler is None:
+        print("no board to board controller running")
+        return jsonify(success=True)
+
     controller = get_board_to_board_controller(board_to_board_handler)
     controller.stop()
+    return jsonify(success=True)
+
+
+@camera_api.route('/enable_filter_board_to_board_controller', methods=['POST'])
+def enable_filter_board_to_board_controller():
+    global object_handler
+    board_to_board_handler = object_handler.get_board_to_board_handler()
+    if board_to_board_handler is None:
+        print("no board to board controller running")
+        return jsonify(success=True)
+
+    board_to_board_handler.set_should_filter(True)
+    return jsonify(success=True)
+
+
+@camera_api.route('/disable_filter_board_to_board_controller', methods=['POST'])
+def disable_filter_board_to_board_controller():
+    global object_handler
+    board_to_board_handler = object_handler.get_board_to_board_handler()
+    if board_to_board_handler is None:
+        print("no board to board controller running")
+        return jsonify(success=True)
+
+    board_to_board_handler.set_should_filter(False)
     return jsonify(success=True)
 
 

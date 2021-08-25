@@ -44,6 +44,8 @@ class BoardToBoardRobotController:
         self.robot = robot
         self.board_to_board_image_handler = board_to_board_image_handler
         self.lock = threading.RLock()
+        self.should_filter_lock = threading.RLock()
+        self.should_filter = True
         self.thread = None
         self.startup_pose = Pose(21, 21.0, 4)
         self.neutral_pose = Pose(0, 30, 10)
@@ -80,27 +82,42 @@ class BoardToBoardRobotController:
     def is_done(self):
         return self.done
 
+    @synchronized_with_lock("should_filter_lock")
+    def should_filter(self):
+        return self.should_filter
+
+    @synchronized_with_lock("should_filter_lock")
+    def set_should_filter(self, val):
+        self.should_filter = val
+
     def get_new_filtered_pose(self):
         relative_matrix, translation_vector = self.board_to_board_image_handler.get_revlative_vecs()
         if relative_matrix is None or translation_vector is None:
             return self.current_pose
 
+        # Measured values
         x_m = translation_vector[0]
         y_m = translation_vector[1] + 10
         z_m = translation_vector[2] + 5
-
         m_orientation = self.get_target_matrix(relative_matrix)
-        old_orientation = self.current_pose.get_euler_matrix()
 
+        # current values
+        old_orientation = self.current_pose.get_euler_matrix()
         old_x = self.current_pose.x
         old_y = self.current_pose.y
         old_z = self.current_pose.z
 
-        new_x = old_x + self.kg * (x_m - old_x)
-        new_y = old_y + self.kg * (y_m - old_y)
-        new_z = old_z + self.kg * (z_m - old_z)
+        if self.should_filter:
+            new_x = old_x + self.kg * (x_m - old_x)
+            new_y = old_y + self.kg * (y_m - old_y)
+            new_z = old_z + self.kg * (z_m - old_z)
+            orientation = old_orientation + self.kg * (m_orientation - old_orientation)
 
-        orientation = old_orientation + self.kg * (m_orientation - old_orientation)
+        else:
+            new_x = x_m
+            new_y = y_m
+            new_z = z_m
+            orientation = m_orientation
 
         x, y, z = apply_workspace_limits(old_x, old_y, old_z, new_x, new_y, new_z)
 
