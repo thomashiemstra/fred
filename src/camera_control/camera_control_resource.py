@@ -204,7 +204,8 @@ def enable_filter_board_to_board_controller():
         print("no board to board controller running")
         return jsonify(success=True)
 
-    board_to_board_handler.set_should_filter(True)
+    controller = get_board_to_board_controller(board_to_board_handler)
+    controller.set_should_filter(True)
     return jsonify(success=True)
 
 
@@ -216,7 +217,8 @@ def disable_filter_board_to_board_controller():
         print("no board to board controller running")
         return jsonify(success=True)
 
-    board_to_board_handler.set_should_filter(False)
+    controller = get_board_to_board_controller(board_to_board_handler)
+    controller.set_should_filter(False)
     return jsonify(success=True)
 
 
