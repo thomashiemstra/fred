@@ -52,7 +52,7 @@ class BoardToBoardRobotController:
         self.current_pose = None
         self.done = False
         self.dt = 1.0 / 100
-        self.kg = 0.05
+        self.kg = 0.04
 
     @synchronized_with_lock("lock")
     def stop(self):
