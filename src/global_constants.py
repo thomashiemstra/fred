@@ -33,4 +33,4 @@ class WorkSpaceLimits:
     radius_min = 20
     radius_max = 57
     y_min = d6 + 0.1  # y=0 is bad for the IK calculation, so let's make sure that never happens
-    z_min = 3
+    z_min = 0
