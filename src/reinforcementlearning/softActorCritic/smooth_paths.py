@@ -28,7 +28,7 @@ def get_usable_poses(poses, target_pose):
 
     for pose in poses[:-2]:
         d = pose_to_pose_distance(current_pose, pose)
-        if d > 5:
+        if d > 5 and pose.z < 30:
             result.append(pose)
             current_pose = pose
 
