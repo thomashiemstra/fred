@@ -110,7 +110,7 @@ class ArucoImageHandler(ImageHandler):
         self.populate_detected_makers(ids, relative_rotation_matrices, relative_tvecs)
 
         if self.should_draw_markers():
-            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=50)
+            aruco.drawAxis(frame, self.cameraMatrix, self.distCoeffs, board_rvec, board_tvec, length=10)
             # self.draw_marker_axis(frame, marker_rvecs, marker_tvecs, ids)
             aruco.drawDetectedMarkers(frame, corners, ids)
 
