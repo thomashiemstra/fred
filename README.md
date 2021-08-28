@@ -39,7 +39,10 @@ and turn them into an occupancy grid which is then fed into the network as an im
 (here color corresponds to the height of the obstacle):
 ![Alt text](media/grid_conversion.png)
 
-The attractive vectors, repulsive vectors, current location and the occupancy grid should be all the information needed to reach the goal, and it turns out it is.
+The attractive vectors, repulsive vectors, current location and the occupancy grid should be all the information needed to reach the goal, and it turns out it is. The neural network looks like this:
+ 
+![Alt text](media/Network_structure.png)
+
 The specific algorithm used here is the soft actor critic method ([Soft Actor Critic__ Haarnoja et al., 2018](https://arxiv.org/abs/1812.05905)).
 
 The agent controls the robot by updating its target position and orientation (pose). Giving the agent direct control over the angels of the robot would mean it has to figure out inverse kinematics as well, but since I have the algorithm for inverse kinematics there is no need for this.
