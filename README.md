@@ -2,6 +2,7 @@
 
 Table of Contents
 -----------------
+  * [Videos](#Videos)
   * [Obstacle avoidance with reinforcement learning](#Obstacle-avoidance-with-reinforcement-learning)
   * [Algorithm details](#Algorithm-details)
   * [Deploying in the real world with machine vision](#Deploying-in-the-real-world-with-machine-vision)
@@ -11,9 +12,12 @@ Table of Contents
   * [Physical robot details](#Physical-robot-details)
   * [Control panel](#Control-panel)
 
-## Obstacle avoidance with reinforcement learning
-A quick overview can be seen in [this](https://www.youtube.com/watch?v=u2XVU5J9dac) youtube video
+## Videos
+[Reinforcement learning overview](https://www.youtube.com/watch?v=u2XVU5J9dac)  
+[complete feature overview](https://www.youtube.com/watch?v=0Zqsso_n_9U)
 
+## Obstacle avoidance with reinforcement learning
+A quick overview can be seen in [this](https://www.youtube.com/watch?v=u2XVU5J9dac) youtube video  
 Using deep reinforcement learning the robot can reach the goal whilst avoiding obstacles, it even outperforms a classical method (gradient descent). 
 
 Gradient descent (left) vs trained agent (right):
