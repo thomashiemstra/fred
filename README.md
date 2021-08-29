@@ -88,8 +88,14 @@ manipulators. Springer Science & Business Media, 2012." For the mathematical det
 
 
 ## Record and play back with a controller
-Using inverse kinematics and B-spline path planning it's easy to program a path for the robot using a controller:
+Using inverse kinematics and an xbox controller the robot can be controlled directly:
+
 ![Alt text](media/controller.gif)
+
+## Motion tracking
+The aruco markers can be tracked in real time allowing for vision based control of the robot:
+
+![Alt text](media/tracking.gif)
 
 ## Reinforcement learning training with docker
 If you want to save yourself the pain of installing cuda, there is always docker. 
