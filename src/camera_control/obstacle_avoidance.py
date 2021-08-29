@@ -82,7 +82,7 @@ class ObstacleAvoidance:
 
         obstacles = self._find_obstacles()
         self.env, self.tf_env, self.eval_tf_env = self.get_env(obstacles)
-        self._initial_state = self.tf_env.reset()
+        self._initial_state = self.env.reset()
 
     def get_env(self, obstacles):
         scenario = Scenario(obstacles, start_pose=self.start_pose, target_pose=self.target_pose)
@@ -139,7 +139,6 @@ class ObstacleAvoidance:
         usable_poses = get_usable_poses(recoded_poses, self.target_pose)
 
         smoothing_factor = 1000
-        # b_spline_plot(usable_poses, s=smoothing_factor)
 
         spline_move = SplineMovement(usable_poses, 5, s=smoothing_factor)
 
