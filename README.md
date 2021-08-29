@@ -7,8 +7,11 @@ Table of Contents
   * [Deploying in the real world with machine vision](#Deploying-in-the-real-world-with-machine-vision)
   * [Inverse kinematics](#Inverse-kinematics)
   * [Record and play back with a controller](#Record-and-play-back-with-a-controller)
+  * [Motion tracking](#Motion-tracking)
 
 ## Obstacle avoidance with reinforcement learning
+A quick overview can be seen in [this](https://www.youtube.com/watch?v=u2XVU5J9dac) youtube video
+
 Using deep reinforcement learning the robot can reach the goal whilst avoiding obstacles, it even outperforms a classical method (gradient descent). 
 
 Gradient descent (left) vs trained agent (right):
@@ -96,6 +99,21 @@ Using inverse kinematics and an xbox controller the robot can be controlled dire
 The aruco markers can be tracked in real time allowing for vision based control of the robot:
 
 ![Alt text](media/tracking.gif)
+
+
+## Physical robot details
+The robot was designed in fusion360 and is printed on a Prusa mk2s. The design files can be found [here](https://a360.co/2PHQOEz). 
+The robot uses Dynamixel servos, 
+* Joint 1 is a xm430-W350 with a 3:1 gear reduction
+* Joint 2 is a XM540-W270 with a 3:1 gear reduction
+* Joint 3 is a xm430-W350
+* Joint 4 is a xc430-w240
+* Joint 5 is a xc430-w240
+* Joint 6 is a xc430-w150
+* the gripper uses a xl330-m288
+
+The plastic is all PLA, the lower arm is reinforced with carbon fiber rods. The gear reduction is achieved using belt and
+pulleys (and tensioners) which are normally used in 3d printers. The camera used is a C922 PRO HD STREAM WEBCAM.
 
 ## Reinforcement learning training with docker
 If you want to save yourself the pain of installing cuda, there is always docker. 
