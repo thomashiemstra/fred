@@ -12,7 +12,6 @@ from src.reinforcementlearning.environment.scenario import Scenario
 import tensorflow as tf
 
 import numpy as np
-from time import sleep
 
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, initialize_and_restore_train_checkpointer
 from src.reinforcementlearning.softActorCritic.smooth_paths import run_agent, get_usable_poses
@@ -29,8 +28,8 @@ class ObstacleAvoidance:
         self.lock = threading.RLock()
         self.stop_lock = threading.RLock()
         self.done = False
-        self.start_pose = Pose(-25, 25, 10)
-        self.target_pose = Pose(25, 25, 10)
+        self.start_pose = Pose(-25, 25, 10, flip=True)
+        self.target_pose = Pose(25, 25, 10, flip=True)
         self.env = None
         self.tf_env = None
         self.eval_tf_env = None
@@ -57,6 +56,11 @@ class ObstacleAvoidance:
     @synchronized_with_lock("stop_lock")
     def set_stopped(self, val):
         self.stopped = val
+
+    def change_flip(self):
+        self.start_pose.flip = not self.start_pose.flip
+        self.target_pose.flip = not self.target_pose.flip
+        self.create_and_set_scenario()
 
     def _find_obstacles(self):
         detected_markers = self.aruco_image_handler.get_detected_markers()

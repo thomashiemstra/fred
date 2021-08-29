@@ -270,6 +270,18 @@ def create_and_set_scenario():
     return jsonify(success=True)
 
 
+@camera_api.route('/change_flip', methods=['POST'])
+def change_flip():
+    global object_handler
+    with api_lock:
+        if object_handler.get_obstacle_avoidance() is None:
+            print("no obstacle avoidance running!")
+            return jsonify(success=False)
+
+    object_handler.get_obstacle_avoidance().change_flip()
+    return jsonify(success=True)
+
+
 @camera_api.route('/obstacle_avoidance_gradient_descent', methods=['POST'])
 def obstacle_avoidance_gradient_descent():
     global object_handler
