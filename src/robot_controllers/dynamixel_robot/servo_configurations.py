@@ -42,8 +42,8 @@ servo2 = ServoWithOffsetFunction(0, 6144, 0, pi, EXTENDED_POSITION_CONTROL,
 servo3 = ServoWithOffsetFunction(3072, 1024, -pi/2, pi/2, POSITION_CONTROL_MODE,
                                  servo3_offset_function_going_up, servo3_offset_function_going_down,
                                  150, 15, p=2000, i=0, d=0, offset=-10)
-servo4 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=3000, i=0, d=0, offset=-15)
-servo5 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=5500, i=0, d=2000, offset=-20)
+servo4 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=3000, i=0, d=0, offset=35)
+servo5 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=5500, i=0, d=2000, offset=-25)
 servo6 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=2000, i=0, d=0, offset=0)
 servo7 = Servo(2048, 3072, 0, 100, CURRENT_BASED_POSITION_CONTROL_MODE, 50, 50, p=500, i=0, d=0, goal_current=100)
 
