@@ -44,6 +44,10 @@ class ServoHandler(object):
 
         return self.__write_and_clear()
 
+    def read_profile_velocity(self):
+        for servo_id in self.servo_map:
+            print(self._read_addr(servo_id, self.config.ADDR_PROFILE_VELOCITY, self.config.LEN_PROFILE_VELOCITY))
+
     def set_profile_velocity_and_acceleration(self):
         """set the velocity profile of the servos, this get's wiped after a reboot"""
         self.group_bulk_write.clearParam()
@@ -144,6 +148,18 @@ class ServoHandler(object):
                                 self.config.LEN_PID, servo_id, servo.d)
 
         return self.__write_and_clear()
+
+    def _read_addr(self, servo_id, address, len):
+        self.group_bulk_read.clearParam()
+        res = self.group_bulk_read.addParam(servo_id, address,
+                                      len)
+        if not res:
+            raise RuntimeError("[ID:%03d] groupBulkRead addparam failed" % id)
+
+        self.__send_read_packet()
+
+        return self.__get_read_res(servo_id, address,
+                                                  len)
 
     def read_current_pos(self):
         """update the current_position parameter of all the servo objects"""
