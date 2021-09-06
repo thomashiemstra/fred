@@ -18,13 +18,14 @@ from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, port, robot_config, servos=servo_configs):
+    def __init__(self, port, robot_config, servos=servo_configs, perform_safety_checks=True):
         """
         :param port: a string representing the usb port the robot is connected to
         :param robot_config: a RobotConfig object
         :param servos: (dict of str:json) servo name and servo config
         """
         self.robot_config = robot_config
+        self.perform_safety_checks = perform_safety_checks
 
         self.servo1 = servos[0]
         self.servo2 = servos[1]
@@ -54,24 +55,25 @@ class DynamixelRobotController(AbstractRobotController):
         self.lock = threading.RLock()
 
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
+        self.counter = 0
 
     def initialize_servos_or_exit(self):
-        success = self.set_velocity_profile()
+        success = self.set_control_mode()
+        success = success & self.set_velocity_profile()
         success = success & self.set_pid()
-        success = success & self.set_control_mode()
-        if not success:
+        if self.perform_safety_checks and not success:
             print('failed to setup the dynamixel robot, exiting')
             sys.exit()
 
     def get_current_angles_or_exit(self):
         angles = self.get_current_angles()
-        if angles is None:
+        if angles is None and self.perform_safety_checks:
             print('failed to setup the dynamixel robot, exiting')
             sys.exit()
         return angles
 
     def enable_servos(self):
-        if not self.safety_check():
+        if self.perform_safety_checks and not self.safety_check():
             print('failed the safety check, disabling servos!')
             self.disable_servos()
             return
@@ -108,21 +110,24 @@ class DynamixelRobotController(AbstractRobotController):
     # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
         start = timer()
-        # current_positions = self.get_current_positions()
-        #
-        # previous_target_positions = np.zeros(7, dtype=np.long)
-        # previous_target_positions[1] = self.servo1.unmodified_target_position
-        # previous_target_positions[2] = self.servo2.unmodified_target_position
-        # previous_target_positions[3] = self.servo3.unmodified_target_position
-        # previous_target_positions[4] = self.servo4.unmodified_target_position
-        # previous_target_positions[5] = self.servo5.unmodified_target_position
-        # previous_target_positions[6] = self.servo6.unmodified_target_position
-        #
-        # diff = np.zeros(7, dtype=np.long)
-        # for i in range(1, 7):
-        #     diff[i] = current_positions[i] - previous_target_positions[i]
-        #
-        # print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+        if self.counter % 10 == 0:
+            current_positions = self.get_current_positions()
+
+            previous_target_positions = np.zeros(7, dtype=np.long)
+            previous_target_positions[1] = self.servo1.unmodified_target_position
+            previous_target_positions[2] = self.servo2.unmodified_target_position
+            previous_target_positions[3] = self.servo3.unmodified_target_position
+            previous_target_positions[4] = self.servo4.unmodified_target_position
+            previous_target_positions[5] = self.servo5.unmodified_target_position
+            previous_target_positions[6] = self.servo6.unmodified_target_position
+
+            diff = np.zeros(7, dtype=np.long)
+            for i in range(1, 7):
+                diff[i] = current_positions[i] - previous_target_positions[i]
+
+            print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+            self.counter = 0
+        self.counter += 1
 
         self._current_angles = angles
         # First set the target_position variable of all servos
