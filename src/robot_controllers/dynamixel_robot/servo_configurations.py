@@ -7,44 +7,44 @@ def servo2_offset_function_going_up(all_angles):
     angle2_input = all_angles[2]
     angle3_input = all_angles[3] - 0.5 * pi
     # function fitting output:
-    # [-6.02716  1.53488 -6.60631 -0.32969]
-    return int(-6 * cos(1.5 * angle2_input) - 6.6 * cos(-0.3 * (angle2_input + angle3_input)))
+    # [12.89047 -0.81075  2.5941  -0.7554 ]
+    return int(12.9 * cos(-0.8 * angle2_input) + 2.6 * cos(-0.75 * (angle2_input + angle3_input)))
 
 
 def servo2_offset_function_going_down(all_angles):
     angle2_input = all_angles[2]
     angle3_input = all_angles[3] - 0.5 * pi
     # function fitting output:
-    # [-3.58724  0.64946 -0.05264  2.25318]
-    return int(-3.6 * cos(0.6 * angle2_input) - 0.05 * cos(2.3 * (angle2_input + angle3_input)))
+    # [ 2.64251  1.21949  0.23948 -2.62854]
+    return int(2.6 * cos(1.2 * angle2_input) + 0.2 * cos(-2.6 * (angle2_input + angle3_input)))
 
 
 def servo3_offset_function_going_up(all_angles):
     angle2_input = all_angles[2]
     angle3_input = all_angles[3] - 0.5 * pi
     # function fitting output:
-    # [11.58150402  1.0308894 ]
-    return int(11.5 * cos(1.0 * (angle2_input + angle3_input)))
+    # [29.91475285  1.01794437]
+    return int(30 * cos(1.0 * (angle2_input + angle3_input)))
 
 
 def servo3_offset_function_going_down(all_angles):
     angle2_input = all_angles[2]
     angle3_input = all_angles[3] - 0.5 * pi
     # function fitting output:
-    # [5.35683678 1.00077923]
-    return int(5.3 * cos(1.0 * (angle2_input + angle3_input)))
+    # [9.84893724 1.02064491]
+    return int(9.8 * cos(1 * (angle2_input + angle3_input)))
 
 
-servo1 = Servo(0, 6144, 0, pi, EXTENDED_POSITION_CONTROL, 150, 50, p=1500, i=0, d=500, offset=40)
+servo1 = Servo(0, 6144, 0, pi, EXTENDED_POSITION_CONTROL, 250, 100, p=1000, i=0, d=500, offset=50)
 servo2 = ServoWithOffsetFunction(0, 6144, 0, pi, EXTENDED_POSITION_CONTROL,
                                  servo2_offset_function_going_up, servo2_offset_function_going_down,
-                                 150, 50, p=1000, i=0, d=0, offset=140)
+                                 150, 5, p=1000, i=0, d=0, offset=50)
 servo3 = ServoWithOffsetFunction(3072, 1024, -pi/2, pi/2, POSITION_CONTROL_MODE,
                                  servo3_offset_function_going_up, servo3_offset_function_going_down,
-                                 150, 15, p=2000, i=0, d=0, offset=-10)
-servo4 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=3000, i=0, d=0, offset=35)
-servo5 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=5500, i=0, d=2000, offset=-25)
-servo6 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 250, 50, p=2000, i=0, d=0, offset=0)
+                                 150, 5, p=1500, i=0, d=0, offset=0)
+servo4 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 300, 100, p=1000, i=0, d=0, offset=40)
+servo5 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 300, 100, p=2000, i=0, d=0, offset=15)
+servo6 = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, 300, 100, p=600, i=0, d=0, offset=0)
 servo7 = Servo(2048, 3072, 0, 100, CURRENT_BASED_POSITION_CONTROL_MODE, 50, 50, p=500, i=0, d=0, goal_current=100)
 
 servo_configs = [servo1, servo2, servo3, servo4, servo5, servo6, servo7]
