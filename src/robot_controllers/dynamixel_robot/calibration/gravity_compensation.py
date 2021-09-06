@@ -30,6 +30,7 @@ class Servo2Manager:
         self.servo_3offsets_dict = {}
         self.servo_3_direct_offsets_dict = {}
 
+    def _add_keyboard_shortcuts(self):
         keyboard.add_hotkey('s', lambda: self.switch_servo())
         keyboard.add_hotkey('up', lambda: self.move_current_servo_up())
         keyboard.add_hotkey('down', lambda: self.move_current_servo_down())
@@ -37,6 +38,7 @@ class Servo2Manager:
         keyboard.add_hotkey('p', lambda: self.print_offset_json())
 
     def start(self):
+        self._add_keyboard_shortcuts()
         self._start_internal()
         keyboard.wait()
 
