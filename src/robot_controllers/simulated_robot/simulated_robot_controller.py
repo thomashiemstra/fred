@@ -37,6 +37,11 @@ class SimulatedRobotController(AbstractRobotController):
         self.reset_servos(angles)
 
     def reset_servos(self, angles):
+        """
+        Move the robot arm to the target angles ignoring physics, just teleport it to the target angles.
+
+        :param angles: angles to reset the servos to
+        """
         self._current_angles = angles
         p.setJointMotorControlArray(self.body_id, self._motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)
