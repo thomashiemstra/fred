@@ -26,24 +26,24 @@ y_axis = np.array(y)
 z_axis = np.array(z)
 
 
-def func(variables, a, b, c, d):
+def func(variables, a, b):
     a2, a3 = variables
-    return a * np.cos(b * a2) + c * np.cos(d * (a2 + a3))
+    return a * np.cos(a2) + b * np.cos(a2 + a3)
 
 
 fit, _ = curve_fit(func, (x_axis, y_axis), z_axis)
 np.set_printoptions(precision=5, suppress=True)
 print(fit)  # [-5.45690379 -4.13802897 -4.63319359  1.63811251]
 
-z_fitted = fit[0] * cos(fit[1] * x_axis) + fit[2] * cos(fit[3] * (x_axis + y_axis))
+z_fitted = fit[0] * cos(x_axis) + fit[1] * cos((x_axis + y_axis))
 
 x_test = np.arange(0, 0.5 * np.pi)
 y_test = np.arange(0, 0.5 * np.pi)
-z_test = fit[0] * cos(fit[1] * x_test) + fit[2] * cos(fit[3] * (x_test + y_test))
+z_test = fit[0] * cos(x_test) + fit[1] * cos((x_test + y_test))
 
 
 def f(x, y):
-    return fit[0] * cos(fit[1] * x) + fit[2] * cos(fit[3] * (x + y))
+    return fit[0] * cos(x) + fit[1] * cos((x + y))
 
 
 X, Y = np.meshgrid(x_axis, y_axis)

@@ -5,12 +5,13 @@ from numpy import cos
 import numpy as np
 from scipy.optimize import curve_fit
 
-servo_3_dynamic_offsets_raw = {"0.9": 2, "0.85": 3, "0.8": 3, "0.75": 3, "0.7": 4, "0.65": 5, "0.6": 5, "0.55": 5, "0.5": 6, "0.45": 6, "0.4": 5, "0.35": 5, "0.3": 5, "0.25": 4, "0.2": 3, "0.15": 2, "0.1": 1, "0.05": 1, "0.0": 0}
+servo_3_dynamic_offsets_raw = {"0.9": [2], "0.85": [3, 3], "0.8": [5, 4], "0.75": [6, 5, 6], "0.7": [7, 7, 7], "0.65": [7, 8, 7, 8], "0.6": [9, 7, 9, 10], "0.55": [9, 9, 10, 9, 9], "0.5": [10, 10, 9, 9, 10, 11], "0.45": [8, 10, 9, 10, 9, 11, 11], "0.4": [8, 8, 9, 8, 9, 9, 10], "0.35": [9, 8, 9, 9, 9, 9, 1], "0.3": [8, 8, 7, 8, 7, 4], "0.25": [6, 6, 7, 6, 6], "0.2": [5, 5, 6, 5], "0.15": [4, 4, 5, 5], "0.1": [0, 3, 3, 3], "0.05": [0, 2, 1], "0.0": [0]}
+
 
 servo_3_dynamic_offsets = {}
 sorted_tuple_list = sorted(servo_3_dynamic_offsets_raw.items())
 for key_value in sorted_tuple_list:
-    servo_3_dynamic_offsets[key_value[0]] = key_value[1]
+    servo_3_dynamic_offsets[key_value[0]] = int(np.max(key_value[1]))
 
 print(json.dumps(servo_3_dynamic_offsets))
 
@@ -27,15 +28,15 @@ plot_x = np.array(x)
 plot_y = np.array(y)
 
 
-def func(variables, a, b):
+def func(variables, a):
     a3 = variables
-    return a * np.cos(b * a3)
+    return a * np.cos(a3)
 
 
 fit, _ = curve_fit(func, plot_x, plot_y)
-print(fit)  # [13.50604571  3.15347015]
+print(fit)
 
-y_cos = fit[0] * cos(fit[1] * plot_x)
+y_cos = fit[0] * cos(plot_x)
 
 plt.plot(plot_x, plot_y, 'g')
 plt.plot(plot_x, y_cos, 'y')
