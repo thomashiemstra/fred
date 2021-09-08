@@ -1,6 +1,7 @@
 import inspect
 import os
 
+import numpy as np
 import pybullet as p
 
 from src import global_constants
@@ -32,3 +33,33 @@ def start_simulated_robot(use_gui=False, robot_config=global_constants.simulated
 
     return SimulatedRobotController(robot_config, physics_client, body_id)
 
+
+class ControlPoint:
+
+    def __init__(self, point_id, radius, body_id, physics_client, weight=1):
+        self.point_id = point_id
+        self.body_id = body_id
+        self.radius = radius
+        self._physics_client = physics_client
+        self._position = None
+        self.weight = weight
+
+    @property
+    def position(self):
+        self._update_position()
+        return self._position
+
+    def _update_position(self):
+        """
+        Function used to sync the position of the control point with the robot,
+        needs to be called before getting the position of the control point
+        """
+        _, _, _, _, pos, _ = p.getLinkState(self.body_id, self.point_id, physicsClientId=self._physics_client)
+        self._position = np.array(pos) * 100  # convert from meters to centimeters
+
+
+def generate_control_points(body_id, physics_client):
+    c1 = ControlPoint(8, 6, body_id, physics_client)   # in between frame 3 and the wrist
+    c2 = ControlPoint(7, 6, body_id, physics_client, weight=2)  # wrist (frame 4)
+    c3 = ControlPoint(6, 4, body_id, physics_client)  # tip of the gripper
+    return c1, c2, c3
