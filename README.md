@@ -2,19 +2,16 @@
 
 Table of Contents
 -----------------
-  * [Videos](#Videos)
   * [Obstacle avoidance with reinforcement learning](#Obstacle-avoidance-with-reinforcement-learning)
   * [Algorithm details](#Algorithm-details)
   * [Deploying in the real world with machine vision](#Deploying-in-the-real-world-with-machine-vision)
+  * [Videos](#Videos)
   * [Inverse kinematics](#Inverse-kinematics)
   * [Record and play back with a controller](#Record-and-play-back-with-a-controller)
   * [Motion tracking](#Motion-tracking)
   * [Physical robot details](#Physical-robot-details)
   * [Control panel](#Control-panel)
 
-## Videos
-[Reinforcement learning overview](https://www.youtube.com/watch?v=u2XVU5J9dac)  
-[complete feature overview](https://www.youtube.com/watch?v=0Zqsso_n_9U)
 
 ## Obstacle avoidance with reinforcement learning
 A quick overview can be seen in [this](https://www.youtube.com/watch?v=u2XVU5J9dac) youtube video  
@@ -75,7 +72,6 @@ Finally a few examples of the agent solving scenarios that were not part of the 
 ![Alt text](media/new_scenarios.gif)
 
 
-
 ## Deploying in the real world with machine vision
 After converting the agent's output to a B-spline we have a simple path the robot has to follow. 
 The hard part is converting the obstacles in the real world to the digital world. 
@@ -88,6 +84,10 @@ to the robot, because each marker has a unique ID I have simply hard coded which
 For example marker 29 is a box of 12 by 12 by 35 centimeters. The camera image is then transformed:
 
 ![Alt text](media/vision_conversion.png)
+
+## Videos
+[Reinforcement learning overview](https://www.youtube.com/watch?v=u2XVU5J9dac)  
+[complete feature overview](https://www.youtube.com/watch?v=0Zqsso_n_9U)
 
 
 ## Inverse kinematics
