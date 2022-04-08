@@ -110,24 +110,24 @@ class DynamixelRobotController(AbstractRobotController):
     # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
         start = timer()
-        if self.counter % 10 == 0:
-            current_positions = self.get_current_positions()
-
-            previous_target_positions = np.zeros(7, dtype=np.long)
-            previous_target_positions[1] = self.servo1.unmodified_target_position
-            previous_target_positions[2] = self.servo2.unmodified_target_position
-            previous_target_positions[3] = self.servo3.unmodified_target_position
-            previous_target_positions[4] = self.servo4.unmodified_target_position
-            previous_target_positions[5] = self.servo5.unmodified_target_position
-            previous_target_positions[6] = self.servo6.unmodified_target_position
-
-            diff = np.zeros(7, dtype=np.long)
-            for i in range(1, 7):
-                diff[i] = current_positions[i] - previous_target_positions[i]
-
-            print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
-            self.counter = 0
-        self.counter += 1
+        # if self.counter % 10 == 0:
+        #     current_positions = self.get_current_positions()
+        #
+        #     previous_target_positions = np.zeros(7, dtype=np.long)
+        #     previous_target_positions[1] = self.servo1.unmodified_target_position
+        #     previous_target_positions[2] = self.servo2.unmodified_target_position
+        #     previous_target_positions[3] = self.servo3.unmodified_target_position
+        #     previous_target_positions[4] = self.servo4.unmodified_target_position
+        #     previous_target_positions[5] = self.servo5.unmodified_target_position
+        #     previous_target_positions[6] = self.servo6.unmodified_target_position
+        #
+        #     diff = np.zeros(7, dtype=np.long)
+        #     for i in range(1, 7):
+        #         diff[i] = current_positions[i] - previous_target_positions[i]
+        #
+        #     print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+        #     self.counter = 0
+        # self.counter += 1
 
         self._current_angles = angles
         # First set the target_position variable of all servos

@@ -61,10 +61,10 @@ class ArduinoAngleReader:
                 self._set_val(val)
 
 
-reader = ArduinoAngleReader()
-reader.start()
-
 if __name__ == '__main__':
+
+    reader = ArduinoAngleReader()
+    reader.start()
     while True:
         print(reader.get_val())
         sleep(0.1)

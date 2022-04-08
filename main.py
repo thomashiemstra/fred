@@ -5,7 +5,7 @@ from absl import flags
 
 from src import global_constants, server
 
-flags.DEFINE_boolean('use_simulation', True, 'Use the simulation instead of the real robot')
+flags.DEFINE_boolean('use_simulation', False, 'Use the simulation instead of the real robot')
 FLAGS = flags.FLAGS
 
 

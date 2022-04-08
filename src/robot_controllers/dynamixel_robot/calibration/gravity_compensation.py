@@ -10,6 +10,7 @@ from numpy import pi
 
 # root window
 from src import global_constants
+from src.robot_controllers.dynamixel_robot.arduino.ArduinoAngleReader import ArduinoAngleReader
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
 
 
@@ -29,6 +30,8 @@ class Servo2Manager:
         self.servo_2offsets_dict = {}
         self.servo_3offsets_dict = {}
         self.servo_3_direct_offsets_dict = {}
+        self.angle2_reader = ArduinoAngleReader()
+        self.angle2_reader.start()
 
     def _add_keyboard_shortcuts(self):
         keyboard.add_hotkey('s', lambda: self.switch_servo())
