@@ -25,6 +25,7 @@ class CameraCapture:
         self._cap = None
         self._running = False
         self.lock = threading.RLock()
+        self.run_lock = threading.RLock()
         self.image_handlers_lock = threading.RLock()
         self._image_handlers = image_handlers
         self._thread = None
@@ -69,18 +70,20 @@ class CameraCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CaptureConfig.screen_height)
 
         self._thread = threading.Thread(target=self.__capture_camera)
-        self._running = True
+        with self.run_lock:
+            self._running = True
         self._thread.start()
 
     @synchronized_with_lock("lock")
     def stop_camera(self):
         if self._thread is None:
             return
-        self._running = False
+        with self.run_lock:
+            self._running = False
         self._thread.join()
 
     def __capture_camera(self):
-        while True:
+        while self.__is_running():
             # Capture frame-by-frame
             ret, frame = self._cap.read()
             if not ret:
@@ -92,15 +95,16 @@ class CameraCapture:
             # Display the resulting frame
             cv2.imshow('frame', frame)
             cv2.waitKey(1)
-            with self.lock:
-                if not self._running:
-                    break
 
         for image_handler in self._image_handlers:
             image_handler.deactivate_handler()
 
         self._cap.release()
         cv2.destroyAllWindows()
+
+    def __is_running(self):
+        with self.run_lock:
+            return self._running
 
     @synchronized_with_lock("image_handlers_lock")
     def use_image_handlers(self, frame, gray):
