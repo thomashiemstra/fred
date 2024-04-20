@@ -16,7 +16,7 @@ def inverse_kinematics(pose, robot_config):
                         robot_config.d4, pose.get_euler_matrix(), pose.flip)
 
 
-@jit(nopython=True)
+@jit()
 def calculate_ik(x, y, z, d1, d6, a2, d4, t, flip):
     # First find the position of the wrist
     xc = x - d6 * t[0, 2]
