@@ -4,5 +4,5 @@ from numpy import pi
 
 robot_controller = start_simulated_robot(True)
 
-robot_controller.move_servos([0, 0, pi/2, -pi/2, 0, 0, 0])
+robot_controller.move_servos([0, pi/2, pi, 0, 0, 0, 0])
 input("Press Enter to close")

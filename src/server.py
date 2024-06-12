@@ -10,7 +10,7 @@ from src.camera_control.camera_control_resource import camera_api
 
 from flask_cors import CORS
 from flask_cdn import CDN
-from flask_nav import Nav
+# from flask_nav import Nav
 from flask import jsonify
 
 app = Flask(__name__)
@@ -19,8 +19,8 @@ app.register_blueprint(xbox_api, url_prefix='/xbox')
 app.register_blueprint(camera_api, url_prefix='/camera')
 CDN(app)
 
-nav = Nav()
-nav.init_app(app)
+# nav = Nav()
+# nav.init_app(app)
 
 
 @app.route('/')

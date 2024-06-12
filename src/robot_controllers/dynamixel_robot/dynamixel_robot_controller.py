@@ -61,6 +61,7 @@ class DynamixelRobotController(AbstractRobotController):
         success = self.set_control_mode()
         success = success & self.set_velocity_profile()
         success = success & self.set_pid()
+        # TODO set min and max pos in servo directly
         if self.perform_safety_checks and not success:
             print('failed to setup the dynamixel robot, exiting')
             sys.exit()
@@ -214,7 +215,7 @@ class DynamixelRobotController(AbstractRobotController):
     def get_current_positions(self):
         self.base_servo_handler.read_current_pos()
         self.wrist_servo_handler.read_current_pos()
-        positions = np.zeros(7, dtype=np.long)
+        positions = np.zeros(7, dtype=np.int_)
 
         positions[1] = self.servo1.current_position
         positions[2] = self.servo2.current_position
