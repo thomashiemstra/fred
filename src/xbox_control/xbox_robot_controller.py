@@ -20,7 +20,7 @@ import logging as log
 
 
 class XboxRobotController:
-    start_pose = Pose(21, 21.0, 4)
+    start_pose = Pose(30, 22.0, 4)
 
     def __init__(self, dynamixel_robot_config, servo_controller, pose_updater):
         self.pose_updater = pose_updater
@@ -104,7 +104,7 @@ class XboxRobotController:
         # It would be easier to get a get_current_pose(), but I'm too lazy to write that
 
         from_current_angles_to_pose(self.current_pose, self.servo_controller, 3)
-        self.servo_controller.set_gripper(self.gripper_state)
+        self.open_gripper()
 
         # self.current_pose = pose_to_pose(self.current_pose, Pose(0, 25, 10), self.servo_controller, 2)
 
@@ -127,6 +127,9 @@ class XboxRobotController:
     def stop_robot(self):
         from_current_angles_to_pose(self.start_pose, self.servo_controller, 4)
         self.servo_controller.disable_servos()
+
+    def open_gripper(self):
+        self.servo_controller.set_gripper(self.gripper_state)
 
     def handle_buttons(self):
         buttons = self.pose_updater.controller.get_buttons()
