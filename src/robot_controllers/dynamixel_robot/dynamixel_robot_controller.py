@@ -13,7 +13,7 @@ from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import from_current_angles_to_pose
 from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
-
+from time import sleep
 
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
@@ -152,8 +152,20 @@ class DynamixelRobotController(AbstractRobotController):
         :param new_gripper_state: value between 0 and 100 0 being fully closed 100 fully open
         :return:
         """
-        self.gripper_servo_handler.set_angle(7, new_gripper_state)
-        self.gripper_servo_handler.move_to_angles()
+        self.gripper_servo_handler.read_current_pos()
+
+        current_state = self.gripper_servo_handler.get_angle(7, self.servo7.current_position)
+
+        delta = int(new_gripper_state - current_state)
+        if abs(delta) > 10:
+            for i in range(abs(delta)):
+                current_state = current_state + np.sign(delta)
+                self.gripper_servo_handler.set_angle(7, int(current_state))
+                self.gripper_servo_handler.move_to_angles()
+                sleep(0.1)
+        else:
+            self.gripper_servo_handler.set_angle(7, new_gripper_state)
+            self.gripper_servo_handler.move_to_angles()
 
     def set_velocity_profile(self):
         success = self.base_servo_handler.set_profile_velocity_and_acceleration()
