@@ -30,7 +30,7 @@ sac_network_weights = os.path.expanduser(os.path.dirname(get_project_root()) +
 
 
 class WorkSpaceLimits:
-    radius_min = 20
+    radius_min = 10
     radius_max = 57
     y_min = d6 + 0.1  # y=0 is bad for the IK calculation, so let's make sure that never happens
-    z_min = 0
+    z_min = -5
