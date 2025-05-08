@@ -15,6 +15,7 @@ from src.utils.movement_utils import from_current_angles_to_pose
 from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
 from time import sleep
 
+
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
@@ -34,6 +35,7 @@ class DynamixelRobotController(AbstractRobotController):
         self.servo5 = servos[4]
         self.servo6 = servos[5]
         self.servo7 = servos[6]
+        self._servos = servos
 
         port_handler, packet_handler, group_bulk_write, group_bulk_read = setup_dynamixel_handlers(port, cfg)
 
@@ -56,6 +58,10 @@ class DynamixelRobotController(AbstractRobotController):
 
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
         self.counter = 0
+        self._recorder = None
+
+    def set_recorder(self, recorder):
+        self._recorder = recorder
 
     def initialize_servos_or_exit(self):
         success = self.set_control_mode()
@@ -129,6 +135,11 @@ class DynamixelRobotController(AbstractRobotController):
         #     print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
         #     self.counter = 0
         # self.counter += 1
+
+        if self._recorder is not None:
+            self.base_servo_handler.read_current_pos()
+            self.wrist_servo_handler.read_current_pos()
+            self._recorder.record(self._servos)
 
         self._current_angles = angles
         # First set the target_position variable of all servos

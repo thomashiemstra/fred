@@ -106,7 +106,7 @@ class Servo:
             logging.debug("input position is smaller than min position")
 
         if self.min_position > self.max_position:
-            return np.interp(position, [self.max_position, self.min_position],
+            return np.interp(position - self.constant_offset, [self.max_position, self.min_position],
                              [self.max_angle, self.min_angle])
         else:
             return np.interp(position - self.constant_offset, [self.min_position, self.max_position],

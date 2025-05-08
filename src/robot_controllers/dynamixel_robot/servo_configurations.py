@@ -1,5 +1,5 @@
-from src.global_constants import EXTENDED_POSITION_CONTROL, CURRENT_BASED_POSITION_CONTROL_MODE, POSITION_CONTROL_MODE
-from src.robot_controllers.dynamixel_robot.servo import Servo, ServoWithOffsetFunction
+from src.global_constants import CURRENT_BASED_POSITION_CONTROL_MODE, POSITION_CONTROL_MODE
+from src.robot_controllers.dynamixel_robot.servo import Servo
 from numpy import pi, cos
 
 

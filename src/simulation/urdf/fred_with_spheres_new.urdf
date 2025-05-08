@@ -72,7 +72,7 @@
     </collision>
   </link>
   <joint name="base_plate_to_arm_lower" type="revolute">
-    <limit effort="1000.0" lower="0.0" upper="3.14159265359" velocity="10"/>
+    <limit effort="1000.0" lower="-3.14159265359" upper="3.14159265359" velocity="10"/>
     <parent link="base_plate"/>
     <child link="arm_lower"/>
     <origin rpy="-1.57079632679 0 0" xyz="0.04 0 0"/>

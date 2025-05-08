@@ -16,6 +16,25 @@ def show_robot(angles, config):
 class Test(TestCase):
 
     # expected robot pose:
+    #     __________
+    #     |
+    #     |
+    #     |
+    #     |
+    # ----------- y-->
+    def test_inverse_kinematics(self):
+        config = RobotConfig(d1=0, a2=10, d4=10, d6=0)
+        x = 0
+        y = config.d4 + config.d6
+        z = config.d1 + config.a2
+
+        pose = Pose(x, y, z)
+
+        angles = inverse_kinematics(pose, config)
+
+        print(angles[1:])
+
+    # expected robot pose:
     #     |\    /
     #     | \  /
     #     |  \/
