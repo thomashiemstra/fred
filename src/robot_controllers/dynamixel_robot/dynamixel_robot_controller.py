@@ -51,6 +51,7 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_servo_handler = ServoHandler(gripper_servos, cfg, port_handler,
                                                   packet_handler, group_bulk_write, group_bulk_read)
 
+        # self.reboot_all_servos()
         self.initialize_servos_or_exit()
         self._current_angles = self.get_current_angles_or_exit()
         self.status = False
@@ -59,6 +60,11 @@ class DynamixelRobotController(AbstractRobotController):
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
         self.counter = 0
         self._recorder = None
+
+    def reboot_all_servos(self):
+        self.base_servo_handler.reboot()
+        self.wrist_servo_handler.reboot()
+        self.gripper_servo_handler.reboot()
 
     def set_recorder(self, recorder):
         self._recorder = recorder
@@ -117,24 +123,25 @@ class DynamixelRobotController(AbstractRobotController):
     # returns the time in seconds it took to move the servos
     def move_servos(self, angles):
         start = timer()
-        # if self.counter % 10 == 0:
-        #     current_positions = self.get_current_positions()
-        #
-        #     previous_target_positions = np.zeros(7, dtype=np.long)
-        #     previous_target_positions[1] = self.servo1.unmodified_target_position
-        #     previous_target_positions[2] = self.servo2.unmodified_target_position
-        #     previous_target_positions[3] = self.servo3.unmodified_target_position
-        #     previous_target_positions[4] = self.servo4.unmodified_target_position
-        #     previous_target_positions[5] = self.servo5.unmodified_target_position
-        #     previous_target_positions[6] = self.servo6.unmodified_target_position
-        #
-        #     diff = np.zeros(7, dtype=np.long)
-        #     for i in range(1, 7):
-        #         diff[i] = current_positions[i] - previous_target_positions[i]
-        #
-        #     print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
-        #     self.counter = 0
-        # self.counter += 1
+
+        if self.counter > 10:
+            current_positions = self.get_current_positions()
+
+            previous_target_positions = np.zeros(7, dtype=np.intp)
+            previous_target_positions[1] = self.servo1.target_position
+            previous_target_positions[2] = self.servo2.target_position
+            previous_target_positions[3] = self.servo3.target_position
+            previous_target_positions[4] = self.servo4.target_position
+            previous_target_positions[5] = self.servo5.target_position
+            previous_target_positions[6] = self.servo6.target_position
+
+            diff = np.zeros(7, dtype=np.intp)
+            for i in range(1, 7):
+                diff[i] = current_positions[i] - previous_target_positions[i]
+
+            print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+            self.counter = 0
+        self.counter += 1
 
         if self._recorder is not None:
             self.base_servo_handler.read_current_pos()
