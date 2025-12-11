@@ -4,6 +4,7 @@ import src.robot_controllers.dynamixel_robot.dynamixel_utils as utils
 
 MAX_INT = 4294967296
 
+
 class ServoHandler(object):
     """class for handling servos
 
@@ -26,6 +27,10 @@ class ServoHandler(object):
         self.group_bulk_write = group_bulk_write
         self.group_bulk_read = group_bulk_read
         self.config = config
+
+    def reboot(self):
+        for servo_id in self.servo_map:
+            self.packet_handler.reboot(self.port_handler, servo_id)
 
     def set_torque(self, enable):
         """Enable or disable the torque for all the servos"""
