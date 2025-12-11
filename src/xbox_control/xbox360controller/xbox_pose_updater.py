@@ -70,7 +70,6 @@ class XboxPoseUpdater:
         v_alpha_max = self.maximum_speed * (right_thumb_x / 1000)
         v_gamma_max = self.maximum_speed * (right_thumb_y / 1000)
 
-        # todo get rid of these global variables and just return them
         self.v_alpha = self.input_to_delta_velocity(right_thumb_x, self.v_alpha, v_alpha_max)
         if find_center_mode:
             self.v_gamma = 0
@@ -84,7 +83,6 @@ class XboxPoseUpdater:
         v_y_max = self.maximum_speed * (y / 100)
         v_z_max = self.maximum_speed * (z / 100)
 
-        # todo get rid of these global variables and just return them
         self.v_x = self.input_to_delta_velocity(x, self.v_x, v_x_max)
         self.v_y = self.input_to_delta_velocity(y, self.v_y, v_y_max)
         if find_center_mode:
