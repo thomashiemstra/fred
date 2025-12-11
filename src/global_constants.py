@@ -3,7 +3,7 @@ import os
 from src.kinematics.kinematics_utils import RobotConfig
 from src.utils.os_utils import is_linux, get_project_root
 
-dynamixel_robot_arm_port = '/dev/ttyUSB0' if is_linux() else 'COM3'
+dynamixel_robot_arm_port = '/dev/ttyUSB0' if is_linux() else 'COM9'
 
 d6 = 12  # Length of the gripper
 dynamixel_robot_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=d6)
