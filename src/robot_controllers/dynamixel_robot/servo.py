@@ -76,7 +76,6 @@ class Servo:
         self.profile_acceleration = profile_acceleration
         self.constant_offset = offset
         self.goal_current = goal_current
-        self.unmodified_target_position = 0
 
     def __str__(self):
         return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
@@ -95,7 +94,6 @@ class Servo:
         self.target_position = int(np.rint(np.interp(angle, [self.min_angle, self.max_angle],
                                                      [self.min_position, self.max_position])))
         self.target_position += self.constant_offset
-        self.unmodified_target_position = self.target_position
 
     def get_angle_from_position(self, position):
         if position is None:
@@ -131,7 +129,6 @@ class ServoWithOffsetFunction(Servo):
         self.offset_function_down = offset_function_down
         self._last_commanded_angle = 0.0
         self._last_adjustment_direction = AdjustmentDirections.UP
-        self.unmodified_target_position = 0
 
     def set_target_position_from_angle(self, angle, all_angles=None):
         super().set_target_position_from_angle(angle)
