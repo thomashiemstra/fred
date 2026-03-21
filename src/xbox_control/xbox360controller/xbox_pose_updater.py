@@ -108,6 +108,8 @@ class XboxPoseUpdater:
             new_z = old_pose.z + dz
             new_r = np.sqrt(new_x*new_x + new_y*new_y + new_z*new_z)
 
+            new_y = np.max(new_y, self.workspace_limits.y_min)
+
             if new_r > self.workspace_limits.radius_max or new_r < self.workspace_limits.radius_min:
                 x, y, z = old_pose.x, old_pose.y, old_pose.z
             else:
