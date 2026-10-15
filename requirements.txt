@@ -1,0 +1,2 @@
+# dependencies of the dynamixel robot controller
+dynamixel-sdk==4.1.0

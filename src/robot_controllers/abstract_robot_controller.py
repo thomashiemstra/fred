@@ -38,3 +38,8 @@ class AbstractRobotController(ABC):
     @abstractmethod
     def reset_to_pose(self, pose):
         pass
+
+    def get_hardware_errors(self):
+        """returns a mapping of servo id to the names of its hardware errors for the servos that shut down, or None
+        if the servos could not be read"""
+        return {}

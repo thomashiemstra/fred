@@ -12,6 +12,9 @@ ADDR_I                  = 82
 ADDR_D                  = 80
 ADDR_GOAL_CURRENT       = 102
 ADDR_OPERATING_MODE     = 11
+ADDR_HARDWARE_ERROR_STATUS = 70
+ADDR_PRESENT_INPUT_VOLTAGE = 144
+ADDR_PRESENT_TEMPERATURE = 146
 
 # Data Byte Length
 LEN_LED_RED             = 1
@@ -22,6 +25,9 @@ LEN_PRESENT_POSITION    = 4
 LEN_PID                 = 2
 LEN_GOAL_CURRENT        = 2
 LEN_OPERATING_MODE      = 1
+LEN_HARDWARE_ERROR_STATUS = 1
+LEN_PRESENT_INPUT_VOLTAGE = 2
+LEN_PRESENT_TEMPERATURE = 1
 
 # Protocol version
 PROTOCOL_VERSION            = 2.0               # See which protocol version is used in the Dynamixel
@@ -33,3 +39,12 @@ TORQUE_ENABLE               = 1                 # Value for enabling the torque
 TORQUE_DISABLE              = 0                 # Value for disabling the torque
 MAX_POSITION                = 4095
 MIN_POSITION                = 0
+
+# bits of the hardware error status, a servo with a hardware error disables its torque until it is rebooted
+HARDWARE_ERRORS = {
+    0: 'input voltage error',
+    2: 'overheating',
+    3: 'motor encoder error',
+    4: 'electrical shock',
+    5: 'overload',
+}

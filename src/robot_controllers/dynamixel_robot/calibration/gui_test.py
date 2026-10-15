@@ -90,7 +90,7 @@ def create_button(root_element, text, row, column, command=None):
     )
 
 
-robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config)
+robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
 
 servo = robot.servo2
 servo_id = 2

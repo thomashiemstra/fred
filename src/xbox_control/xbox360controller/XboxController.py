@@ -1,9 +1,17 @@
-from inputs import get_gamepad
+import logging
+
+import inputs
+from inputs import get_gamepad, UnpluggedError
 import math
 import threading
 from time import sleep
 
 from src.utils.decorators import synchronized_with_lock
+
+logger = logging.getLogger(__name__)
+
+# how often to look for a gamepad when none is connected
+RECONNECT_INTERVAL = 1.0  # seconds
 
 
 class Buttons:
@@ -60,6 +68,7 @@ class XboxController(object):
         self.pad_down = False
         self.pad_left = False
         self.pad_right = False
+        self.connected = False
 
         self._monitor_thread = threading.Thread(target=self._monitor_controller, args=())
         self._monitor_thread.daemon = True
@@ -68,6 +77,32 @@ class XboxController(object):
     @synchronized_with_lock("lock")
     def stop(self):
         pass
+
+    @synchronized_with_lock("lock")
+    def is_connected(self):
+        return self.connected
+
+    def wait_until_connected(self, timeout=2.0):
+        """returns True if a gamepad is connected within the timeout"""
+        waited = 0.0
+        while not self.is_connected() and waited < timeout:
+            sleep(0.1)
+            waited += 0.1
+        return self.is_connected()
+
+    @synchronized_with_lock("lock")
+    def _set_connected(self, connected):
+        if connected == self.connected:
+            return
+        self.connected = connected
+        if connected:
+            logger.info('gamepad connected')
+        else:
+            # the last values of the sticks would keep the robot moving
+            logger.warning('no gamepad connected')
+            self.l_thumb_x = self.l_thumb_y = self.r_thumb_x = self.r_thumb_y = self.lr_trigger = 0
+            self.lb = self.rb = False
+            self.reset_button()
 
     @synchronized_with_lock("lock")
     def get_left_thumb(self):
@@ -101,7 +136,15 @@ class XboxController(object):
 
     def _monitor_controller(self):
         while True:
-            events = get_gamepad()
+            try:
+                events = get_gamepad()
+            except UnpluggedError:
+                self._set_connected(False)
+                sleep(RECONNECT_INTERVAL)
+                _find_gamepads()
+                continue
+            self._set_connected(True)
+
             for event in events:
                 if event.ev_type == 'Sync':
                     continue
@@ -225,6 +268,20 @@ class XboxController(object):
         if self.upper_dead_zone > value > self.lower_dead_zone:
             value = 0
         return value
+
+
+def _find_gamepads():
+    """the inputs library only looks for gamepads when it is imported, look again for gamepads connected later"""
+    devices = inputs.devices
+    if devices.gamepads or not hasattr(devices, '_detect_gamepads') or devices.xinput is None:
+        # a gamepad that was found before is reused when it is plugged back in, on linux the devices can't be
+        # searched again without restarting
+        return
+    try:
+        devices._detect_gamepads()
+        devices._update_all_devices()
+    except RuntimeError as e:
+        logger.warning('failed to look for gamepads: %s', e)
 
 
 if __name__ == '__main__':

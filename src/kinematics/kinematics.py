@@ -3,6 +3,8 @@ from numpy import arctan2, sin, cos, pi, power
 from numpy import sqrt
 from numba import jit
 
+from src.kinematics.kinematics_utils import Pose, calculate_angles_from_euler_matrix
+
 
 def inverse_kinematics(pose, robot_config):
     """
@@ -80,6 +82,19 @@ def calculate_ik(x, y, z, d1, d6, a2, d4, t, flip):
         angles[6] = arctan2(r32, -r31)
 
     return angles
+
+
+def forward_kinematics(angles, robot_config):
+    """
+    The inverse of inverse_kinematics, calculate the pose of the end effector for the given angles.
+    :param angles: array of angles, this array starts at 1.
+    :param robot_config: link lengths
+    :return: the pose of the end effector
+    """
+    p6 = forward_position_kinematics(angles, robot_config)[-1]
+    alpha, beta, gamma = calculate_angles_from_euler_matrix(forward_orientation_kinematics(angles))
+    # the flipped solution of the inverse kinematics is the one with a negative angle 5
+    return Pose(p6[0], p6[1], p6[2], flip=bool(angles[5] < 0), alpha=alpha, beta=beta, gamma=gamma)
 
 
 def forward_position_kinematics(angles, robot_config):

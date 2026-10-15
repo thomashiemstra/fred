@@ -1,5 +1,6 @@
 import unittest
 
+from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics_utils import Pose
 from src.utils.os_utils import is_linux
 from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
@@ -144,3 +145,22 @@ class XboxPoseUpdaterTests(unittest.TestCase):
 
         self.assertIsNotNone(new_pose)
         self.assertTrue(new_pose.z == old_pose.z)
+
+
+class XboxPoseUpdaterWorkspaceLimitsTests(unittest.TestCase):
+
+    def test_no_change(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(), 10, 1, WorkSpaceLimits)
+        old_pose = Pose(30, 22, 4)
+
+        new_pose = pose_updater.get_updated_pose_from_controller(old_pose, False, None)
+
+        self.assertEqual((old_pose.x, old_pose.y, old_pose.z), (new_pose.x, new_pose.y, new_pose.z))
+
+    def test_y_stays_above_the_minimum(self):
+        for direction in (-1, 1):
+            pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_y=direction), 10, 1, WorkSpaceLimits)
+            pose = Pose(30, WorkSpaceLimits.y_min, 4)
+            for _ in range(10):
+                pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+                self.assertGreaterEqual(pose.y, WorkSpaceLimits.y_min)

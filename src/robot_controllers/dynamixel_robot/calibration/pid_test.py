@@ -7,7 +7,7 @@ servo_id = 1
 target = 2048
 
 
-robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config)
+robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
 
 robot.enable_servos()
 # p  i  d

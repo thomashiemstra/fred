@@ -15,8 +15,12 @@ from src.utils.linalg_utils import get_center
 from src.utils.movement import PoseToPoseMovement, SplineMovement
 from src.utils.movement_exception import MovementException
 from src.utils.movement_utils import pose_to_pose, from_current_angles_to_pose
-from time import sleep
+from time import sleep, perf_counter
 import logging as log
+
+
+# how often to check if any of the servos shut down because of a hardware error
+HARDWARE_CHECK_INTERVAL = 1.0  # seconds
 
 
 class XboxRobotController:
@@ -48,7 +52,12 @@ class XboxRobotController:
 
     def stop(self):
         self.set_done()
-        self.thread.join()
+        if self.thread is not None:
+            crashed = not self.thread.is_alive()
+            self.thread.join()
+            if crashed:
+                # the thread didn't get the chance to move back to the start pose and disable the servos
+                self.servo_controller.disable_servos()
         with self.lock:
             self.thread = None
         self.reset()
@@ -87,7 +96,13 @@ class XboxRobotController:
         if self.done:
             return False
 
-        self.servo_controller.enable_servos()
+        if not self.pose_updater.controller.wait_until_connected():
+            log.error('no gamepad connected, not starting the robot')
+            return False
+
+        if self.servo_controller.enable_servos() is False:
+            log.error('failed to enable the servos, not starting the robot')
+            return False
         self.current_pose = copy(self.start_pose)
         if self.thread is None:
             self.thread = threading.Thread(target=self.__start_internal, args=())
@@ -97,6 +112,14 @@ class XboxRobotController:
             return False
 
     def __start_internal(self):
+        try:
+            self.__control_robot()
+        except Exception:
+            # don't try to move the robot back, whatever failed could fail again while moving
+            log.exception('controlling the robot failed, the servos keep holding their last position. '
+                          'Stop to disable them')
+
+    def __control_robot(self):
 
         # self.servo_controller.set_profile_velocity_percentage(10)
 
@@ -109,10 +132,15 @@ class XboxRobotController:
         # self.current_pose = pose_to_pose(self.current_pose, Pose(0, 25, 10), self.servo_controller, 2)
 
         pose_update_sleep_time = self.pose_updater.dt
+        next_hardware_check = perf_counter() + HARDWARE_CHECK_INTERVAL
 
         while True:
             if self.is_done():
                 break
+
+            if perf_counter() > next_hardware_check:
+                self.check_hardware_errors()
+                next_hardware_check = perf_counter() + HARDWARE_CHECK_INTERVAL
 
             self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
                                                                                    self.find_center_mode, self.center)
@@ -123,6 +151,14 @@ class XboxRobotController:
             sleep(time_to_sleep)
 
         self.stop_robot()
+
+    def check_hardware_errors(self):
+        """a servo that shut down because of a hardware error doesn't move anymore, so stop controlling the robot"""
+        errors = self.servo_controller.get_hardware_errors()
+        if errors is None:
+            log.warning('failed to read the hardware error status of the servos')
+        elif errors:
+            raise RuntimeError('servos {} shut down because of a hardware error'.format(sorted(errors)))
 
     def stop_robot(self):
         from_current_angles_to_pose(self.start_pose, self.servo_controller, 4)

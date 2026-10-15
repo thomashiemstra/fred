@@ -39,18 +39,18 @@ class ServoDecoder(json.JSONDecoder):
     def dict_to_object(dictionary):
         if "class" in dictionary.keys() and dictionary["class"] == "servo":
             return Servo(
-                dictionary["min_position"],
-                dictionary["max_position"],
-                dictionary["min_angle"],
-                dictionary["max_angle"],
-                dictionary["profile_velocity"],
-                dictionary["profile_acceleration"],
-                dictionary["p"],
-                dictionary["i"],
-                dictionary["d"],
-                dictionary["offset"],
-                dictionary["goal_current"],
-                dictionary["operating_mode"]
+                min_position=dictionary["min_position"],
+                max_position=dictionary["max_position"],
+                min_angle=dictionary["min_angle"],
+                max_angle=dictionary["max_angle"],
+                operating_mode=dictionary["operating_mode"],
+                profile_velocity=dictionary["profile_velocity"],
+                profile_acceleration=dictionary["profile_acceleration"],
+                p=dictionary["p"],
+                i=dictionary["i"],
+                d=dictionary["d"],
+                offset=dictionary["offset"],
+                goal_current=dictionary["goal_current"]
             )
         else:
             return dictionary
@@ -94,6 +94,12 @@ class Servo:
         self.target_position = int(np.rint(np.interp(angle, [self.min_angle, self.max_angle],
                                                      [self.min_position, self.max_position])))
         self.target_position += self.constant_offset
+
+    def clamp_position(self, position):
+        """clamp the position to the calibrated range of this servo, including the constant offset"""
+        lower = min(self.min_position, self.max_position) + self.constant_offset
+        upper = max(self.min_position, self.max_position) + self.constant_offset
+        return int(np.clip(position, lower, upper))
 
     def get_angle_from_position(self, position):
         if position is None:

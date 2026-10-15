@@ -18,7 +18,7 @@ class Servo2Manager:
 
     def __init__(self, debug=False) -> None:
         self.debug = debug
-        self.robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config)
+        self.robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
 
         self.servo_id = 2
         self.servo = self.robot.servo2

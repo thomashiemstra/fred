@@ -27,6 +27,19 @@ def calculate_euler_matrix_from_angles(alpha, beta, gamma):
     return orientation
 
 
+def calculate_angles_from_euler_matrix(orientation):
+    """the inverse of calculate_euler_matrix_from_angles, returns (alpha, beta, gamma)"""
+    beta = np.arctan2(-orientation[2, 1], np.hypot(orientation[0, 1], orientation[1, 1]))
+    if np.isclose(np.cos(beta), 0.0):
+        # gimbal lock, alpha and gamma turn around the same axis so only their combination is known
+        gamma = 0.0
+        alpha = np.arctan2(-orientation[0, 2], orientation[1, 2])
+    else:
+        alpha = np.arctan2(orientation[1, 1], orientation[0, 1])
+        gamma = np.arctan2(orientation[2, 2], orientation[2, 0])
+    return float(alpha), float(beta), float(gamma)
+
+
 class Pose:
 
     def __init__(self, x, y, z, flip=False, alpha=0.0, beta=0.0, gamma=0.0, time=2.0, euler_matrix=None):

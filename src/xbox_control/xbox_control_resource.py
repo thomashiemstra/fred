@@ -44,6 +44,9 @@ def start():
 
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     success = xbox_robot_controller.start()
+    if not success:
+        with api_lock:
+            started = False
     # if success:
     #     xbox_robot_controller.servo_controller.change_status(True)
     resp = jsonify(success=success)

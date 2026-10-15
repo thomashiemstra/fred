@@ -1,6 +1,7 @@
 import unittest
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config
 from numpy import pi
+from src.global_constants import POSITION_CONTROL_MODE
 import math
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
@@ -9,13 +10,13 @@ from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 class TestServoHandler(unittest.TestCase):
 
     def setUp(self):
-        servo1 = Servo(0, 4095, 0, 2 * pi)
-        servo2 = Servo(1024, 3072, 0, pi)
-        servo3 = Servo(0, 4095, -pi, pi)
+        servo1 = Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE)
+        servo2 = Servo(1024, 3072, 0, pi, POSITION_CONTROL_MODE)
+        servo3 = Servo(0, 4095, -pi, pi, POSITION_CONTROL_MODE)
         # if a servo is mounted backwards it's min will correspond to the max angle and vice versa
-        servo4 = Servo(3072, 1024, -pi/2, pi/2)
+        servo4 = Servo(3072, 1024, -pi/2, pi/2, POSITION_CONTROL_MODE)
         servos = {1: servo1, 2: servo2, 3: servo3, 4: servo4}
-        self.servo_handler = ServoHandler(servos, dynamixel_x_config, None, None, None, None)
+        self.servo_handler = ServoHandler(servos, dynamixel_x_config, None, None)
 
     def test_convert_angle_1(self):
         expected_position = math.floor(4095 / 2)

@@ -5,7 +5,7 @@ from time import sleep
 import json
 
 
-robot = DynamixelRobotController("COM3", global_constants.dynamixel_robot_config)
+robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
 servo_id = 5
 servo = robot.servo5
 
