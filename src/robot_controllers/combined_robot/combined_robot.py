@@ -14,8 +14,11 @@ class CombinedRobot(AbstractRobotController):
         self.control_points = simulated_robot.control_points
 
     def enable_servos(self):
-        self.dynamixel_robot.enable_servos()
+        """returns True if the servos of the physical robot were enabled"""
+        if not self.dynamixel_robot.enable_servos():
+            return False
         self.simulated_robot.enable_servos()
+        return True
 
     def disable_servos(self):
         self.dynamixel_robot.disable_servos()
@@ -35,6 +38,9 @@ class CombinedRobot(AbstractRobotController):
 
     def get_current_angles(self):
         return self.dynamixel_robot.get_current_angles()
+
+    def get_hardware_errors(self):
+        return self.dynamixel_robot.get_hardware_errors()
 
     def pose_to_angles(self, pose):
         return inverse_kinematics(pose, self.dynamixel_robot.robot_config)
