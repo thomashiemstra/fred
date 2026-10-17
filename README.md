@@ -108,7 +108,7 @@ The aruco markers can be tracked in real time allowing for vision based control 
 
 
 ## Physical robot details
-The robot was designed in fusion360 and is printed on a Prusa mk2s. The design files can be found [here](https://a360.co/2PHQOEz). 
+The robot was designed in fusion360 and is printed on a Bambu Lab P1S. The design files can be found [here](https://a360.co/2PHQOEz). 
 The robot uses Dynamixel servos, 
 * Joint 1 is a xm430-W350 with a 3:1 gear reduction
 * Joint 2 is a XM540-W270 with a 3:1 gear reduction
@@ -118,8 +118,14 @@ The robot uses Dynamixel servos,
 * Joint 6 is a xc430-w150
 * the gripper uses a xl330-m288
 
-The plastic is all PLA, the lower arm is reinforced with carbon fiber rods. The gear reduction is achieved using belt and
+The parts are printed in PLA, the arm between joints 2 and 3 in PETG-CF. The lower arm is reinforced with carbon fiber rods. The gear reduction is achieved using belt and
 pulleys (and tensioners) which are normally used in 3d printers. The camera used is a C922 PRO HD STREAM WEBCAM.
+
+## Running the tests
+The tests don't need the robot, all hardware is faked. From the project root:
+```
+python -m unittest discover -s tests -t . -p "*test*.py"
+```
 
 ## Control panel
 Every part of the project is controlled using a REST API built with FLASK. A simple website is used to trigger steps of every process:
