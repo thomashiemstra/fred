@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import cv2
@@ -9,11 +10,27 @@ from src.camera.util import charuco_board_dictionary, aruco_marker_dictionary, g
 from src.camera.image_handlers import ArucoImageHandler, BoardToBoardImageHandler
 
 
+RESOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
+CALIBRATION_FILE = os.path.join(RESOURCES, 'calibration_data.json')
+
+# src/camera/image_handlers.py still uses the legacy cv2.aruco API (DetectorParameters_create, drawAxis,
+# estimatePoseSingleMarkers, interpolateCornersCharuco) which was removed in OpenCV 4.7+.
+# drawAxis is not checked here since these tests run with drawing disabled.
+LEGACY_ARUCO_API_AVAILABLE = all(hasattr(cv2.aruco, name) for name in
+                                 ('DetectorParameters_create', 'estimatePoseSingleMarkers',
+                                  'interpolateCornersCharuco'))
+
+
+@unittest.skipUnless(LEGACY_ARUCO_API_AVAILABLE,
+                     'image_handlers.py needs the legacy cv2.aruco API (DetectorParameters_create, drawAxis, '
+                     'estimatePoseSingleMarkers, interpolateCornersCharuco) which is missing in the installed '
+                     'OpenCV {}; port image_handlers.py to cv2.aruco.ArucoDetector/CharucoDetector'
+                     .format(cv2.__version__))
 class ArucoImageHandlerTest(unittest.TestCase):
 
     def setUp(self):
         try:
-            with open('resources/calibration_data.json', 'r') as calibartion_file:
+            with open(CALIBRATION_FILE, 'r') as calibartion_file:
                 string = calibartion_file.read()
         except FileNotFoundError:
             self.fail("calibration file not found")
@@ -28,7 +45,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
 
     def test_board_and_markers(self):
         # given
-        frame = self.get_image('resources/image_with_markers_and_board.png')
+        frame = self.get_image('image_with_markers_and_board.png')
         aruco_image_handler = self.get_default_aruco_image_handler()
 
         # when
@@ -47,7 +64,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
 
     def test_board_no_markers(self):
         # given
-        frame = self.get_image('resources/image_only_board.png')
+        frame = self.get_image('image_only_board.png')
         aruco_image_handler = self.get_default_aruco_image_handler()
 
         # when
@@ -59,7 +76,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
 
     def test_no_board(self):
         # given
-        frame = self.get_image('resources/image_no_board.png')
+        frame = self.get_image('image_no_board.png')
         aruco_image_handler = self.get_default_aruco_image_handler()
 
         # when
@@ -71,7 +88,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
 
     def test_B2BeHandler_2_boards(self):
         # given
-        frame = self.get_image('resources/2_boards.png')
+        frame = self.get_image('2_boards.png')
         handler = self.get_default_board_to_board_image_handler()
 
         # when
@@ -84,7 +101,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
 
     def test_B2BeHandler_1_boards(self):
         # given
-        frame = self.get_image('resources/image_only_board.png')
+        frame = self.get_image('image_only_board.png')
         handler = self.get_default_board_to_board_image_handler()
 
         # when
@@ -97,7 +114,7 @@ class ArucoImageHandlerTest(unittest.TestCase):
 
     def test_B2BeHandler_no_boards(self):
         # given
-        frame = self.get_image('resources/image_no_board.png')
+        frame = self.get_image('image_no_board.png')
         handler = self.get_default_board_to_board_image_handler()
 
         # when
@@ -131,6 +148,6 @@ class ArucoImageHandlerTest(unittest.TestCase):
         image_handler.handle_frame(frame, gray)
 
     def get_image(self, image_path):
-        image = cv2.imread(image_path)
+        image = cv2.imread(os.path.join(RESOURCES, image_path))
         self.assertIsNotNone(image, "should have gotten an image")
         return image

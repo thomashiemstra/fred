@@ -1,10 +1,13 @@
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 from numpy import pi
 import pybullet as p
 
 from src.kinematics.kinematics_utils import Pose
+from src.reinforcementlearning.environment import robot_env_utils
 from src.reinforcementlearning.environment.robot_env_utils import get_attractive_force_world, get_target_points, \
     get_repulsive_forces_world, get_clipped_state, get_normalized_current_angles, get_de_normalized_current_angles
 from src.simulation.simulation_utils import start_simulated_robot
@@ -71,6 +74,21 @@ class TestRobotEnvUtils(unittest.TestCase):
         self.assert_vectors(expected_vector_1, vector_res_1)
         self.assert_vectors(expected_vector_2, vector_res_2)
         self.assertEqual(1, distance, "Distance should be 1")
+
+    def test_get_attractive_force_world_weights_and_zero_distance(self):
+        control_points = np.array([[0, 0, 0], [0, 0, 0], [1, 1, 1]], dtype=np.float64)
+        target_points = np.array([[0, 0, 4], [0, 1, 0], [1, 1, 1]], dtype=np.float64)
+
+        forces, distance = get_attractive_force_world(control_points, target_points, 2, weights=np.array([0.5, 3, 1]))
+
+        self.assert_vectors(np.array([0, 0, 1]), forces[0])  # clipped to length 2, then weighted
+        self.assert_vectors(np.array([0, 3, 0]), forces[1])  # within cutoff, weighted
+        self.assert_vectors(np.array([0, 0, 0]), forces[2])  # already at the target
+        self.assertAlmostEqual(5, distance, msg="total distance should be the unweighted sum of distances")
+
+    def test_get_attractive_force_world_dimension_mismatch(self):
+        with self.assertRaises(Exception):
+            get_attractive_force_world(np.zeros((2, 3)), np.zeros((3, 3)))
 
     def test_get_target_points_1(self):
         pose = Pose(0, 20, 10)
@@ -140,6 +158,55 @@ class ObstacleIntegrationTests(unittest.TestCase):
                                msg="control point 2 should only point in the x direction, not also in the y direction")
         self.assertAlmostEqual(control_point_3_vec[2], 0, places=2,
                                msg="control point 2 should only point in the x direction, not also in the z direction")
+
+
+class RepulsiveForceTests(unittest.TestCase):
+    """get_repulsive_forces_world with the pybullet distance query replaced by a fake"""
+
+    @staticmethod
+    def control_point(point_id, radius=1, weight=1):
+        return SimpleNamespace(point_id=point_id, radius=radius, weight=weight)
+
+    def get_forces(self, distances, control_points, obstacle_ids, cutoff=10, clip_force=None):
+        """distances: dict (control_point_id, obstacle_id) -> (normal, distance in cm)"""
+        def fake_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id, cutoff_distance):
+            self.assertEqual(cutoff, cutoff_distance)
+            return distances.get((control_point_id, obstacle_id), ([0, 0, 1], 10000000))
+
+        with mock.patch.object(robot_env_utils, 'get_normal_and_distance', side_effect=fake_normal_and_distance):
+            return get_repulsive_forces_world(0, np.array(control_points), obstacle_ids, 0,
+                                              repulsive_cutoff_distance=cutoff, clip_force=clip_force)
+
+    def test_closest_obstacle_determines_force(self):
+        control_points = [self.control_point(1), self.control_point(2, weight=2), self.control_point(3)]
+        distances = {
+            (2, 'far'): ([0, 1, 0], 6),     # distance to surface of control point: 5
+            (2, 'close'): ([1, 0, 0], 3),   # distance to surface of control point: 2
+            (3, 'far'): ([0, 0, 1], 20),    # beyond the cutoff
+        }
+
+        forces = self.get_forces(distances, control_points, ['far', 'close'])
+
+        self.assert_vectors([0, 0, 0], forces[0])
+        expected_magnitude = 2 * (1 / 2 - 1 / 10) / (2 * 2)
+        self.assert_vectors([expected_magnitude, 0, 0], forces[1])
+        self.assert_vectors([0, 0, 0], forces[2])
+
+    def test_overlap_and_clipping(self):
+        control_points = [self.control_point(1), self.control_point(2), self.control_point(3)]
+        distances = {(1, 'obs'): ([0, 0, 1], 0.5), (2, 'obs'): ([0, 0, 1], 0.5)}  # inside the control point radius
+
+        unclipped = self.get_forces(distances, control_points, ['obs'])
+        clipped = self.get_forces(distances, control_points, ['obs'], clip_force=50)
+
+        # an overlapping control point is treated as being 0.1 cm away
+        self.assert_vectors([0, 0, (1 / 0.1 - 1 / 10) / (0.1 * 0.1)], unclipped[0])
+        self.assert_vectors([0, 0, 50], clipped[0])
+        self.assert_vectors([0, 0, 50], clipped[1])
+        self.assert_vectors([0, 0, 0], clipped[2])
+
+    def assert_vectors(self, expected_vector, actual_vector):
+        np.testing.assert_allclose(actual_vector, expected_vector, atol=1e-6)
 
 
 class AnglesTest(unittest.TestCase):
@@ -252,3 +319,18 @@ class AnglesTest(unittest.TestCase):
         self.assertAlmostEqual(-pi, angles[3], places=2, msg="Got a wrong value for angle 3")
         self.assertAlmostEqual(-(3 * pi / 4), angles[4], places=2, msg="Got a wrong value for angle 4")
         self.assertAlmostEqual(-pi, angles[5], places=2, msg="Got a wrong value for angle 5")
+
+    def test_normalize_de_normalize_round_trip(self):
+        angles = [0.3, 2.9, 1.7, -2.5, 0.4, -1.1]
+
+        round_trip = get_de_normalized_current_angles(get_normalized_current_angles(angles))
+
+        np.testing.assert_allclose(round_trip, angles, atol=1e-9)
+
+    def test_clipping_values(self):
+        angles = [5, -1, 4, 3, -4, 3, -4]
+
+        clipped = get_clipped_state(angles)
+
+        # index 0 is not a joint (angles are 1-indexed) and is always 0
+        np.testing.assert_allclose(clipped, [0, 0, pi, 2 * pi / 3, -pi, 3 * pi / 4, -pi], atol=1e-9)

@@ -1,11 +1,18 @@
 import unittest
 
-from src.kinematics.kinematics_utils import Pose
-from src.reinforcementlearning.environment.robot_env import RobotEnv
-from tf_agents.environments import utils
 import numpy as np
 
-from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
+from src.kinematics.kinematics_utils import Pose
+
+try:
+    from tf_agents.environments import utils
+    from src.reinforcementlearning.environment.robot_env import RobotEnv
+    from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
+    MISSING_DEPENDENCY = None
+except ImportError as e:
+    # the reinforcement learning environment needs tf_agents, see Sacrequirements.txt
+    MISSING_DEPENDENCY = str(e)
+
 from src.reinforcementlearning.environment.scenario import Scenario
 from src.utils.obstacle import BoxObstacle
 
@@ -13,6 +20,7 @@ scenario_no_obstacles = Scenario([], Pose(-25, 35, 10), Pose(25, 35, 10))
 scenario_obstacles = Scenario([BoxObstacle([10, 40, 10], [0, 35, 0])], Pose(-25, 35, 10), Pose(25, 35, 10))
 
 
+@unittest.skipIf(MISSING_DEPENDENCY, 'tf_agents is not installed: {}'.format(MISSING_DEPENDENCY))
 class TestRobotEnv(unittest.TestCase):
 
     def test_env_no_obs(self):

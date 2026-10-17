@@ -2,7 +2,7 @@ import unittest
 from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 
 
-class TestPointInObstacle(unittest.TestCase):
+class TestIntervalManager(unittest.TestCase):
 
     def test_interval_manager_1_pass_positive(self):
         interval = 10
@@ -43,3 +43,11 @@ class TestPointInObstacle(unittest.TestCase):
 
         should_log_3 = interval_manager.should_trigger(22)
         self.assertFalse(should_log_3, "should not log after 22 steps with an interval of 10 if we logged at 21")
+
+    def test_interval_manager_resumed_from_total_step(self):
+        # when training is resumed from a checkpoint, the intervals already passed should not trigger again
+        interval_manager = IntervalManager(10, total_step=25)
+
+        self.assertFalse(interval_manager.should_trigger(29), "should not log within the interval we resumed in")
+        self.assertTrue(interval_manager.should_trigger(30), "should log once the next interval is reached")
+        self.assertFalse(interval_manager.should_trigger(30), "should only log once per interval")

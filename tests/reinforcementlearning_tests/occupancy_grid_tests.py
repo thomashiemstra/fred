@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+from hilbertcurve.hilbertcurve import HilbertCurve
 
 from src.reinforcementlearning.environment.occupancy_grid_util import is_point_in_obstacle, get_height_tallest_obstacle, \
     create_hilbert_curve_from_obstacles, create_occupancy_grid_from_obstacles
@@ -120,3 +121,52 @@ class OccupancyGridTest(unittest.TestCase):
         self.assertTrue(np.array_equal(grid, expected_grid),
                         "did not get the expected array. Expected: {}, actual: {}".format(expected_grid, grid))
 
+    def test_height_is_scaled_and_tallest_obstacle_wins(self):
+        low_obstacle = BoxObstacle([2, 4, 10], [-1, 2, 0])
+        high_obstacle = BoxObstacle([2, 2, 20], [0, 2, 0])
+        too_high_obstacle = BoxObstacle([1, 1, 80], [1.5, 0.5, 0])
+        grid = create_occupancy_grid_from_obstacles([low_obstacle, high_obstacle, too_high_obstacle], 4, 4, 1)
+
+        # rows are x (-2..2), columns are y (0..4); heights are divided by 40 and capped at 1
+        expected_grid = np.array(
+            [[0.25, 0.25, 0.25, 0.25],
+             [0.25, 0.5, 0.5, 0.25],
+             [0, 0.5, 0.5, 0],
+             [1, 0, 0, 0]]
+        )
+
+        np.testing.assert_allclose(grid, expected_grid)
+
+    def test_rotated_obstacle(self):
+        # a 1x6 wall rotated by 90 degrees lies along the x axis at y = 2.5
+        obstacle = BoxObstacle([1, 6, 40], [0, 2.5, 0], alpha=np.pi / 2)
+        grid = create_occupancy_grid_from_obstacles([obstacle], 6, 4, 1)
+
+        expected_grid = np.zeros((6, 4))
+        expected_grid[:, 2] = 1
+
+        np.testing.assert_allclose(grid, expected_grid)
+
+    def test_invalid_grid_size(self):
+        with self.assertRaises(ValueError):
+            create_occupancy_grid_from_obstacles(None, 10, 10, 3)
+        with self.assertRaises(ValueError):
+            create_occupancy_grid_from_obstacles(None, 10, 9, 5)
+
+
+class HilbertCurveMatchesGridTest(unittest.TestCase):
+
+    def test_curve_is_the_grid_in_hilbert_order(self):
+        obstacles = [BoxObstacle([10, 20, 20], [5, 20, 0], alpha=np.pi / 4), BoxObstacle([6, 6, 40], [-10, 10, 0])]
+        iteration = 3
+        # 2**3 = 8 cells per side of 5 cm, the same cells as a 40x40 grid with grid_size 5
+        grid = create_occupancy_grid_from_obstacles(obstacles, 40, 40, 5)
+        curve = create_hilbert_curve_from_obstacles(obstacles, grid_len_x=40, grid_len_y=40, iteration=iteration)
+
+        self.assertEqual(64, len(curve))
+        self.assertTrue(np.any(curve > 0), "the obstacles should show up in the curve")
+        hilbert_curve = HilbertCurve(iteration, 2)
+        for distance in range(len(curve)):
+            x, y = hilbert_curve.coordinates_from_distance(distance)
+            self.assertEqual(grid[x][y], curve[distance],
+                             "curve element {} should match grid cell ({}, {})".format(distance, x, y))
