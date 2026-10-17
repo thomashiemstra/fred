@@ -13,7 +13,6 @@ from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import from_current_angles_to_pose
 from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
-from time import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -259,26 +258,19 @@ class DynamixelRobotController(AbstractRobotController):
 
     def set_gripper(self, new_gripper_state):
         """
-        directly control the gripper on the robot
-        :param new_gripper_state: value between 0 and 100 0 being fully closed 100 fully open
-        :return:
+        move the gripper to the state, this returns right away. The servo moves smoothly at its profile velocity, and
+        when an object blocks the gripper it squeezes the object with at most the goal current of the servo.
+        :param new_gripper_state: value between 0 (open) and 100 (closed)
+        :return: True if the gripper state was sent to the servo
         """
+        self.servo_handler.set_angle(GRIPPER_ID, new_gripper_state)
+        return self.servo_handler.move_to_angles([GRIPPER_ID])
+
+    def get_gripper_state(self):
+        """returns the actual state of the gripper (0 to 100), or None if it could not be read"""
         if not self.servo_handler.read_current_pos([GRIPPER_ID]):
-            logger.error('failed to read the gripper position, not moving the gripper')
-            return
-
-        current_state = self.servo_handler.get_angle(GRIPPER_ID, self.servo7.current_position)
-
-        delta = int(new_gripper_state - current_state)
-        if abs(delta) > 10:
-            for i in range(abs(delta)):
-                current_state = current_state + np.sign(delta)
-                self.servo_handler.set_angle(GRIPPER_ID, int(current_state))
-                self.servo_handler.move_to_angles([GRIPPER_ID])
-                sleep(0.1)
-        else:
-            self.servo_handler.set_angle(GRIPPER_ID, new_gripper_state)
-            self.servo_handler.move_to_angles([GRIPPER_ID])
+            return None
+        return self.servo_handler.get_angle(GRIPPER_ID, self.servo7.current_position)
 
     def set_velocity_profile(self):
         return self.servo_handler.set_profile_velocity_and_acceleration()
