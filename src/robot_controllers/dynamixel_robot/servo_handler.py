@@ -240,11 +240,15 @@ class ServoHandler(object):
                 errors[servo_id] = [name for bit, name in self.config.HARDWARE_ERRORS.items() if status & (1 << bit)]
         return errors
 
+    def read_temperatures(self, servo_ids=None):
+        """returns a mapping of servo id to temperature in degrees celsius, or None on failure"""
+        return self.__sync_read(self.config.ADDR_PRESENT_TEMPERATURE, self.config.LEN_PRESENT_TEMPERATURE,
+                                self.__ids(servo_ids))
+
     def read_temperature_and_voltage(self, servo_ids=None):
         """returns a mapping of servo id to (temperature in degrees celsius, input voltage), or None on failure"""
         servo_ids = self.__ids(servo_ids)
-        temperatures = self.__sync_read(self.config.ADDR_PRESENT_TEMPERATURE, self.config.LEN_PRESENT_TEMPERATURE,
-                                        servo_ids)
+        temperatures = self.read_temperatures(servo_ids)
         voltages = self.__sync_read(self.config.ADDR_PRESENT_INPUT_VOLTAGE, self.config.LEN_PRESENT_INPUT_VOLTAGE,
                                     servo_ids)
         if temperatures is None or voltages is None:

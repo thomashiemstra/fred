@@ -61,6 +61,8 @@ class DynamixelRobotController(AbstractRobotController):
         self.servo_handler = ServoHandler(dict(servo_config.servos), cfg, port_handler, packet_handler,
                                           servo_config.buses)
         self.bus_lock = self.servo_handler.bus_lock
+        # the servos that are warmer than the warning temperature, so the warning is only logged once
+        self._warm_servos = set()
 
         self.initialize_servos()
         self._current_angles = self._read_initial_angles()
@@ -105,6 +107,10 @@ class DynamixelRobotController(AbstractRobotController):
 
         if self.get_hardware_errors() != {}:
             logger.error('not all servos are working, not enabling the servos!')
+            return False
+
+        if self.get_overheating_servos() != {}:
+            logger.error('not all servos are cool enough, not enabling the servos!')
             return False
 
         if not self.servo_handler.hold_current_position():
@@ -171,6 +177,30 @@ class DynamixelRobotController(AbstractRobotController):
                 logger.error('servo %d shut down because of: %s (temperature %sC, input voltage %sV), reboot the '
                              'servos to clear the error', servo_id, ', '.join(names), temperature, voltage)
         return errors
+
+    def get_overheating_servos(self):
+        """
+        returns a mapping of servo id to temperature of the servos that are warmer than the temperature limit of the
+        servo configuration, or None if the temperatures could not be read. A warning is logged once when a servo gets
+        warmer than the warning temperature, and again after it cooled down.
+        """
+        warning, limit = self.servo_config.temperature_warning, self.servo_config.temperature_limit
+        temperatures = self.servo_handler.read_temperatures()
+        if temperatures is None:
+            return None
+
+        for servo_id, temperature in temperatures.items():
+            if temperature > warning and servo_id not in self._warm_servos:
+                self._warm_servos.add(servo_id)
+                logger.warning('servo %d is getting warm: %dC, the robot stops at %dC', servo_id, temperature, limit)
+            elif temperature <= warning and servo_id in self._warm_servos:
+                self._warm_servos.remove(servo_id)
+                logger.info('servo %d cooled down: %dC', servo_id, temperature)
+
+        overheating = {servo_id: temperature for servo_id, temperature in temperatures.items() if temperature > limit}
+        for servo_id, temperature in overheating.items():
+            logger.error('servo %d is too warm: %dC, the limit is %dC', servo_id, temperature, limit)
+        return overheating
 
     def get_servos_outside_calibrated_range(self):
         """returns a mapping of servo id to (present position, calibrated range) of the arm servos outside their
