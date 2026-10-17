@@ -1,5 +1,8 @@
 import unittest
 
+import numpy as np
+from numpy import pi
+
 from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics_utils import Pose
 from src.utils.os_utils import is_linux
@@ -164,3 +167,122 @@ class XboxPoseUpdaterWorkspaceLimitsTests(unittest.TestCase):
             for _ in range(10):
                 pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
                 self.assertGreaterEqual(pose.y, WorkSpaceLimits.y_min)
+
+    def test_pose_does_not_move_beyond_the_maximum_radius(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_y=100), 10, 0.1, SmallWorkSpaceLimits)
+        pose = Pose(0, 19.5, 1)
+        for _ in range(100):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+            self.assertLessEqual(np.linalg.norm([pose.x, pose.y, pose.z]), SmallWorkSpaceLimits.radius_max)
+        # it did move up to the limit
+        self.assertGreater(pose.y, 19.8)
+
+    def test_pose_does_not_move_within_the_minimum_radius(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_y=-100), 10, 0.1, SmallWorkSpaceLimits)
+        pose = Pose(0, 10.5, 1)
+        for _ in range(100):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+            self.assertGreaterEqual(np.linalg.norm([pose.x, pose.y, pose.z]), SmallWorkSpaceLimits.radius_min)
+        self.assertLess(pose.y, 10.2)
+
+    def test_z_does_not_move_below_the_minimum_while_x_still_moves(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_x=100, lr_trigger=-100), 10, 0.1,
+                                       SmallWorkSpaceLimits)
+        pose = Pose(0, 15, 0.5)
+        for _ in range(100):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+            self.assertGreater(pose.z, SmallWorkSpaceLimits.z_min)
+        self.assertLess(pose.z, 0.1)
+        self.assertGreater(pose.x, 5)
+
+
+class SmallWorkSpaceLimits:
+    radius_min = 10
+    radius_max = 20
+    y_min = 1
+    z_min = 0
+
+
+class XboxPoseUpdaterVelocityTests(unittest.TestCase):
+
+    def test_speeds_up_to_the_maximum_speed_and_slows_down_to_a_stop(self):
+        state_mock = ControllerStateMock(l_thumb_x=100)
+        # 100 steps per second, so 10 steps to speed up to 10 cm/s
+        pose_updater = XboxPoseUpdater(state_mock, 10, 0.1, None)
+        pose = Pose(0, 0, 0)
+
+        for _ in range(5):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+        self.assertAlmostEqual(5, pose_updater.v_x)
+        for _ in range(20):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+        self.assertAlmostEqual(10, pose_updater.v_x)
+
+        state_mock.l_thumb_x = 0
+        for _ in range(10):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+        self.assertEqual(0, pose_updater.v_x)
+        stopped_x = pose.x
+        pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+        self.assertEqual(stopped_x, pose.x)
+
+    def test_partial_stick_input_limits_the_speed(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_y=-50), 10, 0.1, None)
+        pose = Pose(0, 0, 0)
+
+        for _ in range(30):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+
+        self.assertAlmostEqual(-5, pose_updater.v_y)
+
+    def test_changing_the_maximum_speed_changes_the_speed_and_the_acceleration(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_x=100), 10, 0.1, None)
+        pose_updater.maximum_speed = 20
+        pose = Pose(0, 0, 0)
+
+        pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+        self.assertAlmostEqual(2, pose_updater.v_x)
+        for _ in range(20):
+            pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+        self.assertAlmostEqual(20, pose_updater.v_x)
+        self.assertEqual(20, pose_updater.maximum_speed)
+
+    def test_orientation_stays_within_its_limits(self):
+        for r_thumb_x, r_thumb_y in ((1000, 1000), (-1000, -1000)):
+            pose_updater = XboxPoseUpdater(ControllerStateMock(r_thumb_x=r_thumb_x, r_thumb_y=r_thumb_y), 10, 0.1,
+                                           None)
+            pose = Pose(0, 20, 0)
+            for _ in range(500):
+                pose = pose_updater.get_updated_pose_from_controller(pose, False, None)
+            np.testing.assert_allclose([pi / 2, pi / 2], [abs(pose.alpha), abs(pose.gamma)])
+
+
+class XboxPoseUpdaterCenterTests(unittest.TestCase):
+
+    def test_end_effector_points_towards_the_center(self):
+        # the right stick is ignored when there is a center
+        pose_updater = XboxPoseUpdater(ControllerStateMock(r_thumb_x=1000, r_thumb_y=1000), 10, 0.1, None)
+
+        pose = pose_updater.get_updated_pose_from_controller(Pose(0, 20, 0), False, [0, 30, 10])
+
+        self.assertAlmostEqual(0, pose.alpha)
+        self.assertAlmostEqual(pi / 4, pose.gamma)
+        self.assertEqual(0, pose.beta)
+
+        pose = pose_updater.get_updated_pose_from_controller(Pose(0, 20, 0), False, [-10, 30, 0])
+        self.assertAlmostEqual(pi / 4, pose.alpha)
+        self.assertAlmostEqual(0, pose.gamma)
+
+    def test_center_behind_the_end_effector_is_clipped(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(), 10, 0.1, None)
+
+        pose = pose_updater.get_updated_pose_from_controller(Pose(0, 20, 0), False, [1, 10, 0])
+
+        self.assertAlmostEqual(-pi / 2, pose.alpha)
+
+    def test_flip_is_kept(self):
+        pose_updater = XboxPoseUpdater(ControllerStateMock(l_thumb_x=100), 10, 0.1, WorkSpaceLimits)
+
+        pose = pose_updater.get_updated_pose_from_controller(Pose(30, 22, 4, flip=True), False, None)
+
+        self.assertTrue(pose.flip)
