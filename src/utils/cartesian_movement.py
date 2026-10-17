@@ -136,14 +136,21 @@ def check_move(move, robot_config, workspace_limits=None, angle_limits=None, cur
                                         .format(np.round(wrist, 1), workspace_limits.z_min))
 
 
-def execute_move(robot, move):
-    """send every step of a planned movement to the robot, at src.global_constants.steps_per_second"""
+def execute_move(robot, move, should_stop=None):
+    """
+    send every step of a planned movement to the robot, at src.global_constants.steps_per_second
+    :param should_stop: optional function that is checked before every step, the movement stops when it returns True
+    :return: True if the whole movement was executed, False if it was stopped
+    """
     dt = 1.0 / src.global_constants.steps_per_second
     next_step = perf_counter()
     for angles in move.angles:
+        if should_stop is not None and should_stop():
+            return False
         robot.move_servos(angles)
         next_step += dt
         sleep(max(0.0, next_step - perf_counter()))
+    return True
 
 
 def _get_curve_values(duration):

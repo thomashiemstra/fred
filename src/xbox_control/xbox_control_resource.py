@@ -1,6 +1,5 @@
 from __future__ import division
 
-import threading
 
 from flask import Blueprint, request
 from flask import jsonify
@@ -16,65 +15,34 @@ except ImportError:
 
 xbox_api = Blueprint('xbox_api', __name__)
 
-api_lock = threading.Lock()
-started = False
-done = False
-running_thread = None
-
 
 @xbox_api.route('/test', methods=['GET'])
 def test():
     resp = jsonify(Pose(5.5, 2.0, 3.0).__dict__)
     return resp
 
-
-@xbox_api.route('/testpost', methods=['POST'])
-def test_post(json):
-    print(json)
-
-
 @xbox_api.route('/start', methods=['POST'])
 def start():
-    global started
-    with api_lock:
-        if started:
-            return "already started"
-        else:
-            started = True
-
+    # the xbox robot controller keeps track of whether it is running, and makes sure it only starts once
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
-    success = xbox_robot_controller.start()
-    if not success:
-        with api_lock:
-            started = False
-    # if success:
-    #     xbox_robot_controller.servo_controller.change_status(True)
-    resp = jsonify(success=success)
-    return resp
+    if xbox_robot_controller.is_running():
+        return "already started"
+    return jsonify(success=xbox_robot_controller.start())
 
 
 @xbox_api.route('/stop', methods=['POST'])
 def stop():
-    global started
-    with api_lock:
-        if started:
-            started = False
-        else:
-            return "already stopped"
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
-    xbox_robot_controller.stop()
-    # xbox_robot_controller.servo_controller.change_status(False)
-
-    resp = jsonify(success=True)
-    return resp
+    if not xbox_robot_controller.stop():
+        return "already stopped"
+    return jsonify(success=True)
 
 
 @xbox_api.route('/findcenter', methods=['POST'])
 def define_center():
+    # the control loop moves the robot, so it can't be done in this request
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
-    xbox_robot_controller.start_find_center_mode()
-    resp = jsonify(success=True)
-    return resp
+    return jsonify(success=xbox_robot_controller.request_find_center_mode())
 
 
 @xbox_api.route('/clearcenter', methods=['POST'])
@@ -133,8 +101,7 @@ def set_speed():
 def set_scenario():
     scenario_id = get_parameter('scenario_id')
     if scenario_id is None:
-        return jsonify(success=False
-                       )
+        return jsonify(success=False)
     xbox_robot_controller = global_objects.get_xbox_robot_controller(src.global_constants.dynamixel_robot_arm_port)
     success = xbox_robot_controller.set_scenario(int(scenario_id))
     return jsonify(success=success)

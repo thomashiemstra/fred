@@ -42,12 +42,25 @@ class CombinedRobot(AbstractRobotController):
     def get_hardware_errors(self):
         return self.dynamixel_robot.get_hardware_errors()
 
+    def get_overheating_servos(self):
+        return self.dynamixel_robot.get_overheating_servos()
+
     def pose_to_angles(self, pose):
         return inverse_kinematics(pose, self.dynamixel_robot.robot_config)
 
     def set_gripper(self, new_gripper_state):
-        self.dynamixel_robot.set_gripper(new_gripper_state)
+        return self.dynamixel_robot.set_gripper(new_gripper_state)
+
+    def get_gripper_state(self):
+        return self.dynamixel_robot.get_gripper_state()
+
+    def get_angle_limits(self):
+        return self.dynamixel_robot.get_angle_limits()
 
     def reset_to_pose(self, pose):
         self.simulated_robot.reset_to_pose(pose)
         self.dynamixel_robot.reset_to_pose(pose)
+
+    def set_profile_velocity_percentage(self, percentage):
+        self.simulated_robot.set_profile_velocity_percentage(percentage)
+        self.dynamixel_robot.set_profile_velocity_percentage(percentage)
