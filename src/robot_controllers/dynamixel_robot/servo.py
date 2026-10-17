@@ -3,57 +3,7 @@ from typing import Any, Optional, Callable, Dict, List, Tuple
 
 import numpy as np
 import logging
-import json
 from numpy import pi
-
-
-class ServoEncoder(json.JSONEncoder):
-
-    def default(self, o: Any) -> Any:
-        if isinstance(o, Servo):
-            return {
-                "min_position": o.min_position,
-                "max_position": o.max_position,
-                "max_angle": o.max_angle,
-                "min_angle": o.min_angle,
-                "profile_velocity": o.profile_velocity,
-                "profile_acceleration": o.profile_acceleration,
-                "p": o.p,
-                "i": o.i,
-                "d": o.d,
-                "offset": o.constant_offset,
-                "goal_current": o.goal_current,
-                "operating_mode" : o.operating_mode,
-                "class": "servo"
-            }
-        else:
-            return super().default(o)
-
-
-class ServoDecoder(json.JSONDecoder):
-
-    def __init__(self) -> None:
-        super().__init__(object_hook=self.dict_to_object)
-
-    @staticmethod
-    def dict_to_object(dictionary):
-        if "class" in dictionary.keys() and dictionary["class"] == "servo":
-            return Servo(
-                min_position=dictionary["min_position"],
-                max_position=dictionary["max_position"],
-                min_angle=dictionary["min_angle"],
-                max_angle=dictionary["max_angle"],
-                operating_mode=dictionary["operating_mode"],
-                profile_velocity=dictionary["profile_velocity"],
-                profile_acceleration=dictionary["profile_acceleration"],
-                p=dictionary["p"],
-                i=dictionary["i"],
-                d=dictionary["d"],
-                offset=dictionary["offset"],
-                goal_current=dictionary["goal_current"]
-            )
-        else:
-            return dictionary
 
 
 class Servo:

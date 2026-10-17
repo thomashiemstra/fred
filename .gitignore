@@ -117,3 +117,6 @@ train/
 # capture results
 *.mp4
 *.png
+# configuration files, the yaml rule above is for training output
+!src/robot_controllers/dynamixel_robot/servo_config.yaml
+!tests/servo_controller_tests/test_servo_config.yaml

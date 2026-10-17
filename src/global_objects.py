@@ -1,5 +1,3 @@
-import logging
-import sys
 
 from src import global_constants
 
@@ -23,25 +21,16 @@ def get_robot(port):
         # return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
 
 
-def get_servo_config(servo_config_path):
-    try:
-        with open(servo_config_path, 'r') as servo_config_file:
-            return servo_config_file.read()
-    except FileNotFoundError:
-        logging.error("error getting servo config, exiting")
-        sys.exit()
-
-
 @lru_cache(maxsize=1)
 def get_xbox_robot_controller(port):
     from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
     from src.xbox_control.xbox_robot_controller import XboxRobotController
 
-    dynamixel_servo_controller = get_robot(port)
+    robot = get_robot(port)
     controller = XboxController(dead_zone=30, scale=100)
     pose_updater = XboxPoseUpdater(controller)
 
-    return XboxRobotController(global_constants.dynamixel_robot_config, dynamixel_servo_controller, pose_updater)
+    return XboxRobotController(global_constants.dynamixel_robot_config, robot, pose_updater)
 
 
 @lru_cache(maxsize=1)

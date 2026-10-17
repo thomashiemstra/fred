@@ -8,7 +8,7 @@ from src.kinematics.kinematics import inverse_kinematics, forward_position_kinem
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers, DynamixelError
-from src.robot_controllers.dynamixel_robot.servo_configurations import servo_configs
+from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement_utils import from_current_angles_to_pose
@@ -19,19 +19,17 @@ logger = logging.getLogger(__name__)
 
 ARM_IDS = (1, 2, 3, 4, 5, 6)
 GRIPPER_ID = 7
-# the servos on the rs485 and the ttl connector of the usb adapter can't hear each other's responses
-BUSES = ((1, 2, 3), (4, 5, 6, 7))  # rs485, ttl
 
 
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, port, robot_config, servos=servo_configs, perform_safety_checks=True,
+    def __init__(self, port, robot_config, servo_config=None, perform_safety_checks=True,
                  print_position_error=False):
         """
         :param port: a string representing the usb port the robot is connected to, None to find it automatically
         :param robot_config: a RobotConfig object
-        :param servos: list of the 7 servo objects, ordered by servo id
+        :param servo_config: a ServoConfig, by default it is loaded from servo_config.yaml
         :param perform_safety_checks: raise when the servos can't be set up and check the arm position before
         enabling the torque
         :param print_position_error: periodically print the difference between the target and actual position
@@ -39,6 +37,14 @@ class DynamixelRobotController(AbstractRobotController):
         self.robot_config = robot_config
         self.perform_safety_checks = perform_safety_checks
         self.print_position_error = print_position_error
+
+        if servo_config is None:
+            servo_config = load_servo_config()
+        missing = set(ARM_IDS + (GRIPPER_ID,)) - set(servo_config.servos)
+        if missing:
+            raise DynamixelError('the servo configuration has no servos with ids {}'.format(sorted(missing)))
+        self.servo_config = servo_config
+        servos = [servo_config.servos[servo_id] for servo_id in ARM_IDS + (GRIPPER_ID,)]
 
         # the individual servos are used directly by the calibration scripts
         self.servo1 = servos[0]
@@ -52,8 +58,8 @@ class DynamixelRobotController(AbstractRobotController):
 
         port_handler, packet_handler = setup_dynamixel_handlers(port, cfg, ARM_IDS)
         # all servos share the same usb adapter, the handler reads them per bus
-        servo_map = {servo_id: servo for servo_id, servo in enumerate(servos, start=1)}
-        self.servo_handler = ServoHandler(servo_map, cfg, port_handler, packet_handler, BUSES)
+        self.servo_handler = ServoHandler(dict(servo_config.servos), cfg, port_handler, packet_handler,
+                                          servo_config.buses)
         self.bus_lock = self.servo_handler.bus_lock
 
         self.initialize_servos()

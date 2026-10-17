@@ -1,0 +1,98 @@
+# Configuration of the dynamixel servos of the robot, loaded by servo_config.py
+#
+# Every servo has:
+#   name                        what the servo does
+#   model                       the dynamixel model, for reference
+#   bus                         the connector of the usb adapter, servos on different connectors can't hear each
+#                               other's responses, so they are read separately
+#   mode                        position, extended_position or current_based_position
+#   positions: [first, last]    the servo positions (4096 per turn) of the ends of the range, last can be smaller than
+#                               first when the servo is mounted the other way around
+#   angles: [first, last]       the joint angles in degrees at those positions, or for the gripper:
+#   states: [first, last]       the gripper states at those positions
+#   offset                      added to the position, to calibrate the zero point (optional, default 0)
+#   goal_current                the maximum current in mA in current_based_position mode (optional)
+#   profile                     velocity and acceleration of the movement profile of the servo
+#   pid                         the gains of the position controller of the servo
+
+# The robot is printed in PLA, which softens around 55-65C. A servo that is warmer than the warning temperature is
+# logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure
+# their temperature inside, the plastic around them is cooler. The servos shut down by themselves at their hardware
+# temperature limit, 80C (70C for the gripper), and then just go limp.
+temperature_warning: 45  # degrees celsius
+temperature_limit: 50  # degrees celsius
+
+servos:
+  1:
+    name: base
+    model: XM430-W350
+    bus: rs485
+    mode: position
+    positions: [1024, 3072]
+    angles: [0, 180]
+    offset: 354
+    profile: {velocity: 250, acceleration: 100}
+    pid: {p: 1500, i: 0, d: 500}
+  2:
+    name: shoulder
+    model: XM540-W270
+    bus: rs485
+    mode: position
+    positions: [1024, 3072]
+    angles: [0, 180]
+    offset: -464
+    profile: {velocity: 500, acceleration: 500}
+    pid: {p: 1000, i: 0, d: 0}
+  3:
+    name: elbow
+    model: XM430-W350
+    bus: rs485
+    mode: position
+    positions: [3072, 1024]
+    angles: [-90, 90]
+    profile: {velocity: 150, acceleration: 50}
+    pid: {p: 1500, i: 0, d: 0}
+  4:
+    name: wrist 1
+    model: XC430-W240
+    bus: ttl
+    mode: position
+    positions: [0, 4096]
+    angles: [-180, 180]
+    offset: -12
+    profile: {velocity: 300, acceleration: 100}
+    pid: {p: 1000, i: 0, d: 0}
+  5:
+    name: wrist 2
+    model: XC430-W240
+    bus: ttl
+    mode: position
+    positions: [0, 4096]
+    angles: [-180, 180]
+    offset: 59
+    profile: {velocity: 300, acceleration: 100}
+    pid: {p: 2000, i: 0, d: 0}
+  6:
+    name: wrist 3
+    model: XC430-W150
+    bus: ttl
+    mode: position
+    positions: [0, 4096]
+    angles: [-180, 180]
+    profile: {velocity: 300, acceleration: 100}
+    pid: {p: 600, i: 0, d: 0}
+  # 0 is open and 100 is closed, it closes freely all the way. When an object blocks the gripper, it squeezes with
+  # about 2mA per position the target is beyond the object (with p=500), up to the goal current. Squeezing a pen was
+  # tested without hardware errors and without heating up up to about 580mA, the most it reaches with the target at
+  # the closed end. To squeeze harder, raise the goal current together with GRIPPER_MAX_LEAD of the xbox controller,
+  # it needs about goal current / 20 states (1 state is 10 positions). The current limit of the XL330-M288 is 1750mA
+  7:
+    name: gripper
+    model: XL330-M288
+    bus: ttl
+    mode: current_based_position
+    positions: [1024, 2048]
+    states: [0, 100]
+    goal_current: 400
+    profile: {velocity: 50, acceleration: 50}
+    pid: {p: 500, i: 0, d: 0}
