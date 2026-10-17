@@ -1,4 +1,5 @@
 import copy
+import os
 import unittest
 from unittest import mock
 
@@ -6,11 +7,25 @@ import dynamixel_sdk as dxl
 from src.robot_controllers.dynamixel_robot import dynamixel_robot_controller as drc
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
-from src.robot_controllers.dynamixel_robot.servo_configurations import servo_configs
+from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src import global_constants
 from src.kinematics.kinematics import forward_kinematics
 
 ACCESS_ERROR = 0x07
+# the tests use their own servo configuration, so recalibrating the robot doesn't affect them
+TEST_SERVO_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_servo_config.yaml')
+
+
+def calibrated_range(servo):
+    """the lowest and highest position of the calibrated range of the servo, including its offset"""
+    return servo.clamp_position(-2 ** 31), servo.clamp_position(2 ** 31)
+
+
+def position_of(servo, angle):
+    """the goal position the servo gets for the angle, including its offset"""
+    servo = copy.deepcopy(servo)
+    servo.set_target_position_from_angle(angle)
+    return servo.target_position
 
 
 class FakeBus:
@@ -21,7 +36,7 @@ class FakeBus:
     both buses fails.
     """
 
-    def __init__(self, servos):
+    def __init__(self, servos, buses):
         self.memory = {servo_id: bytearray(256) for servo_id in range(1, len(servos) + 1)}
         for servo_id, servo in enumerate(servos, start=1):
             self.memory[servo_id][cfg.ADDR_OPERATING_MODE] = servo.operating_mode
@@ -29,7 +44,7 @@ class FakeBus:
         self.unresponsive = set()
         self.packets = []  # (instruction, address, ids)
         self.rebooted = set()
-        self.buses = drc.BUSES
+        self.buses = buses
         self._sync_read_ids = []
 
     # helpers for the tests
@@ -112,14 +127,22 @@ class FakeBus:
 class TestDynamixelRobotController(unittest.TestCase):
 
     def setUp(self):
-        self.servos = copy.deepcopy(servo_configs)
-        self.bus = FakeBus(self.servos)
+        self.servo_config = load_servo_config(TEST_SERVO_CONFIG_PATH)
+        self.servos = list(self.servo_config.servos.values())
+        self.bus = FakeBus(self.servos, self.servo_config.buses)
         self.robot = self.make_robot()
 
     def make_robot(self, **kwargs):
         with mock.patch.object(drc, 'setup_dynamixel_handlers', lambda port, config, servo_ids: (mock.Mock(), self.bus)):
-            return drc.DynamixelRobotController('FAKE', global_constants.dynamixel_robot_config, servos=self.servos,
-                                              **kwargs)
+            return drc.DynamixelRobotController('FAKE', global_constants.dynamixel_robot_config,
+                                              servo_config=self.servo_config, **kwargs)
+
+    def test_robot_starts_with_the_real_servo_configuration(self):
+        # only checks that the configuration of the robot can be used, not its values
+        real_config = load_servo_config()
+        self.bus = FakeBus(list(real_config.servos.values()), real_config.buses)
+        self.servo_config = real_config
+        self.assertIsNotNone(self.make_robot().get_current_angles())
 
     def test_setup_writes_the_configured_values(self):
         for servo_id, servo in enumerate(self.servos, start=1):
@@ -129,7 +152,7 @@ class TestDynamixelRobotController(unittest.TestCase):
             self.assertEqual(servo.i, self.bus.get(servo_id, cfg.ADDR_I, 2))
             self.assertEqual(servo.d, self.bus.get(servo_id, cfg.ADDR_D, 2))
         # only the gripper has a goal current configured
-        self.assertEqual(50, self.bus.get(7, cfg.ADDR_GOAL_CURRENT, 2))
+        self.assertEqual(self.servos[6].goal_current, self.bus.get(7, cfg.ADDR_GOAL_CURRENT, 2))
         self.assertEqual([('sync_write', cfg.ADDR_GOAL_CURRENT, [7])], self.bus.packets_to(cfg.ADDR_GOAL_CURRENT))
         # adjacent registers are written in a single packet
         self.assertEqual(1, len(self.bus.packets_to(cfg.ADDR_PROFILE_ACCELERATION)))
@@ -171,8 +194,15 @@ class TestDynamixelRobotController(unittest.TestCase):
 
     def test_move_servos_clamps_out_of_range_positions(self):
         self.robot.move_servos([0, 1.5, 1.5, 0.0, -10.0, 0.0, 0.0])
-        # the calibrated range of servo 4 starts at -12, but the physical range at 0
-        self.assertEqual(0, self.bus.get(4, cfg.ADDR_GOAL_POSITION, 4))
+        # servo 4 goes to the low end of its calibrated range, but never below the physical range
+        lower, _ = calibrated_range(self.servos[3])
+        self.assertEqual(max(lower, cfg.MIN_POSITION), self.bus.get(4, cfg.ADDR_GOAL_POSITION, 4))
+
+    def test_move_servos_clamps_to_the_physical_range(self):
+        # with an offset that moves the calibrated range below 0, a position below 0 would be rejected by the servo
+        self.servos[3].constant_offset = -100
+        self.robot.move_servos([0, 1.5, 1.5, 0.0, -10.0, 0.0, 0.0])
+        self.assertEqual(cfg.MIN_POSITION, self.bus.get(4, cfg.ADDR_GOAL_POSITION, 4))
 
     def test_current_angles_are_read_with_a_packet_per_bus(self):
         self.bus.packets.clear()
@@ -240,6 +270,38 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.bus.memory[7][cfg.ADDR_HARDWARE_ERROR_STATUS] = 0b00010000
         self.assertEqual({2: ['input voltage error'], 7: ['electrical shock']}, self.robot.get_hardware_errors())
 
+    def set_temperature(self, servo_id, temperature):
+        self.bus.memory[servo_id][cfg.ADDR_PRESENT_TEMPERATURE] = temperature
+
+    def test_overheating_servos(self):
+        for servo_id in range(1, 8):
+            self.set_temperature(servo_id, 30)
+        self.assertEqual({}, self.robot.get_overheating_servos())
+
+        self.set_temperature(2, self.servo_config.temperature_limit + 1)
+        self.set_temperature(5, self.servo_config.temperature_limit)
+        self.assertEqual({2: self.servo_config.temperature_limit + 1}, self.robot.get_overheating_servos())
+
+    def test_warm_servo_is_logged_once(self):
+        self.set_temperature(3, self.servo_config.temperature_warning + 1)
+        with self.assertLogs(drc.logger, 'WARNING') as logs:
+            self.robot.get_overheating_servos()
+            self.robot.get_overheating_servos()
+        self.assertEqual(1, len([line for line in logs.output if 'servo 3 is getting warm' in line]))
+
+        # and again after it cooled down and warmed up again
+        self.set_temperature(3, self.servo_config.temperature_warning)
+        self.robot.get_overheating_servos()
+        self.set_temperature(3, self.servo_config.temperature_warning + 2)
+        with self.assertLogs(drc.logger, 'WARNING') as logs:
+            self.robot.get_overheating_servos()
+        self.assertIn('servo 3 is getting warm', logs.output[0])
+
+    def test_servos_are_not_enabled_when_too_warm(self):
+        self.set_temperature(2, self.servo_config.temperature_limit + 5)
+        self.assertFalse(self.robot.enable_servos())
+        self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+
     def test_servos_are_not_enabled_with_a_hardware_error(self):
         self.bus.memory[5][cfg.ADDR_HARDWARE_ERROR_STATUS] = 0b00100000
         self.assertFalse(self.robot.enable_servos())
@@ -260,9 +322,24 @@ class TestDynamixelRobotController(unittest.TestCase):
 
     def test_servos_outside_calibrated_range(self):
         self.assertEqual({}, self.robot.get_servos_outside_calibrated_range())
-        # servo 2 has an offset of -464, so its calibrated range is [560, 2608]
-        self.bus.set_position(2, 545)
-        self.assertEqual({2: (545, (560, 2608))}, self.robot.get_servos_outside_calibrated_range())
+        # the calibrated range includes the offset of the servo
+        lower, upper = calibrated_range(self.servos[1])
+        self.bus.set_position(2, lower)
+        self.assertEqual({}, self.robot.get_servos_outside_calibrated_range())
+        self.bus.set_position(2, lower - 15)
+        self.assertEqual({2: (lower - 15, (lower, upper))}, self.robot.get_servos_outside_calibrated_range())
+
+    def test_recalibrated_offset_is_used(self):
+        servo = self.servos[1]
+        self.bus.set_position(2, position_of(servo, 1.0))
+        self.assertAlmostEqual(1.0, self.robot.get_current_angles()[2], places=2)
+
+        # after recalibrating, the same physical position is a different angle, and the same angle a different position
+        servo.constant_offset += 100
+        self.assertAlmostEqual(servo.get_angle_from_position(position_of(servo, 1.0) - 100),
+                               self.robot.get_current_angles()[2])
+        self.robot.move_servo(2, 1.0)
+        self.assertEqual(position_of(servo, 1.0), self.bus.get(2, cfg.ADDR_GOAL_POSITION, 4))
 
     def test_enable_servos_disables_all_servos_when_one_fails(self):
         self.bus.unresponsive = {5}
@@ -285,11 +362,24 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.robot.set_servo_position(1, 1024)
         self.assertEqual(1024, self.bus.get(1, cfg.ADDR_GOAL_POSITION, 4))
 
-    def test_gripper_moves_without_touching_the_arm(self):
+    def test_gripper_is_moved_with_a_single_write(self):
         self.bus.packets.clear()
-        self.robot.set_gripper(self.robot.servo_handler.get_angle(7, 2048) + 5)
-        self.assertEqual([('sync_read', cfg.ADDR_PRESENT_POSITION, [7]),
-                          ('sync_write', cfg.ADDR_GOAL_POSITION, [7])], self.bus.packets)
+        gripper = self.servos[6]
+        self.assertTrue(self.robot.set_gripper(0))
+        self.assertEqual([('sync_write', cfg.ADDR_GOAL_POSITION, [7])], self.bus.packets)
+        self.assertEqual(position_of(gripper, 0), self.bus.get(7, cfg.ADDR_GOAL_POSITION, 4))
+
+        # a large change isn't split up, the servo moves smoothly at its profile velocity
+        self.bus.packets.clear()
+        self.assertTrue(self.robot.set_gripper(100))
+        self.assertEqual([('sync_write', cfg.ADDR_GOAL_POSITION, [7])], self.bus.packets)
+        self.assertEqual(position_of(gripper, 100), self.bus.get(7, cfg.ADDR_GOAL_POSITION, 4))
+
+    def test_gripper_state(self):
+        self.bus.set_position(7, position_of(self.servos[6], 50))
+        self.assertAlmostEqual(50, self.robot.get_gripper_state(), delta=0.1)
+        self.bus.unresponsive = {7}
+        self.assertIsNone(self.robot.get_gripper_state())
 
     def test_reboot_reinitializes_the_servos(self):
         self.bus.memory[1][cfg.ADDR_P:cfg.ADDR_P + 2] = bytes(2)
@@ -297,6 +387,73 @@ class TestDynamixelRobotController(unittest.TestCase):
             self.robot.reboot_all_servos()
         self.assertEqual(set(range(1, 8)), self.bus.rebooted)
         self.assertEqual(self.servos[0].p, self.bus.get(1, cfg.ADDR_P, 2))
+
+    def test_servo_configuration_without_all_servos_raises_before_opening_the_port(self):
+        del self.servo_config.servos[4]
+        setup = mock.Mock()
+        with mock.patch.object(drc, 'setup_dynamixel_handlers', setup):
+            with self.assertRaisesRegex(DynamixelError, r'no servos with ids \[4\]'):
+                drc.DynamixelRobotController('FAKE', global_constants.dynamixel_robot_config,
+                                             servo_config=self.servo_config)
+        setup.assert_not_called()
+
+    def test_servos_are_not_enabled_when_the_hardware_errors_can_not_be_read(self):
+        with mock.patch.object(self.robot, 'safety_check', return_value=True), \
+                mock.patch.object(self.robot.servo_handler, 'read_hardware_errors', return_value=None):
+            self.assertFalse(self.robot.enable_servos())
+        self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+
+    def test_servos_are_not_enabled_when_the_temperatures_can_not_be_read(self):
+        with mock.patch.object(self.robot, 'safety_check', return_value=True), \
+                mock.patch.object(self.robot.servo_handler, 'read_temperatures', return_value=None):
+            self.assertIsNone(self.robot.get_overheating_servos())
+            self.assertFalse(self.robot.enable_servos())
+        self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+
+    def test_failed_safety_check_disables_the_servos(self):
+        self.assertTrue(self.robot.enable_servos())
+        with mock.patch.object(self.robot, 'safety_check', return_value=False):
+            self.assertFalse(self.robot.enable_servos())
+        self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+
+    def test_servos_are_not_enabled_when_the_goal_position_can_not_be_set(self):
+        with mock.patch.object(self.robot.servo_handler, 'hold_current_position', return_value=False):
+            self.assertFalse(self.robot.enable_servos())
+        self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+
+    def test_servo_at_the_warning_temperature_is_not_logged(self):
+        for servo_id in range(1, 8):
+            self.set_temperature(servo_id, self.servo_config.temperature_warning)
+        with mock.patch.object(drc.logger, 'warning') as warning:
+            self.assertEqual({}, self.robot.get_overheating_servos())
+        warning.assert_not_called()
+
+    def test_temperature_limits_come_from_the_servo_configuration(self):
+        self.servo_config.temperature_warning, self.servo_config.temperature_limit = 30, 35
+        self.set_temperature(1, 36)
+        self.set_temperature(2, 35)
+        self.assertEqual({1: 36}, self.robot.get_overheating_servos())
+
+    def test_move_servos_does_not_move_the_gripper(self):
+        gripper_goal = self.bus.get(7, cfg.ADDR_GOAL_POSITION, 4)
+        self.robot.move_servos([0, 1.5, 1.5, 0.0, 0.5, -0.5, 1.0])
+        self.assertEqual(gripper_goal, self.bus.get(7, cfg.ADDR_GOAL_POSITION, 4))
+
+    def test_debug_functions_reject_unknown_servo_ids(self):
+        self.bus.packets.clear()
+        for function, args in ((self.robot.move_servo, (8, 0.0)), (self.robot.set_servo_position, (0, 2048)),
+                               (self.robot.set_pid_single_servo, (9, 1, 2, 3))):
+            with self.assertRaises(ValueError):
+                function(*args)
+        self.assertEqual([], self.bus.packets)
+
+    def test_angle_limits(self):
+        limits = self.robot.get_angle_limits()
+        self.assertEqual(list(drc.ARM_IDS), list(limits))
+        for servo_id, (low, high) in limits.items():
+            servo = self.servos[servo_id - 1]
+            self.assertEqual((min(servo.min_angle, servo.max_angle), max(servo.min_angle, servo.max_angle)),
+                             (low, high))
 
     def test_reboot_raises_when_a_servo_does_not_come_back(self):
         self.bus.unresponsive = {2}

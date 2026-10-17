@@ -132,12 +132,58 @@ class TestLatencyTimer(unittest.TestCase):
             self.assertEqual(16, dynamixel_utils._get_windows_latency_timer('COM3'))
             self.assertIsNone(dynamixel_utils._get_windows_latency_timer('COM4'))
 
+    def test_windows_instance_without_device_parameters_is_skipped(self):
+        registry = {
+            'VID_0403+PID_6014+FT1': {'0000': {}, '0001': {'Device Parameters': {'PortName': 'COM9'}},
+                                      '0002': {'Device Parameters': {'PortName': 'COM9', 'LatencyTimer': 2}}},
+        }
+        with mock.patch.dict(sys.modules, {'winreg': fake_winreg(registry)}):
+            self.assertEqual(2, dynamixel_utils._get_windows_latency_timer('COM9'))
+
+    def test_latency_timer_is_none_when_it_can_not_be_read(self):
+        def fail(port):
+            raise OSError('no such device')
+
+        with mock.patch.object(dynamixel_utils.sys, 'platform', 'win32'), \
+                mock.patch.object(dynamixel_utils, '_get_windows_latency_timer', fail):
+            self.assertIsNone(dynamixel_utils.get_latency_timer('COM9'))
+        with mock.patch.object(dynamixel_utils.sys, 'platform', 'linux'), \
+                mock.patch.object(dynamixel_utils, '_get_linux_latency_timer', fail):
+            self.assertIsNone(dynamixel_utils.get_latency_timer('/dev/ttyUSB0'))
+        with mock.patch.object(dynamixel_utils.sys, 'platform', 'darwin'):
+            self.assertIsNone(dynamixel_utils.get_latency_timer('/dev/tty.usbserial'))
+
+    def test_linux_latency_timer_follows_symlinks(self):
+        with tempfile.TemporaryDirectory() as sysfs_root:
+            os.mkdir(os.path.join(sysfs_root, 'ttyUSB1'))
+            with open(os.path.join(sysfs_root, 'ttyUSB1', 'latency_timer'), 'w') as latency_file:
+                latency_file.write('1\n')
+            with mock.patch.object(dynamixel_utils.os.path, 'realpath', return_value='/dev/ttyUSB1'):
+                self.assertEqual(1, dynamixel_utils._get_linux_latency_timer('/dev/serial/by-id/usb-FTDI', sysfs_root))
+
+    def get_port_handler(self, latency_timer, open_result=True, baud_result=True):
+        # the port is never opened, openPort and setBaudRate are mocked
+        with mock.patch.object(dynamixel_utils, 'get_latency_timer', return_value=latency_timer), \
+                mock.patch.object(BlockingPortHandler, 'openPort', return_value=open_result), \
+                mock.patch.object(BlockingPortHandler, 'setBaudRate', return_value=baud_result):
+            return dynamixel_utils.get_port_handler('FAKE9', 1000000)
+
     def test_unknown_latency_timer_falls_back_to_the_sdk_default(self):
-        with mock.patch.object(dynamixel_utils, 'get_latency_timer', return_value=None), \
-                mock.patch.object(BlockingPortHandler, 'openPort', return_value=True), \
-                mock.patch.object(BlockingPortHandler, 'setBaudRate', return_value=True):
-            port_handler = dynamixel_utils.get_port_handler('COM9', 1000000)
+        with self.assertLogs(dynamixel_utils.logger, 'WARNING'):
+            port_handler = self.get_port_handler(None)
         self.assertEqual(dxl.port_handler.LATENCY_TIMER, port_handler.latency_timer)
+
+    def test_detected_latency_timer_is_used(self):
+        self.assertEqual(1, self.get_port_handler(1).latency_timer)
+        with self.assertLogs(dynamixel_utils.logger, 'WARNING') as logs:
+            self.assertEqual(16, self.get_port_handler(16).latency_timer)
+        self.assertIn('Set it to 1ms', logs.output[0])
+
+    def test_port_that_can_not_be_opened_raises(self):
+        with self.assertRaisesRegex(dynamixel_utils.DynamixelError, 'failed to open port FAKE9'):
+            self.get_port_handler(1, open_result=False)
+        with self.assertRaisesRegex(dynamixel_utils.DynamixelError, 'baudrate'):
+            self.get_port_handler(1, baud_result=False)
 
 
 def fake_winreg(registry):
