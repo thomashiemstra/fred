@@ -1,45 +1,37 @@
 <?xml version="1.0"?>
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="kuka_lwr">
+<!--
+  Source of fred_new.urdf and fred_with_spheres_new.urdf. Don't edit the urdf files, build them from this file with
+      python -m src.simulation.build_urdf
+  which takes the link lengths from src/robot_config.yaml (simulated_robot, in cm) and passes them in metres as the
+  arguments below. The kinematics in src/kinematics/kinematics.py use the same lengths.
 
- <!-- <xacro:property name="dir" value="file:///home/thomas/tutorial_ws/urdf_tutorial/urdf/" /> -->
-<xacro:property name="dir" value="" />
- <xacro:property name="M_PI" value="3.1415926535897931" />
- <xacro:property name="name" value="kuka" />
-  <!--
-     Little helper macro to define the inertia matrix needed
-     for links.
-     -->
-  <!-- width is along x axis
-       length is along y axis
-       height is along z axis
-  -->
-  <xacro:macro name="cuboid_inertia_def" params="width height length mass">
-    <inertia ixx="${mass * (height * height + length * length) / 12}"
-             iyy="${mass * (width * width + height * height) / 12}"
-             izz="${mass * (width * width + length * length) / 12}"
-             ixy="0" iyz="0" ixz="0"/>
-  </xacro:macro>
+  Joints, in the order of the servo ids: base_to_base_plate (1, yaw), base_plate_to_arm_lower (2, shoulder),
+  arm_lower_to_arm_upper (3, elbow), arm_upper_to_wrist (4, roll), wrist_to_wrist_servo (5, pitch),
+  wrist_servo_to_gripper (6, roll). The three spheres are the control points of the obstacle avoidance.
 
-  <!-- length is along the y-axis! -->
-  <xacro:macro name="cylinder_inertia_def" params="radius length mass">
-    <inertia ixx="${mass * (3 * radius * radius + length * length) / 12}"
-             iyy="${mass * radius* radius / 2}"
-             izz="${mass * (3 * radius * radius + length * length) / 12}"
-             ixy="0" iyz="0" ixz="0"/>
-  </xacro:macro>
+  The joint axes of 4 and 5 intersect at the wrist centre of the kinematics, joint 6 sits gripper_offset beyond it.
+  The masses and inertias are placeholders.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fred">
 
-  <xacro:property name="base_plate_mass" value="0.05"/>
-  <xacro:property name="arm_lower_mass" value="0.2"/>
-  <xacro:property name="arm_upper_mass" value="0.3"/>
-  <xacro:property name="wrist_mass" value="0.1"/>
-  <xacro:property name="wrist_servo_mass" value="0.04"/>
-  <xacro:property name="gripper_mass" value="0.01"/>
+  <!-- link lengths in metres, see src/robot_config.yaml -->
+  <xacro:arg name="d1" default="0.157"/>   <!-- ground to the shoulder axis -->
+  <xacro:arg name="a2" default="0.2"/>     <!-- shoulder to elbow -->
+  <xacro:arg name="d4" default="0.22"/>    <!-- elbow to the wrist centre -->
+  <xacro:arg name="d6" default="0.12"/>    <!-- wrist centre to the tip of the gripper -->
+  <xacro:arg name="spheres" default="true"/>  <!-- add the control point spheres -->
 
+  <xacro:property name="d1" value="$(arg d1)"/>
+  <xacro:property name="a2" value="$(arg a2)"/>
+  <xacro:property name="d4" value="$(arg d4)"/>
+  <xacro:property name="d6" value="$(arg d6)"/>
+  <xacro:property name="M_PI" value="3.14159265359"/>
 
-  <xacro:property name="arm_velocity_scale_factor" value="1"/>
-  <xacro:property name="right" value="0" />
-  <!-- right is either 1 (for right arm) or -1 (for left arm) -->
-
+  <!-- offsets that follow from the printed parts, not from the kinematics -->
+  <xacro:property name="shoulder_offset" value="0.04"/>     <!-- the shoulder axis is beside the base axis, undone at the elbow -->
+  <xacro:property name="wrist_roll_offset" value="0.101"/>  <!-- the roll joint sits this far up the upper arm -->
+  <xacro:property name="gripper_offset" value="0.017"/>     <!-- the gripper roll joint beyond the wrist centre -->
+  <xacro:property name="sphere1_offset" value="0.05"/>      <!-- control point 1 along the upper arm, from the roll joint -->
 
   <material name="black">
     <color rgba="0 0 0 1"/>
@@ -50,190 +42,165 @@
   <material name="red">
     <color rgba="0.8 0 0 1"/>
   </material>
+  <material name="yellow">
+    <color rgba="1 1 0 1"/>
+  </material>
 
+  <xacro:macro name="mesh_link" params="name mesh mass com ixx iyy izz material collision:=true">
+    <link name="${name}">
+      <inertial>
+        <mass value="${mass}"/>
+        <origin rpy="0 0 0" xyz="${com}"/>
+        <inertia ixx="${ixx}" iyy="${iyy}" izz="${izz}" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <mesh filename="meshes/${mesh}" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="${material}"/>
+      </visual>
+      <xacro:if value="${collision}">
+        <collision>
+          <origin rpy="0 0 0" xyz="0 0 0"/>
+          <geometry>
+            <mesh filename="meshes/${mesh}" scale="0.001 0.001 0.001"/>
+          </geometry>
+        </collision>
+      </xacro:if>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="sphere_link" params="name parent xyz collision_radius:=0.01">
+    <link name="${name}">
+      <inertial>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <mass value=".0"/>
+        <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+      </inertial>
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <sphere radius="0.01"/>
+        </geometry>
+        <material name="yellow"/>
+      </visual>
+      <collision>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <sphere radius="${collision_radius}"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="${parent}_to_${name}" type="continuous">
+      <parent link="${parent}"/>
+      <child link="${name}"/>
+      <origin xyz="${xyz}"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
 
   <link name="base_link">
     <inertial>
       <origin rpy="0 0 0" xyz="0 0 0"/>
-       <mass value=".0"/>
-       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+      <mass value=".0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
     </inertial>
     <visual>
-      <origin rpy="0 0 0" xyz="-0.08 -0.08 0"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="${dir}meshes_fred/base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="meshes/base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="black"/>
     </visual>
   </link>
 
-  <link name="base_plate">
-    <inertial>
-      <mass value="${base_plate_mass}"/>
-      <origin rpy="0 0 0" xyz="0 0.09 0.0"/>
-      <cylinder_inertia_def radius="0.06" length="0.004"
-                          mass="${base_plate_mass}"/>
-    </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="-0.06 -0.06 0"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/base_plate.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-      <material name="black"/>
-    </visual>
-  </link>
+  <!-- joint 1: the base plate turns on top of the base, its axis is the base axis -->
+  <xacro:mesh_link name="base_plate" mesh="joint2.stl" mass="0.05" com="0 0 0"
+                   ixx="1e-05" iyy="1e-05" izz="1e-05" material="red" collision="false"/>
   <joint name="base_to_base_plate" type="revolute">
     <limit effort="1000.0" lower="0.0" upper="${M_PI}" velocity="10"/>
     <parent link="base_link"/>
     <child link="base_plate"/>
-    <origin rpy="0 0 -${M_PI/2}" xyz="0 0 0.0545"/>
+    <origin rpy="0 0 -${M_PI/2}" xyz="0 0 ${d1}"/>
     <axis xyz="0 0 1"/>
   </joint>
 
-  <link name="arm_lower">
-    <inertial>
-      <mass value="${arm_lower_mass}"/>
-      <origin rpy="0 0 0" xyz="0 0.09 0.0"/>
-      <cuboid_inertia_def width="0.06" length="0.18" height="0.06"
-                          mass="${arm_lower_mass}"/>
-    </inertial>
-    <visual>
-      <origin rpy="0 ${M_PI/2} 0" xyz="-0.032 -0.0243 0.030"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/arm_lower.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-      <material name="red"/>
-    </visual>
-
-    <collision>
-      <origin rpy="0 ${M_PI/2} 0" xyz="-0.032 -0.0243 0.030"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/arm_lower_col.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-    </collision>
-  </link>
+  <!-- joint 2: the shoulder, its axis lies at height d1 beside the base axis -->
+  <xacro:mesh_link name="arm_lower" mesh="arm.stl" mass="0.2" com="0 0.09 0.0"
+                   ixx="0.0006" iyy="0.00012" izz="0.0006" material="red"/>
   <joint name="base_plate_to_arm_lower" type="revolute">
-    <limit effort="1000.0" lower="0.0" upper="${M_PI}" velocity="10"/>
+    <limit effort="1000.0" lower="-${M_PI}" upper="${M_PI}" velocity="10"/>
     <parent link="base_plate"/>
     <child link="arm_lower"/>
-    <origin rpy="${M_PI} 0 ${M_PI}" xyz="0 0 0.036"/>
-    <axis xyz="-1 0 0"/>
+    <origin rpy="-${M_PI/2} 0 0" xyz="${shoulder_offset} 0 0"/>
+    <axis xyz="1 0 0"/>
   </joint>
 
-
-  <link name="arm_upper">
-    <inertial>
-      <mass value="${arm_upper_mass}"/>
-      <origin rpy="0 0 0" xyz="0.0 0.03 -0.01"/>
-      <cuboid_inertia_def width="0.04" length="0.12" height="0.06"
-                          mass="${arm_upper_mass}"/>
-    </inertial>
-    <visual>
-      <origin rpy="0 ${M_PI} 0" xyz="0.019 -0.0415 0.02"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/arm_upper.stl" scale="0.001 0.001 0.001"/>
-      </geometry>195
-      <material name="red"/>
-    </visual>
-    <collision>
-      <origin rpy="0 ${M_PI} 0" xyz="0.019 -0.0415 0.02"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/arm_upper.stl" scale="0.001 0.001 0.001"/>
-      </geometry>195
-   </collision>
-  </link>
+  <!-- joint 3: the elbow, a2 along the lower arm and back on the base axis -->
+  <xacro:mesh_link name="arm_upper" mesh="joint3.stl" mass="0.3" com="0.0 0.03 -0.01"
+                   ixx="0.00045" iyy="0.00013" izz="0.0004" material="red"/>
   <joint name="arm_lower_to_arm_upper" type="revolute">
     <limit effort="1000.0" lower="${-M_PI/2}" upper="${M_PI}" velocity="10"/>
     <parent link="arm_lower"/>
     <child link="arm_upper"/>
-    <origin rpy="${M_PI/2} 0 0" xyz="0 0.158 0"/>
-    <axis xyz="-1 0 0"/>
+    <origin rpy="0 0 0" xyz="-${shoulder_offset} 0 ${a2}"/>
+    <axis xyz="1 0 0"/>
   </joint>
 
-  <link name="wrist">
-    <inertial>
-      <mass value="${wrist_mass}"/>
-      <origin rpy="0 0 0" xyz="0.0 0.065 0.0"/>
-      <cuboid_inertia_def width="0.07" length="0.12" height="0.04"
-                          mass="${wrist_mass}"/>
-    </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="-0.036625 0 -0.02"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/wrist.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-      <material name="red"/>
-    </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="-0.036625 0 -0.02"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/wrist.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-    </collision>
-  </link>
+  <!-- joint 4: the wrist roll, part way up the upper arm -->
+  <xacro:mesh_link name="wrist" mesh="joint4.stl" mass="0.1" com="0 0 0.0"
+                   ixx="0.000133333333333" iyy="5.41666666667e-05" izz="0.000160833333333" material="red"/>
   <joint name="arm_upper_to_wrist" type="continuous">
     <parent link="arm_upper"/>
     <child link="wrist"/>
-    <origin xyz="0 0.102 0"/>
+    <origin xyz="0 ${wrist_roll_offset} 0"/>
     <axis xyz="0 1 0"/>
   </joint>
 
-
+  <!-- joint 5: the wrist pitch, d4 from the elbow: the wrist centre of the kinematics -->
   <link name="wrist_servo">
     <inertial>
-      <mass value="${wrist_servo_mass}"/>
-      <origin rpy="0 0 0" xyz="0.0 0.0 -0.015"/>
-      <cuboid_inertia_def width="0.03" length="0.3" height="0.045"
-                          mass="${wrist_servo_mass}"/>
+      <mass value="0.04"/>
+      <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
+      <inertia ixx="0.00030675" ixy="0" ixz="0" iyy="9.75e-06" iyz="0" izz="0.000303"/>
     </inertial>
     <visual>
-      <origin rpy="0 0 ${M_PI/2}" xyz="0.0145 -0.017 -0.03525"/>
+      <origin rpy="0 0 ${M_PI/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="${dir}meshes_fred/servo.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="meshes/gripper_servo.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="red"/>
     </visual>
     <collision>
-      <origin rpy="0 0 ${M_PI/2}" xyz="0.0145 -0.017 -0.03525"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="${dir}meshes_fred/servo.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="meshes/gripper_servo.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
   <joint name="wrist_to_wrist_servo" type="continuous">
     <parent link="wrist"/>
     <child link="wrist_servo"/>
-    <origin xyz="0 0.11625 0"/>
-    <axis xyz="-1 0 0"/>
+    <origin xyz="0 ${d4 - wrist_roll_offset} 0"/>
+    <axis xyz="1 0 0"/>
   </joint>
 
-
-  <link name="gripper">
-    <inertial>
-      <mass value="${gripper_mass}"/>
-      <origin rpy="0 0 0" xyz="0.0 0.038 0.0"/>
-      <cuboid_inertia_def width="0.06" length="0.075" height="0.03"
-                          mass="${gripper_mass}"/>
-    </inertial>
-    <visual>
-      <origin rpy="${-M_PI/2} 0 0" xyz="-0.03 0 0.015"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/gripper.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-      <material name="black"/>
-    </visual>
-    <collision>
-      <origin rpy="${-M_PI/2} 0 0" xyz="-0.03 0 0.015"/>
-      <geometry>
-        <mesh filename="${dir}meshes_fred/gripper.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-    </collision>
-  </link>
+  <!-- joint 6: the gripper roll -->
+  <xacro:mesh_link name="gripper" mesh="gripper.stl" mass="0.01" com="0 0 0"
+                   ixx="5.4375e-06" iyy="3.75e-06" izz="7.6875e-06" material="black"/>
   <joint name="wrist_servo_to_gripper" type="continuous">
     <parent link="wrist_servo"/>
     <child link="gripper"/>
-    <origin xyz="0 0.017 0"/>
+    <origin xyz="0 ${gripper_offset} 0"/>
     <axis xyz="0 1 0"/>
   </joint>
+
+  <!-- the control points of the obstacle avoidance: on the upper arm, at the wrist centre and at the tip -->
+  <xacro:if value="$(arg spheres)">
+    <xacro:sphere_link name="sphere1" parent="wrist" xyz="0 ${sphere1_offset} 0"/>
+    <xacro:sphere_link name="sphere2" parent="wrist_servo" xyz="0 0 0"/>
+    <xacro:sphere_link name="sphere3" parent="gripper" xyz="0 ${d6 - gripper_offset} 0" collision_radius="0.005"/>
+  </xacro:if>
 
 </robot>

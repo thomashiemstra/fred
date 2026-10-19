@@ -1,2 +1,4 @@
 # dependencies of the dynamixel robot controller
 dynamixel-sdk==4.1.0
+# builds the urdf of the simulated robot from fred.xacro (src/simulation/build_urdf.py)
+xacro==2.1.1
