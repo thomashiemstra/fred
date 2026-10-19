@@ -25,7 +25,7 @@ def start_simulated_robot(use_gui=False, robot_config=global_constants.simulated
 
     start_pos = [0, 0, 0]
     start_orientation = p.getQuaternionFromEuler([0, 0, 0])
-    body_id = p.loadURDF(current_dir + "/urdf/fred_with_spheres_new.urdf", start_pos, start_orientation,
+    body_id = p.loadURDF(current_dir + "/urdf/fred_new.urdf", start_pos, start_orientation,
                          physicsClientId=physics_client)
 
     robot = SimulatedRobotController(robot_config, physics_client, body_id)
