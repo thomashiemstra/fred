@@ -1,13 +1,15 @@
 import os
 
-from src.kinematics.kinematics_utils import RobotConfig
+from src.robot_config import load_robot_configs
 from src.utils.os_utils import get_project_root
 
 dynamixel_robot_arm_port = None  # None finds the port of the usb adapter the servos are connected to
 
-d6 = 12  # Length of the gripper
-dynamixel_robot_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=d6)
-simulated_robot_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=d6)
+# the link lengths of the robots come from src/robot_config.yaml
+_robot_configs = load_robot_configs()
+dynamixel_robot_config = _robot_configs['dynamixel_robot']
+simulated_robot_config = _robot_configs['simulated_robot']
+d6 = dynamixel_robot_config.d6  # Length of the gripper
 
 SERVO_1_LOW_CURRENT = 40
 SERVO_2_LOW_CURRENT = 150

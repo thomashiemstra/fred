@@ -1,0 +1,18 @@
+# Link lengths of the robot in cm, loaded by src/robot_config.py into RobotConfig objects (src/kinematics/kinematics_utils.py)
+#
+#   d1    ground to the axis of joint 2 (the shoulder)
+#   a2    joint 2 to joint 3 (the lower arm)
+#   d4    joint 3 to the wrist centre (the upper arm)
+#   d6    wrist centre to the tip of the end effector (the gripper); WorkSpaceLimits.y_min is d6 + 0.1
+#
+# The simulated robot uses the same lengths as the real one unless it has its own section.
+dynamixel_robot:
+  d1: 15.7
+  a2: 20
+  d4: 22
+  d6: 12
+simulated_robot:
+  d1: 15.7
+  a2: 20
+  d4: 22
+  d6: 12
