@@ -624,6 +624,21 @@ class MoreButtonTests(unittest.TestCase):
         self.assertIsNotNone(controller.center)
         self.assertEqual([], controller.recorded_positions)
 
+    def test_poses_that_define_no_center_are_dropped_and_find_center_mode_continues(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(y=True))
+        controller.find_center_mode = True
+
+        controller.current_pose = Pose(-10, 20, 4)
+        controller.handle_buttons()
+        # a different height, get_center can't intersect the two
+        controller.current_pose = Pose(10, 20, 8, alpha=0.5)
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller.handle_buttons()
+
+        self.assertTrue(controller.find_center_mode)
+        self.assertIsNone(controller.center)
+        self.assertEqual([], controller.recorded_positions)
+
     def test_x_without_enough_positions_does_not_create_a_move(self):
         controller = make_controller(FakeRobot(), buttons=lambda: Buttons(x=True))
         controller.recorded_positions = [Pose(30, 22, 4)]

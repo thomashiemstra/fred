@@ -397,10 +397,15 @@ class XboxRobotController:
 
     @synchronized_with_lock("lock")
     def set_center(self) -> None:
-        self.center = get_center(self.recorded_positions[0], self.recorded_positions[1])
-        print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))  # type: ignore[index]  # get_center can return none
-        self.find_center_mode = False
+        center = get_center(self.recorded_positions[0], self.recorded_positions[1])
         self.recorded_positions = []
+        if center is None:
+            # get_center logged why, stay in find center mode so two new poses can be recorded
+            logger.warning('the two poses do not define a center, record two new ones')
+            return
+        self.center = center
+        print('setting center x={}, y={}, z={}'.format(center[0], center[1], center[2]))
+        self.find_center_mode = False
 
     @synchronized_with_lock("lock")
     def save_recorded_moves_to_file(self, filename: str) -> bool:
