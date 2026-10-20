@@ -33,7 +33,9 @@ arc_3 = Pose(25, 30, 25)
 
 poses = [arc_1, arc_2, arc_3]
 
-move = create_move(simulated_robot, poses, 15, None, None)  # type: ignore[call-arg]  # create_move takes 4 arguments, script is stale
+move = create_move(simulated_robot, poses, 15, None)
+if move is None:
+    raise SystemExit('the arc is outside the workspace limits')
 simulated_robot.reset_to_pose(arc_1)
 _, _, _, _, pos, orientation_quaterions = p.getLinkState(robot_body_id, 7)
 
@@ -46,5 +48,5 @@ print(normal_on_b, distance)
 print(distance)
 # # move.go_to_start_of_move(simulated_robot, 2)
 while True:
-    move.move(simulated_robot)  # type: ignore[union-attr]  # create_move can return none
-    move.move_reversed(simulated_robot)  # type: ignore[union-attr]  # create_move can return none
+    move.move(simulated_robot)
+    move.move_reversed(simulated_robot)

@@ -254,7 +254,7 @@ class XboxController(object):
 
     @synchronized_with_lock("lock")
     def _start(self, value: int) -> None:
-        self.start = True if value == 1 else 0  # type: ignore[assignment]  # 0 instead of False, harmless
+        self.start = value == 1
 
     def _handle_x_axis_value(self, value: float) -> float:
         value = (value / XboxController.MAX_JOY_VAL) * self.scale

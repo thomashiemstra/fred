@@ -177,8 +177,10 @@ class Servo2(Servo):
                  dynamic_offsets: dict[str, dict[str, int]] | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
                          profile_acceleration, p, i, d, offset, goal_current)
+        if dynamic_offsets is None:
+            raise ValueError('Servo2 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
-        self.dynamic_offsets_info = self._get_dynamic_offsets_info(dynamic_offsets)  # type: ignore[arg-type]  # fails on none
+        self.dynamic_offsets_info = self._get_dynamic_offsets_info(dynamic_offsets)
         self.angle2_lookup_min = self.dynamic_offsets_info['min']
         self.angle2_lookup_max = self.dynamic_offsets_info['max']
 
@@ -236,8 +238,10 @@ class Servo3(Servo):
                  dynamic_offsets: dict[str, int] | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode,
                          profile_velocity, profile_acceleration, p, i, d, offset, goal_current)
+        if dynamic_offsets is None:
+            raise ValueError('Servo3 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
-        self.angle_lookup_min, self.angle_lookup_max = self._get_dynamic_offsets_info(dynamic_offsets)  # type: ignore[arg-type]  # fails on none
+        self.angle_lookup_min, self.angle_lookup_max = self._get_dynamic_offsets_info(dynamic_offsets)
 
     def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         super().set_target_position_from_angle(angle)

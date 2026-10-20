@@ -15,18 +15,15 @@ from __future__ import annotations
 import logging
 import sys
 from time import sleep
-from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.kinematics.kinematics import forward_kinematics
 from src.kinematics.kinematics_utils import Pose
 from src.global_objects import get_robot
+from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.utils.movement import plan_move_to_pose, execute_move, check_move
 from src.utils.movement_exception import MovementException
-
-if TYPE_CHECKING:
-    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 
 # all the way to the right, the same start pose as the xbox controller
 START_POSE = Pose(30, 25.0, 5)
@@ -86,8 +83,11 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
     robot = get_robot()
+    if not isinstance(robot, CombinedRobot):
+        print('this script needs the real robot, use_simulation is set')
+        return 1
 
-    if not check_calibrated_range(robot):  # type: ignore[arg-type]  # needs the real robot, the simulation has no servos
+    if not check_calibrated_range(robot):
         return 1
 
     current_angles = robot.get_current_angles()
@@ -121,13 +121,13 @@ def main() -> int:
         check_move(move, robot, current_angles=angles_after_enabling)
         execute_move(robot, move)
         sleep(0.5)  # let the servos settle
-        compare_to_target(robot, START_POSE)  # type: ignore[arg-type]  # needs the real robot, the simulation has no servos
+        compare_to_target(robot, START_POSE)
     except MovementException as e:
         print('stopped: {}'.format(e))
     except KeyboardInterrupt:
         print('\nstopped, the servos are holding their last position')
 
-    disable_torque_on_request(robot)  # type: ignore[arg-type]  # needs the real robot, the simulation has no servos
+    disable_torque_on_request(robot)
     return 0
 
 

@@ -52,7 +52,7 @@ class BoardToBoardRobotController:
         self.board_to_board_image_handler = board_to_board_image_handler
         self.lock = threading.RLock()
         self.should_filter_lock = threading.RLock()
-        self.should_filter = True  # type: ignore[method-assign, assignment]  # should_filter is also a method, the attribute shadows it
+        self._should_filter = True
         self.thread: threading.Thread | None = None
         self.startup_pose = Pose(21, 21.0, 4)
         self.neutral_pose = Pose(0, 30, 10)
@@ -92,11 +92,11 @@ class BoardToBoardRobotController:
 
     @synchronized_with_lock("should_filter_lock")
     def should_filter(self) -> bool:
-        return self.should_filter  # type: ignore[return-value]  # should_filter is also a method, the attribute shadows it
+        return self._should_filter
 
     @synchronized_with_lock("should_filter_lock")
     def set_should_filter(self, val: bool) -> None:
-        self.should_filter = val  # type: ignore[method-assign, assignment]  # should_filter is also a method, the attribute shadows it
+        self._should_filter = val
 
     def get_new_filtered_pose(self) -> Pose:
         relative_matrix, translation_vector = self.board_to_board_image_handler.get_revlative_vecs()
@@ -116,7 +116,7 @@ class BoardToBoardRobotController:
         old_y = self.current_pose.y
         old_z = self.current_pose.z
 
-        if self.should_filter:  # type: ignore[truthy-function]  # should_filter is also a method, the attribute shadows it
+        if self.should_filter():
             new_x = old_x + self.kg * (x_m - old_x)
             new_y = old_y + self.kg * (y_m - old_y)
             new_z = old_z + self.kg * (z_m - old_z)
