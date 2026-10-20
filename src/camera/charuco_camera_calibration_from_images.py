@@ -7,7 +7,8 @@ import numpy as np
 import json
 
 
-from src.camera.util import get_default_charuco_board, charuco_board_dictionary
+from src.camera.util import get_default_charuco_board, charuco_board_dictionary, detect_aruco_markers, \
+    interpolate_charuco_corners, calibrate_camera_charuco
 
 
 def calibrate_camera(allCorners: list[np.ndarray], allIds: list[np.ndarray], imsize: tuple[int, ...]
@@ -24,18 +25,9 @@ def calibrate_camera(allCorners: list[np.ndarray], allIds: list[np.ndarray], ims
     distCoeffsInit = np.zeros((5,1))
     flags = (cv2.CALIB_USE_INTRINSIC_GUESS + cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_FIX_ASPECT_RATIO)
     #flags = (cv2.CALIB_RATIONAL_MODEL)
-    (ret, camera_matrix, distortion_coefficients0,
-     rotation_vectors, translation_vectors,
-     stdDeviationsIntrinsics, stdDeviationsExtrinsics,
-     perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(  # type: ignore[attr-defined]  # removed in opencv 4.7
-                      charucoCorners=allCorners,
-                      charucoIds=allIds,
-                      board=board,
-                      imageSize=imsize,
-                      cameraMatrix=cameraMatrixInit,
-                      distCoeffs=distCoeffsInit,
-                      flags=flags,
-                      criteria=(cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
+    ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera_charuco(
+        board, allCorners, allIds, imsize, cameraMatrixInit, distCoeffsInit, flags,
+        (cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
 
     return ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors
 
@@ -60,19 +52,17 @@ for fname in images:
     imsize = gray.shape
     last_frame = gray
 
-    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray, charuco_board_dictionary)  # type: ignore[attr-defined]  # removed in opencv 4.7
-    cv2.aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)  # type: ignore[attr-defined]  # removed in opencv 4.7
+    corners, ids = detect_aruco_markers(gray, charuco_board_dictionary)
     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
-    if len(corners) > 7:
+    if ids is not None and len(corners) > 7:
         # SUB PIXEL DETECTION
         for corner in corners:
             cv2.cornerSubPix(gray, corner,
                              winSize=(3, 3),
                              zeroZone=(-1, -1),
                              criteria=criteria)
-        charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,  # type: ignore[attr-defined]  # removed in opencv 4.7
-                                                                                        board)
+        charucoCorners, charucoIds = interpolate_charuco_corners(board, gray, corners, ids)
         if charucoCorners is not None and charucoIds is not None and len(
                 charucoCorners) > 3 and 7 < len(ids) <= 9:
             print("found {} ids".format(len(ids)))

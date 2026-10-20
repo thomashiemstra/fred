@@ -9,7 +9,8 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-from src.camera.util import get_default_charuco_board, charuco_board_dictionary
+from src.camera.util import get_default_charuco_board, charuco_board_dictionary, detect_aruco_markers, \
+    interpolate_charuco_corners, calibrate_camera_charuco
 from src.utils.decorators import timer
 
 ESC_KEY = 27
@@ -32,18 +33,9 @@ def calibrate_camera(allCorners: list[np.ndarray], allIds: list[np.ndarray], ims
     distCoeffsInit = np.zeros((5,1))
     flags = (cv2.CALIB_USE_INTRINSIC_GUESS + cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_FIX_ASPECT_RATIO)
     #flags = (cv2.CALIB_RATIONAL_MODEL)
-    (ret, camera_matrix, distortion_coefficients0,
-     rotation_vectors, translation_vectors,
-     stdDeviationsIntrinsics, stdDeviationsExtrinsics,
-     perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(  # type: ignore[attr-defined]  # removed in opencv 4.7
-                      charucoCorners=allCorners,
-                      charucoIds=allIds,
-                      board=board,
-                      imageSize=imsize,
-                      cameraMatrix=cameraMatrixInit,
-                      distCoeffs=distCoeffsInit,
-                      flags=flags,
-                      criteria=(cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
+    ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera_charuco(
+        board, allCorners, allIds, imsize, cameraMatrixInit, distCoeffsInit, flags,
+        (cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
 
     return ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors
 
@@ -97,8 +89,7 @@ while cap.isOpened():
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
     imsize = gray.shape
-    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray, charuco_board_dictionary)  # type: ignore[attr-defined]  # removed in opencv 4.7
-    cv2.aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)  # type: ignore[attr-defined]  # removed in opencv 4.7
+    corners, ids = detect_aruco_markers(gray, charuco_board_dictionary)
     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
     key_pressed = cv2.waitKey(1)
@@ -112,15 +103,14 @@ while cap.isOpened():
             cv2.imwrite(img_name, gray)
             img_counter += 1
 
-            if len(corners) > 0:
+            if ids is not None and len(corners) > 0:
                 # SUB PIXEL DETECTION
                 for corner in corners:
                     cv2.cornerSubPix(gray, corner,
                                      winSize=(3, 3),
                                      zeroZone=(-1, -1),
                                      criteria=criteria)
-                charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,  # type: ignore[attr-defined]  # removed in opencv 4.7
-                                                                                                board)
+                charucoCorners, charucoIds = interpolate_charuco_corners(board, gray, corners, ids)
                 if charucoCorners is not None and charucoIds is not None and len(
                         charucoCorners) > 3 and decimator % 1 == 0 and 7 < len(ids) <= 9:
                     print("found {} ids".format(len(ids)))
@@ -141,7 +131,11 @@ cap.release()
 cv2.destroyAllWindows()
 
 
-ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera(allCorners, allIds, imsize)  # type: ignore[assignment, arg-type]  # ret was the frame flag before, imsize is none when no frame was read
+if imsize is None:
+    print("no frame was read, camera not connected? exiting.")
+    sys.exit()
+
+error, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera(allCorners, allIds, imsize)
 
 print("Camera matrix : \n")
 print(camera_matrix)

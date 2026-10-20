@@ -13,19 +13,6 @@ from src.camera.image_handlers import ArucoImageHandler, BoardToBoardImageHandle
 RESOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
 CALIBRATION_FILE = os.path.join(RESOURCES, 'calibration_data.json')
 
-# src/camera/image_handlers.py still uses the legacy cv2.aruco API (DetectorParameters_create, drawAxis,
-# estimatePoseSingleMarkers, interpolateCornersCharuco) which was removed in OpenCV 4.7+.
-# drawAxis is not checked here since these tests run with drawing disabled.
-LEGACY_ARUCO_API_AVAILABLE = all(hasattr(cv2.aruco, name) for name in
-                                 ('DetectorParameters_create', 'estimatePoseSingleMarkers',
-                                  'interpolateCornersCharuco'))
-
-
-@unittest.skipUnless(LEGACY_ARUCO_API_AVAILABLE,
-                     'image_handlers.py needs the legacy cv2.aruco API (DetectorParameters_create, drawAxis, '
-                     'estimatePoseSingleMarkers, interpolateCornersCharuco) which is missing in the installed '
-                     'OpenCV {}; port image_handlers.py to cv2.aruco.ArucoDetector/CharucoDetector'
-                     .format(cv2.__version__))
 class ArucoImageHandlerTest(unittest.TestCase):
 
     def setUp(self):
@@ -55,6 +42,8 @@ class ArucoImageHandlerTest(unittest.TestCase):
         detected_makers = aruco_image_handler.get_detected_markers()
         self.assertIsNotNone(detected_makers, "should have gotten detected makers")
         self.assertEqual(3, len(detected_makers), "should have gotten 3 detected markers")
+        self.assertEqual([17, 26, 29], sorted(int(marker.id[0]) for marker in detected_makers),
+                         "should have gotten the markers 17, 26 and 29")
 
         for marker in detected_makers:
             self.assertIsNotNone(marker, "marker should not be null")
@@ -124,6 +113,17 @@ class ArucoImageHandlerTest(unittest.TestCase):
         relative_matrix, relative_tvec = handler.get_revlative_vecs()
         self.assertIsNone(relative_matrix, "should have not gotten a relative rotation matrix")
         self.assertIsNone(relative_tvec, "should have not gotten a relative rotation vector")
+
+    def test_board_not_detected(self):
+        three = np.zeros((3, 1))
+        for handler_class in (ArucoImageHandler, BoardToBoardImageHandler):
+            check = handler_class.board_not_detected
+            self.assertFalse(check(three, three, True), "vectors of length 3 are a detected board")
+            self.assertTrue(check(three, three, False), "no retval is no board")
+            self.assertTrue(check(None, three, True), "no rvec is no board")
+            self.assertTrue(check(three, None, True), "no tvec is no board")
+            self.assertTrue(check(np.zeros((2, 1)), three, True), "a vector of the wrong length is no board")
+            self.assertTrue(check(three, np.zeros((4, 1)), True), "a vector of the wrong length is no board")
 
     def get_default_aruco_image_handler(self):
         aruco_marker_length = 2.65
