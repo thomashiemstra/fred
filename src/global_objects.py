@@ -3,23 +3,41 @@ The objects shared by the whole process, built on their first use.
 
 get_robot() is the one place that builds the robot: the server resources, the calibration scripts and the move tests
 all go through it, so what the robot is (the simulation, or the real arm mirrored in the simulation, see
-global_constants.use_simulation) is decided here and nowhere else. Fresh simulated robots for the reinforcement
-learning environments and the visualiser come from simulation_utils.start_simulated_robot.
+global_constants.use_simulation) is decided here and nowhere else. Whether the simulation is shown in a window is
+decided once per process by its entry point with configure(): the server shows it, the scripts keep it headless.
+Fresh simulated robots for the reinforcement learning environments and the visualiser come from
+simulation_utils.start_simulated_robot.
 """
 from functools import lru_cache
 
 from src import global_constants
 
+_show_simulation = False
+
+
+def configure(show_simulation):
+    """
+    decides what the robot of this process looks like, to be called by the entry point before the robot is built
+    :param show_simulation: open the pybullet window for the simulation (the server does, scripts keep it headless)
+    :raises RuntimeError: when the robot is already built
+    """
+    global _show_simulation
+    if get_robot.cache_info().currsize:
+        raise RuntimeError('the robot is already built, configure() has to be called before the first get_robot()')
+    _show_simulation = show_simulation
+
+
 @lru_cache(maxsize=1)
 def get_robot():
     """
     the robot of this process, built on the first call: the simulated robot, or the real robot mirrored in the
-    simulation; the serial port of the real robot is found automatically
+    simulation (headless unless configure(show_simulation=True) was called); the serial port of the real robot is
+    found automatically
     :raises DynamixelError: when the servos of the real robot don't answer on any usb adapter or can't be set up
     """
     from src.simulation.simulation_utils import start_simulated_robot
     if global_constants.use_simulation:
-        return start_simulated_robot(use_gui=True)
+        return start_simulated_robot(use_gui=_show_simulation)
     from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
     from src.robot_controllers.dynamixel_robot import dynamixel_x_config
     from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController, ARM_IDS
@@ -27,7 +45,7 @@ def get_robot():
     # the real robot first: when its servos don't answer nothing else is started and the next call simply retries
     port_handler, packet_handler = setup_dynamixel_handlers(None, dynamixel_x_config, ARM_IDS)
     dynamixel_robot = DynamixelRobotController(global_constants.dynamixel_robot_config, port_handler, packet_handler)
-    simulated_robot = start_simulated_robot(use_gui=True)
+    simulated_robot = start_simulated_robot(use_gui=_show_simulation)
     return CombinedRobot(dynamixel_robot, simulated_robot)
 
 

@@ -78,6 +78,9 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   arguments (the port argument went on 20 October, the port is always found automatically) and is
   `lru_cache(maxsize=1)`: one robot per process. It is the one place that builds the robot: the calibration scripts
   and `robot_move_test.py` call it too (20 October) and run against the simulation when `use_simulation` is set.
+  Whether the simulation is shown is decided once per process by `global_objects.configure(show_simulation=...)`:
+  `start_server` turns the window on (1920x1080, real time simulation), the scripts leave it headless, and
+  configuring after the robot is built raises.
 - `requirements.txt` only pins `dynamixel-sdk` (issue 27); the venv has everything else except `tf_agents`,
   `keyboard` and `Arduino`.
 - Close `main.py` and DYNAMIXEL Wizard before running a tool, only one program can open the port. Support the arm

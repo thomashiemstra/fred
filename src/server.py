@@ -82,6 +82,8 @@ def stop_camera():
 
 
 def start_server():
+    # the server is the one process that shows the simulation, see global_objects.configure
+    global_objects.configure(show_simulation=True)
     app.run(debug=False, host='0.0.0.0')
 
 

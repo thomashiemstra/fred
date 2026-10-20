@@ -27,6 +27,9 @@ class GetRobotTests(unittest.TestCase):
 
     def setUp(self):
         global_objects.get_robot.cache_clear()
+        global_objects.configure(show_simulation=False)
+        # cleanups run in reverse order: the robot has to be gone before the process can be configured again
+        self.addCleanup(global_objects.configure, False)
         self.addCleanup(global_objects.get_robot.cache_clear)
         self.simulated = FakeSimulatedRobot()
         self.handlers = (mock.Mock(name='port_handler'), mock.Mock(name='packet_handler'))
@@ -67,6 +70,22 @@ class GetRobotTests(unittest.TestCase):
     def test_there_is_one_robot_per_process(self):
         self.assertIs(global_objects.get_robot(), global_objects.get_robot())
         self.assertEqual(1, simulation_utils.start_simulated_robot.call_count)
+
+    def test_the_simulation_is_headless_by_default(self):
+        global_objects.get_robot()
+        simulation_utils.start_simulated_robot.assert_called_once_with(use_gui=False)
+
+    def test_the_entry_point_can_show_the_simulation(self):
+        global_objects.configure(show_simulation=True)
+        global_objects.get_robot()
+        simulation_utils.start_simulated_robot.assert_called_once_with(use_gui=True)
+
+    def test_configuring_a_built_robot_is_refused(self):
+        global_objects.get_robot()
+        with self.assertRaises(RuntimeError):
+            global_objects.configure(show_simulation=True)
+        # the robot that exists is kept as it is
+        self.assertIs(self.simulated, global_objects.get_robot().simulated_robot)
 
 
 if __name__ == '__main__':
