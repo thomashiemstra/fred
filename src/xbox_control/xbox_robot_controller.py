@@ -212,6 +212,7 @@ class XboxRobotController:
 
         pose_update_sleep_time = self.pose_updater.dt
         next_hardware_check = perf_counter() + HARDWARE_CHECK_INTERVAL
+        previous_step_time = perf_counter()
 
         while True:
             if self.is_done():
@@ -223,8 +224,11 @@ class XboxRobotController:
 
             self.__handle_commands()
 
+            # the step covers the time that really passed, so the speeds of the sticks hold at any loop pace
+            now = perf_counter()
             new_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose, self.find_center_mode,
-                                                                          self.center)
+                                                                          self.center, dt=now - previous_step_time)
+            previous_step_time = now
             self._update_pose_within_the_workspace(new_pose)
             recommended_time, time_taken = self.robot.move_to_pose(self.current_pose)
             self.handle_buttons()

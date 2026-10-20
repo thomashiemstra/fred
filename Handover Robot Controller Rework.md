@@ -31,7 +31,7 @@ latency timer. The gravity compensation plan is in `Handover Gravity and Spring 
   still sends the IK result straight to the servos (issue 21).
 - The xbox controller: only its control loop thread moves the robot, start/stop are safe to call at any time.
 - The gripper is non-blocking and squeezes with up to 400mA.
-- 560 tests, all hardware faked: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"`.
+- 590 tests (20 October), all hardware faked: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"`.
 
 ## The physical robot, measured
 
@@ -81,8 +81,8 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   Whether the simulation is shown is decided once per process by `global_objects.configure(show_simulation=...)`:
   `start_server` turns the window on (1920x1080, real time simulation), the scripts leave it headless, and
   configuring after the robot is built raises.
-- `requirements.txt` only pins `dynamixel-sdk` (issue 27); the venv has everything else except `tf_agents`,
-  `keyboard` and `Arduino`.
+- `requirements.txt` pins the packages of the venv (20 October); `tf_agents`, `keyboard` and `Arduino` are not
+  installed.
 - Close `main.py` and DYNAMIXEL Wizard before running a tool, only one program can open the port. Support the arm
   whenever the torque goes off, it drops.
 
@@ -234,7 +234,12 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - Start pose: `start_pose = Pose(30, 22.0, 4)`, with the flip the arm has at that moment. Three things are called
   speed: the sticks move at most `pose_updater.maximum_speed` cm/s, 5 by default, d-pad up/down change it in steps of
   `MAXIMUM_SPEED_STEP = 5` within 5 to 50, `/xbox/setSpeed` sets it directly; recorded moves play at `move_speed = 10`
-  cm/s, hard coded; `/xbox/speed` is the profile velocity of the servos in percent.
+  cm/s, hard coded; `/xbox/speed` is the profile velocity of the servos in percent. The right stick turns at most
+  `maximum_angular_speed` = 0.5 rad/s, independent of the linear speed (20 October). Every axis ramps to the speed
+  the stick asks for in `ramp_up_time` = 0.1 s, easing off and releasing ramp the same way, and a step covers the
+  time that really passed since the previous one (capped at `MAX_STEP_TIME` = 0.1 s), so the speeds hold at any
+  loop pace. The updater does no workspace clipping of its own, the loop's `workspace_violation` check is the only
+  one; the platform sign of the right stick lives in `XboxController`.
 - Buttons are a table, `_button_actions`, the first pressed button wins. `get_buttons()` resets the momentary buttons
   when read, the bumpers are the only buttons it doesn't reset, and they come first in the table (issue 23).
 - Gripper: `lb`/`rb` move the target `gripper_state` (0 open, 100 closed) by `GRIPPER_STEP = 1` every loop step while
@@ -317,25 +322,20 @@ the four `record_going_*.py` scripts need the `keyboard` package (not installed)
 
 ## Open issues
 
-Found while writing the tests and in the code reviews of 15-18 October, not fixed. Only issue 2 has tests in the
-repository: the 6 aruco tests in `tests/camera_tests/aruco_image_handler_test.py` skip until `image_handlers.py` is
-ported. The other issues have no test in the repository. Where = repo-relative `path:line` plus the symbol; the numbers
+Found while writing the tests and in the code reviews of 15-18 October, not fixed. Issues 2, 13, 14, 19, 20 and 27
+were fixed on 20 October and are listed below the table; the issues in the table have no test in the repository. Where = repo-relative `path:line` plus the symbol; the numbers
 1-17 are the original ones, 18-28 were added on 18 October; the rows are grouped by area.
 
 | # | Where | Issue | Impact |
 |---|---|---|---|
 | 17 | `src/robot_controllers/dynamixel_robot/dynamixel_utils.py:62-64` (`to_bytes`), `servo_config.py:140-143` | `to_bytes` masks values that don't fit (70000 in 2 bytes -> 4464) without raising; `_integer` only checks the type, so pid, goal current and profile values from the yaml have no range check, and a sync write has no status packet (`servo_handler.py:293`), so a value the servo rejects isn't reported either | low today, all values in the yaml fit; a typo writes a different gain or current limit, or none, while `set_pid`/`set_goal_current` return True |
 | 12 | `src/robot_controllers/dynamixel_robot/servo_handler.py:71-72` (`reboot`) | the result of the reboot command is logged and discarded, a servo that still answers pings counts as rebooted | low, `reboot()` can report success while a servo kept its hardware error; `reboot_all_servos` has no callers outside the tests, `FakeBus.reboot` always succeeds |
-| 13 | `src/robot_controllers/dynamixel_robot/dynamixel_robot_controller.py:217-220` (`get_current_gripper_position`) | passes the `None` of a failed `get_current_angles` into `forward_position_kinematics`, `TypeError` instead of None; the name is misleading, it returns the end effector position | low, no callers |
 | 16 | `src/robot_controllers/dynamixel_robot/servo.py:112,169` (`Servo2`, `Servo3`) | the lookup key is `str(round(angle / pi, 1))`, a small negative angle gives `'-0.0'`, which the min clamp misses, `KeyError('-0.0')`; a rounded value between two table keys also `KeyError`s | none, the classes are unused (`load_servo_config` only builds `Servo`), only `tests/utils_tests/servo_test.py` imports them |
 | 5 | `src/robot_controllers/dynamixel_robot/servo_config.py:63` | servo ids are sorted as text (`str(key)`), 10 before 7; `servos` and `buses` keep that order | none with ids 1-7; with ids >= 10 the order of the servos in the sync packets changes, the values stay right |
 | 18 | `src/utils/robot_controller_utils.py:18-41` (`servo_1_check`, `servo_2_check`), run by `enable_servos` | the safety check prints DANGER and blocks on `input()` when the raw position of servo 1 or 2 is above 2500 or below 0; `enable_servos` runs in the thread that calls it, so a `/xbox/start` request hangs on stdin (`EOFError` without a console); the thresholds are raw positions, they ignore `positions` and `offset` of the yaml | medium, `start()` hangs instead of failing; recalibrating servo 1 or 2 silently moves the angle at which it fires |
-| 19 | `src/robot_controllers/dynamixel_robot/position_recorder.py:10-26` | `record` indexes `servos[1..6]` of the 7 element `_servos` list (servo 1 is at index 0), `write` joins ints | low, unused (`set_recorder` has no callers) |
 | 1 | `src/kinematics/kinematics_utils.py:73-75` (`Pose.__copy__`), `src/utils/movement.py:169` | `__copy__` drops `euler_matrix` and `plan_move_to_pose` copies the target, so a target given as a matrix is planned with alpha=beta=gamma=0; `Pose.__eq__` (`kinematics_utils.py:81-83`) raises `ValueError` when only one side has a matrix | medium, latent today: the only caller (`xbox_robot_controller.py:277`) never passes matrix poses; the board to board controller builds matrix targets (`board_to_board_robot_controller.py:124`) but sends them through `move_between_poses`/`move_from_current_angles` (`:138-144`), whose IK reads the matrix, so it moves correctly until it is switched to `plan_move_to_pose` |
 | 3 | `src/kinematics/kinematics.py:193,199` (same copy in `src/reinforcementlearning/softActorCritic/custom_policy.py:38,44`, unused) | `jacobian_transpose_on_f` uses `c2` instead of `c1` in the joint 2 term of control points 1 and 2 (joints 1 and 3 are right); the test at `tests/kinematics_tests/kinematics_tests.py:181` only checks control point 3 | medium, wrong joint 2 force whenever a force on control point 1 or 2 has an x component: the repulsive forces in obstacle avoidance (`camera_control/obstacle_avoidance.py:202`, `simulation/obstacle_avoidance.py:219`) and the demonstrations the RL agent is cloned from |
 | 4 | `src/kinematics/kinematics.py:75-82` | with the wrist exactly straight (angle 5 = 0) `r13`, `r23`, `r31`, `r32` are rounding noise, so angle 4 and angle 6 are both arbitrary and the gripper roll is lost; on either side of angle 5 = 0 they differ by pi when the flip is kept | medium, planned moves refuse the jump (the joint speed check of `check_move`, `src/utils/movement.py:86-91`); a joint space move between differently flipped poses spreads the pi turn over the move and is accepted when it is slow enough (the tip swings around the wrist); the stick control (`xbox_robot_controller.py:217` -> `dynamixel_robot_controller.py:139-143`) sends the pi turn of joints 4 and 6 to the servos unchecked |
-| 14 | `src/utils/movement.py:488-491` (`Movement.to_json`) | `to_json` calls `Pose.to_json`, which doesn't exist (the `_init__` typo of `PoseToPoseMovement` was fixed in the merge of 19 October) | low, `to_json` has no callers |
-| 20 | `src/utils/movement.py:494-497` (`Movement.is_robot_at_start_pose`) | a failed read returns `None` from `get_current_angles`; `np.allclose(None, ...)` raises `TypeError` (`move_from_current_angles` raises a `MovementException` for it since 19 October) | medium, a bus error right before a playback move crashes the control loop (the servos keep holding until `stop()`) instead of raising a `MovementException` |
 | 21 | `src/xbox_control/xbox_robot_controller.py` (`_update_pose_within_the_workspace`, the loop at `:217`) | the stick control checks the workspace limits of every pose before moving (19 October), but still sends the IK result to the servos without the other checks of the planner: an unreachable target becomes the stretched arm (`kinematics.py:33-34`), joints 4 and 6 can turn by pi through the straight wrist (issue 4), joint ranges and speeds aren't checked; `move_to_pose` only lengthens the wait. The playback of recorded moves goes through the planner since 19 October | medium, the wrist spin is reachable with the sticks |
 | 6 | `src/xbox_control/xbox_robot_controller.py:406` (`set_scenario`) | accepts `scenario_id == len(scenarios)` (`>` should be `>=`; `medium_scenarios` has 7, so id 7 passes); `:414` stores the id before `:415` raises | medium, `IndexError`, a 500 from `/xbox/setScenarioId`, and every later `set_scenario` fails at `:412` until the server restarts; the arm is not affected |
 | 7 | `src/xbox_control/xbox_control_resource.py:92,106,115,131,138`, `src/xbox_control/xbox_robot_controller.py:389` | only `KeyError` is caught: a json body that is not an object or a non-string filename is a `TypeError`, `int()` of a bad value a `ValueError`, a missing restore file a `FileNotFoundError`; a non-json body is a 415 on Flask 3.0.3 | low, 500 errors, also from the UI forms (an empty speed field); the robot is not affected |
@@ -347,11 +347,21 @@ ported. The other issues have no test in the repository. Where = repo-relative `
 | 24 | `src/xbox_control/xbox_control_resource.py:93` (`/xbox/setSpeed`) | accepts `speed = 0` while the d-pad keeps it at 5-50 | low, the sticks stop moving the arm |
 | 8 | `src/server.py:17,86` | listens on 0.0.0.0 with CORS for every origin, no authentication | high, anyone on the network, or any web page, can start, stop or disable the arm; the UI only uses 127.0.0.1 (the fetch urls are hard coded, so the 0.0.0.0 bind gives the UI nothing) |
 | 25 | `src/server.py:56-59` (`/test2`) | debug route, calls `get_robot()` and prints it; without the port argument it can no longer evict the running robot, but a stray GET still builds the robot (pybullet window, serial port) before anyone pressed start | low, remove it |
-| 2 | `src/camera/image_handlers.py:82,113,131,152,154,159,163,173,175,177,235,270-271,292,294,299,303` | legacy aruco API; 7 of the 8 aruco functions used don't exist in the installed `opencv-python` 4.9.0.80 (`DetectorParameters_create`, `drawAxis`, `detectMarkers`, `refineDetectedMarkers`, `interpolateCornersCharuco`, `estimatePoseCharucoBoard`, `estimatePoseSingleMarkers`; only `drawDetectedMarkers` does), `requirements.txt` pins no OpenCV; same API in `src/camera/aruco_test.py`, `aruco_camera_calibration.py`, `charuco_camera_calibration_from_images.py` | high for the camera features: both handlers raise `AttributeError` in `__init__`, `/camera/start_aruco` and `/camera/start_board_to_board` give a 500, so board to board control and obstacle avoidance can't start; 6 tests skip |
 | 26 | `src/camera/image_handlers.py:70`, `src/camera/util.py:37-43` (`get_calibrations`) | `get_default_aurco_image_handler` reads `src/camera/calibration/calibration_data_charuco.json`, which isn't in the repository (`*.json` is gitignored, the calibration scripts write it to a cwd relative `calibration/`); `get_calibrations` calls `sys.exit()` when the file is missing | medium, `/camera/start_aruco` raises `SystemExit` in the request thread before it even reaches issue 2 |
 | 11 | `src/reinforcementlearning/environment/robot_env_utils.py:108,134-136` | `get_repulsive_forces_world` allocates `(3, n)` but fills `[i][0..2]` | none today, every caller uses 3 control points; another number raises `IndexError` |
-| 27 | `requirements.txt` | pins only `dynamixel-sdk==4.1.0`; the code also imports flask, flask-cors, flask-cdn, jsonpickle, numba, scipy, pybullet, inputs, pyyaml, pyserial, absl-py, matplotlib, opencv-python, numpy, hilbertcurve (all in the gitignored `venv/`), `tf_agents` (`Sacrequirements.txt`), `keyboard` and `Arduino` (not installed) | medium, a fresh clone can't run the app, the tests or the tools; `pip freeze` the venv |
 | 28 | `src/robot_controllers/dynamixel_robot/robot_move_test.py:26-27` | `START_POSE = Pose(30, 25.0, 5)` with the comment "the same start pose as the xbox controller", which uses `Pose(30, 22.0, 4)` | low, the script and the xbox controller end 3 cm apart |
+
+Fixed on 20 October, after the type check found most of them again (details in
+`Handover Bugs Found By Type Checking.md`):
+
+- 2: the camera code uses the aruco API of OpenCV 4.7+, checked against the legacy code on the recorded images
+  (`184ec82`); the 6 aruco tests run again.
+- 13: `get_current_gripper_position` returns `None` when the servos can't be read (`129511c`).
+- 14: `Movement.to_json` is removed (`a2cd1a1`).
+- 19: `ServoPositionRecorder.write` writes the numbers (`b5f7f5a`) and `record` takes servo 1 from index 0.
+- 20: `Movement.is_robot_at_start_pose` raises a `MovementException` when the angles can't be read (`129511c`).
+- 27: `requirements.txt` pins the packages of the venv; a fresh venv installed from it passes the type check and
+  the tests.
 
 Fixed in `6efdd99` (found by the code review of the xbox rework): `/xbox/speed` crashed because `CombinedRobot` had no
 `set_profile_velocity_percentage`, now at `src/robot_controllers/combined_robot/combined_robot.py:64`.
@@ -376,10 +386,10 @@ Fixed in `6efdd99` (found by the code review of the xbox rework): `/xbox/speed` 
 
 ## Working on it
 
-- Run the tests: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"` (560 tests, 10 skip:
-  6 aruco tests in `aruco_image_handler_test.py`, OpenCV 4.9 lacks the legacy API, and 4 `robot_env_test.py` tests,
-  `tf_agents` is not installed). `hilbertcurve` 1.0.3 (pinned in `Sacrequirements.txt`, not in `requirements.txt`)
-  was installed in the venv; `occupancy_grid_util.py` and its tests import it.
+- Run the tests: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"` (590 tests on 20
+  October, 5 skip: 4 `robot_env_test.py` tests because `tf_agents` is not installed, and `test_repulsive_vectors`
+  until the control points of `fred_new.urdf` are checked). The pre-commit hook runs them after mypy; enable it once
+  per clone with `git config core.hooksPath .githooks`.
 - The tests never open a serial port: `FakeBus` in `tests/servo_controller_tests/dynamixel_robot_controller_tests.py`
   fakes the control table of every servo with the real sdk group classes on top, including the bus split; the xbox
   tests use a `FakeRobot` with real kinematics.

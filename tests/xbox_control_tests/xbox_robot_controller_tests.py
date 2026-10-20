@@ -165,7 +165,7 @@ def make_controller(robot, buttons=None):
     pose_updater.dt = 0.01
     pose_updater.controller.wait_until_connected.return_value = True
     pose_updater.controller.get_buttons.side_effect = lambda: buttons() if buttons else Buttons()
-    pose_updater.get_updated_pose_from_controller.side_effect = lambda pose, find_center_mode, center: pose
+    pose_updater.get_updated_pose_from_controller.side_effect = lambda pose, find_center_mode, center, dt=None: pose
     return XboxRobotController(test_config, robot, pose_updater)
 
 
@@ -576,7 +576,7 @@ class ConcurrencyTests(unittest.TestCase):
         self.assertEqual(['enable_servos', 'disable_servos'], robot.calls)
         # a new run starts without the crash of the previous one
         controller.pose_updater.get_updated_pose_from_controller.side_effect = \
-            lambda pose, find_center_mode, center: pose
+            lambda pose, find_center_mode, center, dt=None: pose
         self.assertTrue(controller.start())
         self.assertFalse(controller._crashed)
         controller.stop()

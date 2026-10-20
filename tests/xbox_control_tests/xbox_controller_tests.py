@@ -2,6 +2,8 @@ import threading
 import unittest
 from unittest import mock
 
+from src.utils.os_utils import is_linux
+
 from inputs import UnpluggedError
 
 from src.xbox_control.xbox360controller import XboxController as xbox_controller_module
@@ -48,14 +50,15 @@ class XboxControllerTests(unittest.TestCase):
         controller, _ = self.run_controller([[Event('ABS_X', 2 ** 14), Event('ABS_Y', -2 ** 14),
                                               Event('ABS_RX', -2 ** 15), Event('ABS_RY', 2 ** 13)]])
         self.assertEqual((0.5, -0.5), controller.get_left_thumb())
-        self.assertEqual((-1, 0.25), controller.get_right_thumb())
+        # the right stick: x has the sign of Linux on every platform, y is turned around so that up is positive
+        self.assertEqual((-1 if is_linux() else 1, -0.25), controller.get_right_thumb())
 
     def test_dead_zone_scale_and_inverted_y_axis(self):
         controller, _ = self.run_controller([[Event('ABS_X', 0.2 * 2 ** 15), Event('ABS_Y', 0.5 * 2 ** 15),
                                               Event('ABS_RX', -0.29 * 2 ** 15), Event('ABS_RY', -0.75 * 2 ** 15)]],
                                             dead_zone=30, scale=100, invert_yaxis=True)
         self.assertEqual((0, -50), controller.get_left_thumb())
-        self.assertEqual((0, 75), controller.get_right_thumb())
+        self.assertEqual((0, -75), controller.get_right_thumb())
 
     def test_triggers_move_up_and_down(self):
         controller, _ = self.run_controller([[Event('ABS_Z', 128)]])

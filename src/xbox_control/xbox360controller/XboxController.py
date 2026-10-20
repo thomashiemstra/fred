@@ -7,6 +7,7 @@ import threading
 from time import sleep
 
 from src.utils.decorators import synchronized_with_lock
+from src.utils.os_utils import is_linux
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,10 @@ class XboxController(object):
 
         self.scale = scale
         self.invert_yaxis_val = -1 if invert_yaxis else 1
+        # the inputs library reports the x axis of the right stick with opposite signs on Linux and Windows; the
+        # sign makes Windows behave like Linux, where the controls were tuned. The y axis of the right stick is
+        # turned around so that up is positive, like the gamma it turns
+        self._right_x_sign = 1 if is_linux() else -1
         self.lock = threading.RLock()
 
         self.l_thumb_x: float = 0
@@ -196,11 +201,11 @@ class XboxController(object):
 
     @synchronized_with_lock("lock")
     def __right_thumb_x(self, x_value: float) -> None:
-        self.r_thumb_x = self._handle_x_axis_value(x_value)
+        self.r_thumb_x = self._handle_x_axis_value(x_value) * self._right_x_sign
 
     @synchronized_with_lock("lock")
     def __right_thumb_y(self, y_value: float) -> None:
-        self.r_thumb_y = self._handle_y_axis_value(y_value)
+        self.r_thumb_y = -self._handle_y_axis_value(y_value)
 
     @synchronized_with_lock("lock")
     def __x(self, value: int) -> None:
