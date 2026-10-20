@@ -16,10 +16,11 @@ class FakeSimulatedRobot:
 
 class FakeDynamixelRobot:
 
-    def __init__(self, robot_config, port_handler, packet_handler):
+    def __init__(self, robot_config, port_handler, packet_handler, servo_config):
         self.robot_config = robot_config
         self.port_handler = port_handler
         self.packet_handler = packet_handler
+        self.servo_config = servo_config
 
 
 class GetRobotTests(unittest.TestCase):
