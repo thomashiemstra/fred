@@ -3,7 +3,7 @@ from src.kinematics.kinematics_utils import Pose
 from src.utils.movement import move_from_current_angles
 import numpy as np
 
-robot = get_robot('COM5')
+robot = get_robot()
 robot.enable_servos()
 
 pose = Pose(0, 21.9, 13.9, gamma=-np.pi/2)

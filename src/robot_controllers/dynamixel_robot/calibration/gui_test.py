@@ -4,8 +4,7 @@ from numpy import pi
 
 
 # root window
-from src import global_constants
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+from src.global_objects import get_robot
 
 root = tk.Tk()
 root.geometry('1000x500')
@@ -90,7 +89,7 @@ def create_button(root_element, text, row, column, command=None):
     )
 
 
-robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
+robot = get_robot()
 
 servo = robot.servo2
 servo_id = 2

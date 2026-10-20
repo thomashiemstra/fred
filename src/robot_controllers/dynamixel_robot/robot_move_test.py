@@ -16,10 +16,9 @@ from time import sleep
 
 import numpy as np
 
-from src import global_constants
 from src.kinematics.kinematics import forward_kinematics
 from src.kinematics.kinematics_utils import Pose
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+from src.global_objects import get_robot
 from src.utils.movement import plan_move_to_pose, execute_move, check_move
 from src.utils.movement_exception import MovementException
 
@@ -80,7 +79,7 @@ def disable_torque_on_request(robot):
 def main():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
-    robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
+    robot = get_robot()
 
     if not check_calibrated_range(robot):
         return 1

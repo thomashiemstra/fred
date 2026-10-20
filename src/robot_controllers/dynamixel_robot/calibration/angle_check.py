@@ -1,11 +1,10 @@
-from src import global_constants
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+from src.global_objects import get_robot
 import numpy as np
 from time import sleep
 import json
 
 
-robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
+robot = get_robot()
 servo_id = 5
 servo = robot.servo5
 

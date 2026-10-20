@@ -31,9 +31,9 @@ from datetime import datetime
 
 import numpy as np
 
-from src import global_constants
 from src.global_constants import WorkSpaceLimits
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController, ARM_IDS
+from src.global_objects import get_robot
+from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
 from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
 from src.utils.movement import plan_move_to_angles, execute_move, check_move, PlannedMove
@@ -210,7 +210,7 @@ def record(robot, poses, writer, models, temperature_warning, joints=DEFAULT_JOI
            settle=3.0, angular_speed=0.5, sleep=time.sleep, clock=time.time):
     """
     visit the poses from both directions and write a row per servo and reading, returns the number of poses done
-    :param robot: a DynamixelRobotController with its servos enabled; every move is checked against its workspace
+    :param robot: the robot of global_objects.get_robot with its servos enabled; every move is checked against its workspace
         limits (robot.workspace_limits, see limits_with_floor) and joint ranges
     :param poses: list of 7 element angle arrays
     :param writer: csv.DictWriter with FIELDS
@@ -289,7 +289,7 @@ def main(argv=None):
     delta = np.radians(args.delta)
 
     try:
-        robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
+        robot = get_robot()
     except DynamixelError as e:
         print(e)
         return 1

@@ -1,33 +1,43 @@
+"""
+The objects shared by the whole process, built on their first use.
+
+get_robot() is the one place that builds the robot: the server resources, the calibration scripts and the move tests
+all go through it, so what the robot is (the simulation, or the real arm mirrored in the simulation, see
+global_constants.use_simulation) is decided here and nowhere else. Fresh simulated robots for the reinforcement
+learning environments and the visualiser come from simulation_utils.start_simulated_robot.
+"""
+from functools import lru_cache
 
 from src import global_constants
 
-from functools import lru_cache
-
-from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
-from src.xbox_control.xbox360controller.XboxController import XboxController
-
-
-# TODO review with CLAUDE and use this everywhere, is this a good singleton solution?
 @lru_cache(maxsize=1)
-def get_robot(port):
+def get_robot():
+    """
+    the robot of this process, built on the first call: the simulated robot, or the real robot mirrored in the
+    simulation; the serial port of the real robot is found automatically
+    :raises DynamixelError: when the servos of the real robot don't answer on any usb adapter or can't be set up
+    """
     from src.simulation.simulation_utils import start_simulated_robot
-    simulated_robot = start_simulated_robot(use_gui=True)
     if global_constants.use_simulation:
-        from src.simulation.simulation_utils import start_simulated_robot
-        return simulated_robot
-    else:
-        from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
-        dynamixel_robot = DynamixelRobotController(port, global_constants.dynamixel_robot_config)
-        return CombinedRobot(dynamixel_robot, simulated_robot)
-        # return DynamixelRobotController(port, global_constants.dynamixel_robot_config)
+        return start_simulated_robot(use_gui=True)
+    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+    from src.robot_controllers.dynamixel_robot import dynamixel_x_config
+    from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController, ARM_IDS
+    from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
+    # the real robot first: when its servos don't answer nothing else is started and the next call simply retries
+    port_handler, packet_handler = setup_dynamixel_handlers(None, dynamixel_x_config, ARM_IDS)
+    dynamixel_robot = DynamixelRobotController(global_constants.dynamixel_robot_config, port_handler, packet_handler)
+    simulated_robot = start_simulated_robot(use_gui=True)
+    return CombinedRobot(dynamixel_robot, simulated_robot)
 
 
 @lru_cache(maxsize=1)
-def get_xbox_robot_controller(port):
+def get_xbox_robot_controller():
+    from src.xbox_control.xbox360controller.XboxController import XboxController
     from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
     from src.xbox_control.xbox_robot_controller import XboxRobotController
 
-    robot = get_robot(port)
+    robot = get_robot()
     controller = XboxController(dead_zone=30, scale=100)
     pose_updater = XboxPoseUpdater(controller)
 

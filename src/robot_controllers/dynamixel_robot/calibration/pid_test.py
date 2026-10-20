@@ -1,13 +1,12 @@
 from time import sleep, time
-from src import global_constants
 import matplotlib.pyplot as plt
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+from src.global_objects import get_robot
 
 servo_id = 1
 target = 2048
 
 
-robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
+robot = get_robot()
 
 robot.enable_servos()
 # p  i  d

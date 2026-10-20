@@ -9,16 +9,15 @@ import keyboard
 from numpy import pi
 
 # root window
-from src import global_constants
 from src.robot_controllers.dynamixel_robot.arduino.ArduinoAngleReader import ArduinoAngleReader
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
+from src.global_objects import get_robot
 
 
 class Servo2Manager:
 
     def __init__(self, debug=False) -> None:
         self.debug = debug
-        self.robot = DynamixelRobotController(None, global_constants.dynamixel_robot_config)
+        self.robot = get_robot()
 
         self.servo_id = 2
         self.servo = self.robot.servo2

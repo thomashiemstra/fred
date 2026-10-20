@@ -17,9 +17,10 @@ latency timer. The gravity compensation plan is in `Handover Gravity and Spring 
   connector (1-3) and the TTL connector (4-7) can't hear each other's responses.
 - The vendored Dynamixel SDK is replaced by the official `dynamixel-sdk==4.1.0` (`requirements.txt`), with a
   `BlockingPortHandler` that doesn't busy wait.
-- The port of the robot is found automatically (`dynamixel_robot_arm_port = None` in `src/global_constants.py`), by
-  pinging servos 1-6 on every adapter with usb id `0403:6014`. The servo power has to be on, otherwise the controller
-  raises `DynamixelError`.
+- The port of the robot is always found automatically: `global_objects.get_robot` sets up the bus with
+  `setup_dynamixel_handlers(None, ...)`, which pings servos 1-6 on every adapter with usb id `0403:6014`, and hands the
+  port and packet handler to `DynamixelRobotController` (20 October; the tests build it with a fake bus instead of
+  patching). The servo power has to be on, otherwise the bus setup raises `DynamixelError`.
 - The servo configuration lives in `servo_config.yaml`.
 - Safety: failed reads never leave stale positions, targets are clamped, servos are only enabled when the arm is in a
   safe state (the check for servos 1 and 2 is a console prompt, issue 18), hardware errors and temperatures are
@@ -69,10 +70,14 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - `venv\Scripts\python.exe main.py` runs Flask on `0.0.0.0:5000` (issue 8); `--use_simulation` uses the pybullet
   robot instead of the real one. The control panel is `http://127.0.0.1:5000/`, the xbox page `/xbox`, the camera
   page `/camera`; the pages post to hard coded `http://127.0.0.1:5000/...` urls.
-- The robot is created on the first `POST /xbox/start`: `global_objects.get_robot` always starts pybullet with a GUI
-  (a 1920x1080 window with real time simulation) before it looks at `use_simulation`, and for the real robot returns
-  `CombinedRobot(DynamixelRobotController, simulated robot)`. So pybullet and a display are needed for the real robot
-  too, and the serial port is only opened then. `get_robot` is `lru_cache(maxsize=1)` keyed on the port.
+- The robot is created on the first `POST /xbox/start` by `global_objects.get_robot`: with `use_simulation` it is the
+  simulated robot, otherwise it finds the bus and builds the `DynamixelRobotController` first, then starts pybullet
+  and returns `CombinedRobot(DynamixelRobotController, simulated robot)`, so pybullet is needed for the real robot
+  too; the serial port is only opened then, and when the servos are off nothing is left behind, so the next start
+  simply retries. `get_robot()` takes no
+  arguments (the port argument went on 20 October, the port is always found automatically) and is
+  `lru_cache(maxsize=1)`: one robot per process. It is the one place that builds the robot: the calibration scripts
+  and `robot_move_test.py` call it too (20 October) and run against the simulation when `use_simulation` is set.
 - `requirements.txt` only pins `dynamixel-sdk` (issue 27); the venv has everything else except `tf_agents`,
   `keyboard` and `Arduino`.
 - Close `main.py` and DYNAMIXEL Wizard before running a tool, only one program can open the port. Support the arm
@@ -297,7 +302,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 | `python -m src.robot_controllers.dynamixel_robot.calibration.measure_offsets` | reads servos 1, 2 and 4 held by the jig (90, 0 and 0 degrees, `--jig 1=90 2=0 4=0`), prints the offsets and writes them to `servo_config.yaml` after asking (`--dry-run` to only print); never enables the torque, see `Calibrating the servo offsets.md` |
 
 Other scripts in `src/robot_controllers/dynamixel_robot/`, none asks before moving: `calibration/angle_check.py`,
-`gui_test.py` and `pid_test.py` run at import, create `DynamixelRobotController(None, ...)`, enable the servos and
+`gui_test.py` and `pid_test.py` run at import, call `get_robot()`, enable the servos and
 move them (`pid_test.py` leaves the torque on). They use the debug API that still exists (`robot.servoN`,
 `move_servo`, `move_servos`, `get_current_positions`, `set_pid_single_servo`, `set_servo_position`,
 `get_servo_position`, `Servo.target_position`, `Servo.constant_offset`). `calibration/gravity_compensation.py` and
@@ -338,7 +343,7 @@ ported. The other issues have no test in the repository. Where = repo-relative `
 | 23 | `src/xbox_control/xbox_robot_controller.py:77-87,303-309` (`handle_buttons`), `xbox360controller/XboxController.py:119-135` | `get_buttons()` resets the momentary buttons when read and `handle_buttons` handles only the first pressed button in `_button_actions` order; the bumpers come first and are held | low, `a`/`b`/`x`/`y`/`start`/d-pad presses are lost while a bumper is held |
 | 24 | `src/xbox_control/xbox_control_resource.py:93` (`/xbox/setSpeed`) | accepts `speed = 0` while the d-pad keeps it at 5-50 | low, the sticks stop moving the arm |
 | 8 | `src/server.py:17,86` | listens on 0.0.0.0 with CORS for every origin, no authentication | high, anyone on the network, or any web page, can start, stop or disable the arm; the UI only uses 127.0.0.1 (the fetch urls are hard coded, so the 0.0.0.0 bind gives the UI nothing) |
-| 25 | `src/server.py:56-59` (`/test2`) | debug route, calls `get_robot('COM5')`; `get_robot` is `lru_cache(maxsize=1)` keyed on the port, so it evicts the real robot and builds a second one (and a second pybullet window) | low, a stray GET breaks the running robot; remove it |
+| 25 | `src/server.py:56-59` (`/test2`) | debug route, calls `get_robot()` and prints it; without the port argument it can no longer evict the running robot, but a stray GET still builds the robot (pybullet window, serial port) before anyone pressed start | low, remove it |
 | 2 | `src/camera/image_handlers.py:82,113,131,152,154,159,163,173,175,177,235,270-271,292,294,299,303` | legacy aruco API; 7 of the 8 aruco functions used don't exist in the installed `opencv-python` 4.9.0.80 (`DetectorParameters_create`, `drawAxis`, `detectMarkers`, `refineDetectedMarkers`, `interpolateCornersCharuco`, `estimatePoseCharucoBoard`, `estimatePoseSingleMarkers`; only `drawDetectedMarkers` does), `requirements.txt` pins no OpenCV; same API in `src/camera/aruco_test.py`, `aruco_camera_calibration.py`, `charuco_camera_calibration_from_images.py` | high for the camera features: both handlers raise `AttributeError` in `__init__`, `/camera/start_aruco` and `/camera/start_board_to_board` give a 500, so board to board control and obstacle avoidance can't start; 6 tests skip |
 | 26 | `src/camera/image_handlers.py:70`, `src/camera/util.py:37-43` (`get_calibrations`) | `get_default_aurco_image_handler` reads `src/camera/calibration/calibration_data_charuco.json`, which isn't in the repository (`*.json` is gitignored, the calibration scripts write it to a cwd relative `calibration/`); `get_calibrations` calls `sys.exit()` when the file is missing | medium, `/camera/start_aruco` raises `SystemExit` in the request thread before it even reaches issue 2 |
 | 11 | `src/reinforcementlearning/environment/robot_env_utils.py:108,134-136` | `get_repulsive_forces_world` allocates `(3, n)` but fills `[i][0..2]` | none today, every caller uses 3 control points; another number raises `IndexError` |

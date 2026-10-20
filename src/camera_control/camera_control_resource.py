@@ -6,7 +6,6 @@ from flask import Blueprint
 from flask import jsonify
 
 import src.global_objects as global_objects
-from src import global_constants
 from src.camera.image_handlers import get_default_aurco_image_handler, \
     get_default_board_to_board_image_handler
 from src.camera_control.board_to_board_robot_controller import get_board_to_board_controller
@@ -224,14 +223,14 @@ def disable_filter_board_to_board_controller():
 
 @camera_api.route('/enable_servos', methods=['POST'])
 def enable_servos():
-    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
+    robot = global_objects.get_robot()
     robot.enable_servos()
     return jsonify(success=True)
 
 
 @camera_api.route('/disable_servos', methods=['POST'])
 def disable_servos():
-    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
+    robot = global_objects.get_robot()
     robot.disable_servos()
     return jsonify(success=True)
 
@@ -247,7 +246,7 @@ def start_obstacle_avoidance():
             print("already started obstacle_avoidance")
             return jsonify(success=False)
 
-    robot = global_objects.get_robot(global_constants.dynamixel_robot_arm_port)
+    robot = global_objects.get_robot()
     aruco_image_handler = object_handler.get_aruco_image_handler()
 
     from src.camera_control.obstacle_avoidance import ObstacleAvoidance

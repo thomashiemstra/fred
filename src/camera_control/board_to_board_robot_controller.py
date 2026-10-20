@@ -5,7 +5,6 @@ from time import sleep
 
 import numpy as np
 
-import src.global_constants
 from src import global_constants
 from src.global_objects import get_robot
 from src.kinematics.kinematics_utils import Pose
@@ -15,7 +14,7 @@ from src.utils.movement import move_from_current_angles, move_between_poses
 
 @lru_cache(maxsize=1)
 def get_board_to_board_controller(image_hanlder):
-    robot = get_robot(src.global_constants.dynamixel_robot_arm_port)
+    robot = get_robot()
     controller = BoardToBoardRobotController(robot, image_hanlder)
     return controller
 

@@ -7,7 +7,7 @@ import numpy as np
 from src.kinematics.kinematics import inverse_kinematics, forward_position_kinematics, forward_kinematics
 from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
-from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers, DynamixelError
+from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
@@ -23,11 +23,13 @@ GRIPPER_ID = 7
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, port, robot_config, servo_config=None, perform_safety_checks=True,
+    def __init__(self, robot_config, port_handler, packet_handler, servo_config=None, perform_safety_checks=True,
                  print_position_error=False):
         """
-        :param port: a string representing the usb port the robot is connected to, None to find it automatically
         :param robot_config: a RobotConfig object
+        :param port_handler: the port handler of the usb adapter the servos are connected to
+        :param packet_handler: the packet handler for the protocol of the servos; both come from
+        dynamixel_utils.setup_dynamixel_handlers, global_objects.get_robot sets them up
         :param servo_config: a ServoConfig, by default it is loaded from servo_config.yaml
         :param perform_safety_checks: raise when the servos can't be set up and check the arm position before
         enabling the torque
@@ -55,7 +57,6 @@ class DynamixelRobotController(AbstractRobotController):
         self.servo7 = servos[6]
         self._servos = servos
 
-        port_handler, packet_handler = setup_dynamixel_handlers(port, cfg, ARM_IDS)
         # all servos share the same usb adapter, the handler reads them per bus
         self.servo_handler = ServoHandler(dict(servo_config.servos), cfg, port_handler, packet_handler,
                                           servo_config.buses)

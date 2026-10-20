@@ -2,8 +2,7 @@ import json
 
 from flask import Flask, render_template, request, Response
 
-from src import global_objects, global_constants
-from src.global_constants import dynamixel_robot_arm_port
+from src import global_objects
 from src.global_objects import get_robot
 from src.xbox_control.xbox_control_resource import xbox_api
 from src.camera_control.camera_control_resource import camera_api
@@ -55,7 +54,7 @@ def test():
 
 @app.route('/test2')
 def test2():
-    robot = global_objects.get_robot('COM5')
+    robot = global_objects.get_robot()
     print(robot)
     resp = jsonify(success=True)
     return resp

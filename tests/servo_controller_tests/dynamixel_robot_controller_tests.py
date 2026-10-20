@@ -135,9 +135,8 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.robot = self.make_robot()
 
     def make_robot(self, **kwargs):
-        with mock.patch.object(drc, 'setup_dynamixel_handlers', lambda port, config, servo_ids: (mock.Mock(), self.bus)):
-            return drc.DynamixelRobotController('FAKE', global_constants.dynamixel_robot_config,
-                                              servo_config=self.servo_config, **kwargs)
+        return drc.DynamixelRobotController(global_constants.dynamixel_robot_config, mock.Mock(), self.bus,
+                                            servo_config=self.servo_config, **kwargs)
 
     def test_robot_starts_with_the_real_servo_configuration(self):
         # only checks that the configuration of the robot can be used, not its values
@@ -390,14 +389,13 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.assertEqual(set(range(1, 8)), self.bus.rebooted)
         self.assertEqual(self.servos[0].p, self.bus.get(1, cfg.ADDR_P, 2))
 
-    def test_servo_configuration_without_all_servos_raises_before_opening_the_port(self):
+    def test_servo_configuration_without_all_servos_raises_before_touching_the_bus(self):
         del self.servo_config.servos[4]
-        setup = mock.Mock()
-        with mock.patch.object(drc, 'setup_dynamixel_handlers', setup):
-            with self.assertRaisesRegex(DynamixelError, r'no servos with ids \[4\]'):
-                drc.DynamixelRobotController('FAKE', global_constants.dynamixel_robot_config,
-                                             servo_config=self.servo_config)
-        setup.assert_not_called()
+        bus = mock.Mock()
+        with self.assertRaisesRegex(DynamixelError, r'no servos with ids \[4\]'):
+            drc.DynamixelRobotController(global_constants.dynamixel_robot_config, mock.Mock(), bus,
+                                         servo_config=self.servo_config)
+        self.assertEqual([], bus.mock_calls)
 
     def test_servos_are_not_enabled_when_the_hardware_errors_can_not_be_read(self):
         with mock.patch.object(self.robot, 'safety_check', return_value=True), \

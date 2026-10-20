@@ -3,7 +3,6 @@ import os
 from src.robot_config import load_robot_configs
 from src.utils.os_utils import get_project_root
 
-dynamixel_robot_arm_port = None  # None finds the port of the usb adapter the servos are connected to
 
 # the link lengths of the robots come from src/robot_config.yaml
 _robot_configs = load_robot_configs()

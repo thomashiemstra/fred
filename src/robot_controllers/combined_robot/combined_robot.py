@@ -3,6 +3,11 @@ from src.robot_controllers.abstract_robot_controller import AbstractRobotControl
 
 
 class CombinedRobot(AbstractRobotController):
+    """
+    the real robot mirrored in the simulation: moves go to both, readings come from the physical robot. Everything
+    this class doesn't define itself (the servo level of the DynamixelRobotController: positions, currents,
+    temperatures, the servo handler, used by the calibration scripts) is forwarded to the physical robot.
+    """
 
     def __init__(self, dynamixel_robot, simulated_robot):
         self.dynamixel_robot = dynamixel_robot
@@ -12,6 +17,12 @@ class CombinedRobot(AbstractRobotController):
         self.physics_client = simulated_robot.physics_client
         self.body_id = simulated_robot.body_id
         self.control_points = simulated_robot.control_points
+
+    def __getattr__(self, name):
+        # only called for attributes this class doesn't have; before __init__ ran there is no physical robot yet
+        if name == 'dynamixel_robot':
+            raise AttributeError(name)
+        return getattr(self.dynamixel_robot, name)
 
     def enable_servos(self):
         """returns True if the servos of the physical robot were enabled"""
