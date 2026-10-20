@@ -37,8 +37,9 @@ def get_robot():
     :raises DynamixelError: when the servos of the real robot don't answer on any usb adapter or can't be set up
     """
     from src.simulation.simulation_utils import start_simulated_robot
+    simulated_robot = start_simulated_robot(use_gui=_show_simulation)
     if global_constants.use_simulation:
-        return start_simulated_robot(use_gui=_show_simulation)
+        return simulated_robot
     from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
     from src.robot_controllers.dynamixel_robot import dynamixel_x_config
     from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController, ARM_IDS
@@ -49,7 +50,6 @@ def get_robot():
     servo_config = load_servo_config()
     dynamixel_robot = DynamixelRobotController(global_constants.dynamixel_robot_config, port_handler, packet_handler, servo_config)
 
-    simulated_robot = start_simulated_robot(use_gui=_show_simulation)
     return CombinedRobot(dynamixel_robot, simulated_robot)
 
 
