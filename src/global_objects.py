@@ -7,6 +7,7 @@ from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.xbox_control.xbox360controller.XboxController import XboxController
 
 
+# TODO review with CLAUDE and use this everywhere, is this a good singleton solution?
 @lru_cache(maxsize=1)
 def get_robot(port):
     from src.simulation.simulation_utils import start_simulated_robot
