@@ -42,8 +42,8 @@ while cap.isOpened():
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
 
-    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD,  # type: ignore[call-overload]  # flags are passed as the corners argument
-                                             cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
+    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD,
+                                             flags=cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
                                              + cv2.CALIB_CB_NORMALIZE_IMAGE)
 
     key_pressed = cv2.waitKey(1)
@@ -100,7 +100,7 @@ print(rvecs)
 print("tvecs : \n")
 print(tvecs)
 
-calibration_data = {'cameraMatrix': cameraMatrix, 'distCoeffs': distCoeffs}
+calibration_data = {'cameraMatrix': cameraMatrix.tolist(), 'distCoeffs': distCoeffs.tolist()}
 
 with open('calibration/calibration_data.txt', 'w') as outfile:
     json.dump(calibration_data, outfile)
