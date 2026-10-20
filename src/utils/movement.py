@@ -513,9 +513,12 @@ class Movement(ABC):
 
     @staticmethod
     def is_robot_at_start_pose(start_pose: Pose, robot: AbstractRobotController) -> bool:
+        """:raises MovementException: when the current angles of the robot can't be read"""
         current_angles = robot.get_current_angles()
+        if current_angles is None:
+            raise MovementException('can not read the current angles of the robot')
         start_pose_angles = robot.pose_to_angles(start_pose)
-        return np.allclose(current_angles, start_pose_angles, atol=0.4)  # type: ignore[arg-type]  # current angles can be none
+        return bool(np.allclose(current_angles, start_pose_angles, atol=0.4))
 
 
 class SplineMovement(Movement):

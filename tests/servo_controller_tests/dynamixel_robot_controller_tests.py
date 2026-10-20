@@ -171,6 +171,24 @@ class TestDynamixelRobotController(unittest.TestCase):
         robot = self.make_robot(perform_safety_checks=False)
         self.assertIsNone(robot.get_current_angles())
 
+    def test_move_to_pose_refuses_while_the_current_angles_are_unknown(self):
+        pose = forward_kinematics(self.robot.get_current_angles(), self.robot.robot_config)
+        self.bus.unresponsive = {5}
+        robot = self.make_robot(perform_safety_checks=False)
+
+        with self.assertRaises(DynamixelError):
+            robot.move_to_pose(pose)
+
+        # once the servos answer the current angles are read before moving
+        self.bus.unresponsive = set()
+        recommended_time, _ = robot.move_to_pose(pose)
+        self.assertGreaterEqual(recommended_time, 0)
+
+    def test_gripper_position_is_none_when_the_servos_can_not_be_read(self):
+        self.assertEqual(3, len(self.robot.get_current_gripper_position()))
+        self.bus.unresponsive = {5}
+        self.assertIsNone(self.robot.get_current_gripper_position())
+
     def test_operating_mode_is_only_written_when_it_changes(self):
         for servo_id in range(1, 8):
             self.bus.memory[servo_id][cfg.ADDR_TORQUE_ENABLE] = 1

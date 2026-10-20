@@ -303,6 +303,13 @@ class MovementTests(unittest.TestCase):
         controller.current_angles[3] += 0.02
         self.assertFalse(Movement.is_robot_at_start_pose(poses[0], controller))
 
+    def test_move_is_refused_when_the_current_angles_can_not_be_read(self):
+        controller = FakeServoController(poses[0])
+        controller.current_angles = None
+        with mock.patch.object(movement, 'sleep'):
+            self.assertRaises(MovementException, lambda: SplineMovement(poses, 2).move(controller))
+        self.assertEqual([], controller.sent_angles)
+
     def test_move_is_refused_when_the_robot_is_not_at_the_start_pose(self):
         controller = FakeServoController(poses[-1])
         with mock.patch.object(movement, 'sleep'):

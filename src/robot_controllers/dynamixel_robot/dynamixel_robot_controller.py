@@ -146,7 +146,11 @@ class DynamixelRobotController(AbstractRobotController):
 
     def move_to_pose(self, pose: Pose) -> tuple[float, float]:
         angles = inverse_kinematics(pose, self.robot_config)
-        recommended_time = get_recommended_wait_time(self._current_angles, angles)  # type: ignore[arg-type]  # none when the first read failed
+        # unknown only before the first move when the initial read failed without safety checks
+        previous_angles = self._current_angles if self._current_angles is not None else self.get_current_angles()
+        if previous_angles is None:
+            raise DynamixelError('the current angles of the robot are unknown, not moving')
+        recommended_time = get_recommended_wait_time(previous_angles, angles)
         time_taken = self.move_servos(angles)
         return recommended_time, time_taken
 
@@ -222,9 +226,12 @@ class DynamixelRobotController(AbstractRobotController):
                 outside[servo_id] = (servo.current_position, calibrated_range)
         return outside
 
-    def get_current_gripper_position(self) -> np.ndarray:
+    def get_current_gripper_position(self) -> np.ndarray | None:
+        """the position of the gripper or None if the servos could not be read"""
         angles = self.get_current_angles()
-        _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)  # type: ignore[arg-type]  # none when the read failed
+        if angles is None:
+            return None
+        _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)
         return p6
 
     # returns the time in seconds it took to move the servos
