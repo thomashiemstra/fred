@@ -374,6 +374,45 @@ class TestServoHandlerCommunication(unittest.TestCase):
                 self.assertLogs(servo_handler_module.logger, 'ERROR'):
             self.assertFalse(self.handler.reboot(timeout=3.0))
 
+    # static load compensation
+
+    def test_present_current_is_read_signed_with_a_packet_per_bus(self):
+        self.bus.memory[1][cfg.ADDR_PRESENT_CURRENT:cfg.ADDR_PRESENT_CURRENT + 2] = (-30 & 0xFFFF).to_bytes(2, 'little')
+        self.bus.memory[3][cfg.ADDR_PRESENT_CURRENT:cfg.ADDR_PRESENT_CURRENT + 2] = (100).to_bytes(2, 'little')
+        self.assertEqual({1: -30, 2: 0, 3: 100, 4: 0}, self.handler.read_present_current())
+        self.assertEqual([('sync_read', cfg.ADDR_PRESENT_CURRENT, [1, 2]),
+                          ('sync_read', cfg.ADDR_PRESENT_CURRENT, [3, 4])], self.bus.packets)
+        self.assertEqual({3: 100}, self.handler.read_present_current([3]))
+        self.bus.unresponsive = {2}
+        self.assertIsNone(self.handler.read_present_current())
+
+    def test_the_compensation_is_kept_at_the_end_of_the_calibrated_range(self):
+        # servo 1: positions 1024-3072 with offset 100, a target beyond the range with 40 positions of compensation
+        servo = self.servos[0]
+        servo.target_position = 3300
+        servo.compensation_positions = 40
+        with self.assertLogs(servo_handler_module.logger, 'WARNING'):
+            self.assertTrue(self.handler.move_to_angles([1]))
+        self.assertEqual(3072 + 100 + 40, self.goal_position(1))
+        self.assertEqual(3072 + 100 + 40, servo.target_position)
+
+    def test_hold_current_position_drops_the_compensation(self):
+        servo = self.servos[0]
+        servo.compensation_positions = 40
+        self.bus.set_position(1, 2000)
+        self.assertTrue(self.handler.hold_current_position([1]))
+        self.assertEqual(2000, servo.target_position)
+        self.assertEqual(0, servo.compensation_positions)
+        self.assertEqual(2000, servo.clamp_target_position())
+
+    def test_the_compensation_never_leaves_the_physical_range(self):
+        servo = self.servos[2]  # 0-4096
+        servo.target_position = 4110
+        servo.compensation_positions = 20
+        with self.assertLogs(servo_handler_module.logger, 'WARNING'):
+            self.assertTrue(self.handler.move_to_angles([3]))
+        self.assertEqual(cfg.MAX_POSITION, self.goal_position(3))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -14,6 +14,20 @@
 #   goal_current                the maximum current in mA in current_based_position mode (optional)
 #   profile                     velocity and acceleration of the movement profile of the servo
 #   pid                         the gains of the position controller of the servo
+#   compensation                the static load compensation of the joint (optional, joints 2-5), the positions
+#                               added to every target for gravity and the spring at the commanded pose, fitted by
+#                               calibration/fit_static_load.py from the data of calibration/record_static_load.py,
+#                               see static_compensation.py and Handover Gravity and Spring Compensation.md:
+#                                 max_positions: 60                           the compensation is clipped to this
+#                                 terms: {constant: 1.0, cos_q2: 12.0, ...}   coefficient per term in positions
+#                                 up: {...}, down: {...}                      optional, per direction of the joint
+#                               the terms: joint 2 constant, cos_q2, sin_q2, sin_phi, cos_phi, wrist_reach,
+#                               spring_dl; joint 3 constant, sin_phi, cos_phi, wrist_reach, spring_dl;
+#                               joint 4 constant, wrist_roll; joint 5 constant, wrist_pitch
+#
+# spring (optional, top level): the spring between the servo 2 and servo 3 housings, needed for the spring terms
+#   base_anchor: [radial, up]   cm from the joint 2 axis, radial away from the base axis
+#   arm_anchor: [along, perp]   cm from the joint 3 axis, along the upper arm and perpendicular to it
 
 # The robot is printed in PLA, which softens around 55-65C. A servo that is warmer than the warning temperature is
 # logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure

@@ -210,6 +210,7 @@ class ServoHandler(object):
         for servo_id in servo_ids:
             servo = self.servo_map[servo_id]
             servo.target_position = servo.current_position
+            servo.compensation_positions = 0  # the present position is held as it is, nothing was added to it
             values[servo_id] = servo.current_position
         return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION, values)
 
@@ -240,6 +241,20 @@ class ServoHandler(object):
                 errors[servo_id] = [name for bit, name in self.config.HARDWARE_ERRORS.items() if status & (1 << bit)]
         return errors
 
+    def read_present_current(self, servo_ids=None):
+        """returns a mapping of servo id to the signed value of its present current register, or None on failure
+
+        The unit depends on the model: 2.69mA for the XM430 and XM540, 1mA for the XL330. The XC430 has no current
+        sensor, its register is the present load in 0.1% of the maximum (see CURRENT_UNITS in
+        calibration/record_static_load.py).
+        """
+        values = self.__sync_read(self.config.ADDR_PRESENT_CURRENT, self.config.LEN_PRESENT_CURRENT,
+                                  self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: utils.to_signed(value, self.config.LEN_PRESENT_CURRENT)
+                for servo_id, value in values.items()}
+
     def read_temperatures(self, servo_ids=None):
         """returns a mapping of servo id to temperature in degrees celsius, or None on failure"""
         return self.__sync_read(self.config.ADDR_PRESENT_TEMPERATURE, self.config.LEN_PRESENT_TEMPERATURE,
@@ -262,9 +277,13 @@ class ServoHandler(object):
         return list(servo_ids)
 
     def __clamp_target_position(self, servo_id):
-        """clamp the target position to both the calibrated and the physical range of the servo"""
+        """clamp the target position to both the calibrated and the physical range of the servo
+
+        The calibrated range applies to the target before its static load compensation, the compensation is kept at
+        the ends of the range; the physical range applies to the goal position that is sent.
+        """
         servo = self.servo_map[servo_id]
-        clamped = servo.clamp_position(servo.target_position)
+        clamped = servo.clamp_target_position()
         clamped = min(max(clamped, self.config.MIN_POSITION), self.config.MAX_POSITION)
         if clamped != servo.target_position:
             logger.warning("[ID:%03d] target position %d is out of range, clamped to %d",

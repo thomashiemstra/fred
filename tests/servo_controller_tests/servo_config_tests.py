@@ -186,5 +186,75 @@ class LoadServoConfigTests(unittest.TestCase):
                 load_servo_config(path)
 
 
+class CompensationConfigTests(unittest.TestCase):
+    """the compensation of a servo and the spring section"""
+
+    SPRING = {'base_anchor': [-4.0, -6.0], 'arm_anchor': [2.0, 3.0]}
+
+    def parse(self, **changes):
+        return parse_servo_config(config_with(**changes), a2=20.0)
+
+    def test_compensation_is_parsed(self):
+        config = self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'cos_q2': 12.0, 'sin_phi': 5}}))
+        compensation = config.servos[2].compensation
+        self.assertEqual(2, compensation.joint)
+        self.assertEqual({'cos_q2': 12.0, 'sin_phi': 5.0}, compensation.terms)
+        self.assertEqual(60, compensation.max_positions)
+        self.assertEqual({}, compensation.directional)
+        self.assertIsNone(config.servos[1].compensation)
+        self.assertIsNone(config.spring)
+
+    def test_directional_compensation(self):
+        config = self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'cos_q2': 12.0},
+                                                   'up': {'cos_q2': 14.0}, 'down': {'cos_q2': 10.0}}))
+        self.assertEqual({'up': {'cos_q2': 14.0}, 'down': {'cos_q2': 10.0}}, config.servos[2].compensation.directional)
+
+    def test_spring_and_spring_terms(self):
+        config = self.parse(s=(None, 'spring', self.SPRING),
+                            c=(2, 'compensation', {'max_positions': 60, 'terms': {'spring_dl': 1.5, 'cos_q2': -0.1}}))
+        self.assertEqual([-4.0, -6.0], list(config.spring.base_anchor))
+        self.assertEqual([2.0, 3.0], list(config.spring.arm_anchor))
+        self.assertEqual(20.0, config.spring.a2)
+        self.assertIs(config.spring, config.servos[2].compensation.spring)
+
+    def test_models_are_kept(self):
+        config = self.parse(m=(1, 'model', 'XM430-W350'))
+        self.assertEqual({1: 'XM430-W350'}, config.models)
+
+    def test_invalid_compensations(self):
+        invalid = [
+            {'terms': {'cos_q2': 1.0}},                                         # no max_positions
+            {'max_positions': 0, 'terms': {'cos_q2': 1.0}},
+            {'max_positions': 60.5, 'terms': {'cos_q2': 1.0}},
+            {'max_positions': 60},                                              # no terms
+            {'max_positions': 60, 'terms': {'nope': 1.0}},
+            {'max_positions': 60, 'terms': {'cos_q2': 'one'}},
+            {'max_positions': 60, 'terms': [1.0]},
+            {'max_positions': 60, 'terms': {'cos_q2': 1.0}, 'up': {'cos_q2': 1.0}},  # up without down
+            {'max_positions': 60, 'terms': {'spring_dl': 1.0}},                 # no spring section
+            {'max_positions': 60, 'terms': {'cos_q2': 1.0}, 'sideways': {}},
+        ]
+        for compensation in invalid:
+            with self.assertRaises(ServoConfigError, msg=repr(compensation)):
+                self.parse(c=(2, 'compensation', compensation))
+        # joint 1 has no terms, the gripper has states instead of angles
+        with self.assertRaises(ServoConfigError):
+            self.parse(c=(1, 'compensation', {'max_positions': 60, 'terms': {}}))
+        with self.assertRaises(ServoConfigError):
+            self.parse(c=(7, 'compensation', {'max_positions': 60, 'terms': {}}))
+
+    def test_invalid_spring(self):
+        for spring in ({'base_anchor': [0, 0]}, {'base_anchor': [0, 0], 'arm_anchor': [1]},
+                       {'base_anchor': [0, 0], 'arm_anchor': [1, 'a']}, [1, 2],
+                       {'base_anchor': [0, 0], 'arm_anchor': [1, 2], 'k': 3}):
+            with self.assertRaises(ServoConfigError, msg=repr(spring)):
+                self.parse(s=(None, 'spring', spring))
+
+    def test_spring_takes_a2_from_the_robot_config_by_default(self):
+        from src.robot_config import load_robot_configs
+        config = parse_servo_config(config_with(s=(None, 'spring', self.SPRING)))
+        self.assertEqual(load_robot_configs()['dynamixel_robot'].a2, config.spring.a2)
+
+
 if __name__ == '__main__':
     unittest.main()

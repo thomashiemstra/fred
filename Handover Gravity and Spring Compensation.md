@@ -148,11 +148,13 @@ the perpendicular and wrist terms.
 Spring. It runs from the housing of servo 2, on the base plate, to the housing of servo 3. Servo 3 is mounted
 reversed: its housing is part of the upper arm and turns with q2 + q3 about the elbow, so the spring length is
 `L(q2, q3)` and the spring loads both joints (the readme doesn't mention it; measure the anchors). For a linear
-spring the torque on joint j is `k (L - L0) dL/dqj`: two linear columns per joint, `L dL/dqj` and `dL/dqj`, with the
-same coefficients `k` and `-k L0` in torque (in positions each joint absorbs its own `1 / K`); a nonlinear or
-pre-tensioned spring gets a polynomial in `L` instead. The anchor on the upper arm sits close to the joint 3 axis, so
-`dL/dq3` and the joint 3 load are small compared to joint 2, which is why q2 and q3 have to be varied independently
-to tell the spring from gravity.
+spring the torque on joint j is `k (L - L0) dL/dqj`. The `k L dL/dqj` part is a spring of zero free length, and such
+a spring pulls exactly like a mass: its torque is a combination of the same sin/cos terms as gravity (checked: the
+regressor with an `L dL/dq` column has a condition number of 1e11), so it is absorbed by the gravity coefficients.
+Only `dL/dqj` is a column of its own, with coefficient `-k L0` in torque (in positions each joint absorbs its own
+`1 / K`); a nonlinear or pre-tensioned spring gets a polynomial in `L` instead. The anchor on the upper arm sits
+close to the joint 3 axis, so `dL/dq3` and the joint 3 load are small compared to joint 2, which is why q2 and q3
+have to be varied independently to tell the spring from gravity.
 
 Residual. What the physics leaves over on (q2, q3), maybe q5: a low order polynomial or a
 `scipy.interpolate.RegularGridInterpolator` on a q2 x q3 grid. An MLP is more than a few hundred poses support.
@@ -181,6 +183,11 @@ term with `c = d6`; this needs K.
 
 ## Step 2: fit the gravity model
 
+The code: the terms live in `static_compensation.py` (`term_values`, `regressor_row`; the names are `constant`,
+`cos_q2`, `sin_q2`, `sin_phi`, `cos_phi`, `wrist_reach`, `wrist_pitch`, `wrist_roll` and `spring_dl`) and
+`calibration/fit_static_load.py` does what the snippet below shows, per joint, with hold-out poses and standard
+errors. The snippet is the idea in 30 lines:
+
 ```python
 import numpy as np
 
@@ -196,24 +203,23 @@ def basis(q):
     return {2: np.array(row2), 3: np.array(row3), 5: np.array(row5)}
 
 def spring_columns(q2, q3, base_anchor, arm_anchor, a2=20.0, h=1e-6):
-    """{joint: [L dL/dq, dL/dq]} for the spring between the servo 2 housing (anchor relative to joint 2: radial,
-    up, in cm) and the servo 3 housing, which moves with the upper arm (anchor relative to joint 3: along the
-    upper arm, perpendicular to it); the coefficients are k and -k L0"""
+    """{joint: dL/dq} for the spring between the servo 2 housing (anchor relative to joint 2: radial, up, in cm)
+    and the servo 3 housing, which moves with the upper arm (anchor relative to joint 3: along the upper arm,
+    perpendicular to it); the coefficient is -k L0, the k L part is absorbed by the gravity terms"""
     def length(q2, q3):
         phi = q2 + q3
         along, perp = arm_anchor
         anchor = np.array([a2 * np.cos(q2) + along * np.sin(phi) + perp * np.cos(phi),
                            a2 * np.sin(q2) - along * np.cos(phi) + perp * np.sin(phi)])
         return np.linalg.norm(anchor - np.asarray(base_anchor))
-    L = length(q2, q3)
     dL2 = (length(q2 + h, q3) - length(q2 - h, q3)) / (2 * h)
     dL3 = (length(q2, q3 + h) - length(q2, q3 - h)) / (2 * h)
-    return {2: [L * dL2, dL2], 3: [L * dL3, dL3]}
+    return {2: dL2, 3: dL3}
 
 # Q: list of angle arrays, E: {servo id: steady state error in positions}, mean of both directions
 A = {j: np.array([basis(q)[j] for q in Q]) for j in (2, 3, 5)}
 for j in (2, 3):
-    A[j] = np.hstack([A[j], np.array([spring_columns(q[2], q[3], base_anchor, arm_anchor)[j] for q in Q])])
+    A[j] = np.hstack([A[j], np.array([[spring_columns(q[2], q[3], base_anchor, arm_anchor)[j]] for q in Q])])
 coefficients = {}
 for j in (2, 3, 5):
     coefficients[j], _, rank, _ = np.linalg.lstsq(A[j], E[j], rcond=None)
@@ -231,9 +237,9 @@ for j in (2, 3, 5):
 1. Measure the anchor on the servo 2 housing relative to the joint 2 axis (radial and vertical offset in the arm
    plane) and the anchor on the servo 3 housing relative to the joint 3 axis (along the upper arm and perpendicular
    to it), with a ruler or from the CAD.
-2. Measure k and L0 offline by hanging weights, as a check on the fitted `k` and `-k L0`.
-3. The fitted `k` has to come out the same from the joint 2 and the joint 3 columns up to the ratio `K3 / K2`; if
-   not, or if `k` is far from the measured one, suspect the anchor measurement or a sign error, not the spring.
+2. Measure k and L0 offline by hanging weights, as a check on the fitted `-k L0`.
+3. The fitted `-k L0` has to come out the same from the joint 2 and the joint 3 columns up to the ratio `K3 / K2`;
+   if not, or if it is far from the measured one, suspect the anchor measurement or a sign error, not the spring.
 
 ## Step 4: the residual
 
@@ -246,19 +252,20 @@ for j in (2, 3, 5):
 
 ## Step 5: apply it at runtime
 
-Where it plugs into the code:
+Where it plugs into the code (implemented on 19 October, see the work list at the end):
 
 - `Servo.set_target_position_from_angle(angle, all_angles)` (`servo.py`): after interpolating the angle to a position
-  and adding `constant_offset`, add the compensation in positions computed from `all_angles`. `move_servos` passes
-  the commanded angles, so the model input is the target pose, not the measured one, which is what the first version
-  asked for. Store the applied compensation on the servo for diagnostics.
-- Parameters in the yaml: `servo_config.py` rejects unknown fields; add an optional `compensation` field (the
-  coefficients per basis term, the direction split, the magnitude clamp) to `_OPTIONAL_SERVO_FIELDS`, parse it in
-  `_parse_servo` and build a `Servo` with it. Keep the basis functions in one module shared with the fit script.
-- Clamping: `servo_handler.__clamp_target_position` runs after the hook, in `move_to_angles`. Either clamp the
-  uncompensated position first and let the goal exceed the calibrated range by the compensation (the physical limits
-  have to allow it), or let the clamp cut the compensation at the range ends. The rework handover asks for the first;
-  decide per joint, servo 3's range is [1024, 3072] reversed.
+  and adding `constant_offset`, the `compensation` of the servo (a `StaticCompensation`) gives the positions for
+  `all_angles` and they are added; `compensation_positions` keeps what was added. `move_servos` passes the
+  commanded angles, so the model input is the target pose, not the measured one, which is what the first version
+  asked for.
+- Parameters in the yaml: the optional `compensation` field of a servo (`max_positions`, `terms`, optional `up` and
+  `down`) and the top level `spring` section (the two anchors), validated by `servo_config.py`; the basis is one
+  module shared with the fit script.
+- Clamping: `Servo.clamp_target_position` clamps the uncompensated position to the calibrated range and adds the
+  compensation back, so the compensation is kept at the ends of the range and the goal may exceed the calibrated
+  range by at most `max_positions`; `servo_handler` then clamps to 0-4095. The physical range has to allow that
+  margin, servo 3's range is [1024, 3072] reversed.
 - Reported angles stay truthful: `get_angle_from_position` converts the measured position, and with the
   compensation the measured position is close to the uncompensated goal, so `get_current_angles`,
   `forward_kinematics`, the 0.05 rad start check of `check_move` (33 positions) and `hold_current_position` don't need
@@ -268,7 +275,8 @@ Where it plugs into the code:
   nothing. No separate loop, no change to the servos' own 1 kHz loop.
 - Direction: keep the 2021 split as an option: fit up and down separately, use the mean for static targets and the
   direction of the last commanded change to pick the side (`ServoWithOffsetFunction` did this with
-  `_last_commanded_angle`).
+  `_last_commanded_angle`). The basis needs a constant term for that: Coulomb friction is a fixed number of
+  positions whose sign follows the direction, which no sin/cos term can carry.
 - Safety: clamp the compensation magnitude (60 positions is 5 degrees), enable it one joint at a time with the arm
   supported, and check the sign by reading `present - target` before and after: the error has to shrink. A wrong sign
   doubles it.
@@ -341,13 +349,23 @@ Information still needed:
   stretch it).
 - [ ] Which joints sag most and the payload range: 2021 says servo 3, then 2; re-measure, the gearing changed.
 
-Work to do:
+Work to do (the code of 19 October 2026 is in `src/robot_controllers/dynamixel_robot/static_compensation.py`,
+`calibration/record_static_load.py`, `calibration/fit_static_load.py` and the `compensation`/`spring` fields of
+`servo_config.yaml`; nothing has run on the robot yet):
 
-- [ ] Sync read of Present Current (joints 1-3, 7) and Present Load (4-6) in `servo_handler.py`.
-- [ ] Pose sampling and logging script: random poses, both directions, settle, csv (replaces
-  `calibration/gravity_compensation.py`).
-- [ ] Fit the positions per joint on the cos/sin basis, plus the spring columns; check `cond` and the hold-out error.
-- [ ] Residual and the up/down split, if the hold-out error asks for it.
-- [ ] `Servo` compensation with a yaml field and tests, the clamp order decision, the magnitude clamp.
-- [ ] Enable it per joint on the robot with the arm supported, sign check.
+- [x] Sync read of Present Current (joints 1-3, 7) and Present Load (4-6): `ServoHandler.read_present_current`,
+  `DynamixelRobotController.get_present_currents`.
+- [x] Pose sampling and logging script: `python -m src.robot_controllers.dynamixel_robot.calibration.record_static_load`
+  (random poses the planner accepts, both directions with an overshoot, settle, csv; joints 4 and 5 are only sampled
+  within plus or minus 90 degrees by default, `--range` and `--floor` to change the ranges and the floor).
+- [x] Fit: `python -m src.robot_controllers.dynamixel_robot.calibration.fit_static_load static_load.csv` prints the
+  coefficients with their standard errors, the condition number, the hold-out error, the hysteresis, and the yaml
+  blocks (negated, so they cancel the error); `--split` adds the up/down blocks.
+- [x] `Servo` compensation with the yaml field and tests. Decisions taken: the calibrated range clamps the target
+  before the compensation (the goal may exceed it by the compensation, `max_positions` caps that, the handler clamps
+  to 0-4095); the up/down direction only turns around after the commanded angle came back more than 3 positions, so
+  a dithering target doesn't flip it every step; `hold_current_position` drops the compensation.
+- [ ] Residual model, if the hold-out error asks for it.
+- [ ] Record on the robot, fit, put the blocks in the yaml, enable one joint at a time with the arm supported and
+  check the sign with `_print_position_error`.
 - [ ] Validate (Step 6), then the friction stage.

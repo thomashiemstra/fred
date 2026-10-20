@@ -244,7 +244,8 @@ class DynamixelRobotController(AbstractRobotController):
         return end - start
 
     def _print_position_error(self):
-        """print the difference between the current position and the previous target position of each servo"""
+        """print the difference between the current position and the previous target position of each servo, the
+        target without its static load compensation, so the number is the remaining sag"""
         current_positions = self.get_current_positions()
         if current_positions is None:
             logger.warning("failed to read the current positions")
@@ -252,9 +253,19 @@ class DynamixelRobotController(AbstractRobotController):
 
         diff = np.zeros(7, dtype=np.intp)
         for servo_id in ARM_IDS:
-            diff[servo_id] = current_positions[servo_id] - self.servo_handler.get_servo(servo_id).target_position
+            servo = self.servo_handler.get_servo(servo_id)
+            diff[servo_id] = current_positions[servo_id] - (servo.target_position - servo.compensation_positions)
 
         print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
+
+    def get_present_currents(self, servo_ids=ARM_IDS):
+        """returns a mapping of servo id to the signed present current register of the servos, or None if they
+        could not be read; the unit depends on the model, see ServoHandler.read_present_current"""
+        return self.servo_handler.read_present_current(list(servo_ids))
+
+    def get_temperatures_and_voltages(self, servo_ids=ARM_IDS):
+        """returns a mapping of servo id to (temperature in degrees celsius, input voltage), or None on failure"""
+        return self.servo_handler.read_temperature_and_voltage(list(servo_ids))
 
     def set_gripper(self, new_gripper_state):
         """

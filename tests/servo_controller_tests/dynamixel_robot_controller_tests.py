@@ -1,6 +1,8 @@
 import copy
 import os
 import unittest
+
+import numpy as np
 from unittest import mock
 
 import dynamixel_sdk as dxl
@@ -460,6 +462,39 @@ class TestDynamixelRobotController(unittest.TestCase):
         with mock.patch('src.robot_controllers.dynamixel_robot.servo_handler.time.sleep'):
             with self.assertRaises(DynamixelError):
                 self.robot.reboot_all_servos()
+
+    # static load compensation
+
+    def test_present_currents(self):
+        self.bus.memory[2][cfg.ADDR_PRESENT_CURRENT:cfg.ADDR_PRESENT_CURRENT + 2] = (-50 & 0xFFFF).to_bytes(2, 'little')
+        currents = self.robot.get_present_currents()
+        self.assertEqual(-50, currents[2])
+        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(currents))
+        self.assertEqual({7: 0}, self.robot.get_present_currents([7]))
+        self.bus.unresponsive = {4}
+        self.assertIsNone(self.robot.get_present_currents())
+
+    def test_temperatures_and_voltages(self):
+        self.set_temperature(3, 41)
+        self.bus.memory[3][cfg.ADDR_PRESENT_INPUT_VOLTAGE:cfg.ADDR_PRESENT_INPUT_VOLTAGE + 2] = (116).to_bytes(2, 'little')
+        self.assertEqual((41, 11.6), self.robot.get_temperatures_and_voltages()[3])
+        self.bus.unresponsive = {3}
+        self.assertIsNone(self.robot.get_temperatures_and_voltages())
+
+    def test_compensation_is_sent_with_the_goal_and_left_out_of_the_position_error(self):
+        from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
+        servo = self.servos[1]  # servo 2
+        servo.compensation = StaticCompensation(2, {'cos_q2': 20.0}, 60)
+        angles = np.array([0, 0.5, 0.0, 1.0, 0.2, 0.3, 0.1])  # cos(q2 = 0) = 1: 20 positions
+        self.robot.move_servos(angles)
+        self.assertEqual(20, servo.compensation_positions)
+        self.assertEqual(position_of(self.servo_config.servos[2], 0.0) + 20, self.bus.get(2, cfg.ADDR_GOAL_POSITION, 4))
+        # the servo reaches the uncompensated target: the printed error is 0
+        self.bus.set_position(2, servo.target_position - 20)
+        with mock.patch('builtins.print') as printed:
+            self.robot._print_position_error()
+        self.assertIn('2:0', printed.call_args.args[0])
+        self.assertAlmostEqual(0.0, self.robot.get_current_angles()[2], places=3)
 
 
 if __name__ == '__main__':

@@ -5,15 +5,22 @@ import numpy as np
 import logging
 from numpy import pi
 
+from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
+
 
 class Servo:
     min_position = 0
     max_position = 0
     target_position = 0
     current_position = -1  # set by the servo handler
+    DIRECTION_DEADBAND_POSITIONS = 3
 
     def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
-                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None):
+                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None, compensation=None):
+        """
+        :param compensation: a StaticCompensation, the positions it gives for the commanded angles of all joints
+            are added to every target position (see static_compensation.py)
+        """
         self.p = p
         self.i = i
         self.d = d
@@ -26,16 +33,29 @@ class Servo:
         self.profile_acceleration = profile_acceleration
         self.constant_offset = offset
         self.goal_current = goal_current
+        self.compensation = compensation
+        self.compensation_positions = 0  # the positions the compensation added to the last target
+        self._direction = None
+        self._extreme_angle = None  # the furthest commanded angle in the current direction
+        # the direction only turns around when the commanded angle has come back more than this from the furthest
+        # point, so a target that dithers around a value doesn't flip the up/down compensation every step
+        positions_per_radian = abs(max_position - min_position) / (max_angle - min_angle) if max_angle != min_angle else 0
+        self.direction_deadband = self.DIRECTION_DEADBAND_POSITIONS / positions_per_radian if positions_per_radian else 0.0
 
     def __str__(self):
         return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
-               "profile_velocity={} profile_acceleration={} offset={} goal_current={}" \
+               "profile_velocity={} profile_acceleration={} offset={} goal_current={} compensation={}" \
             .format(self.p, self.i, self.d, self.max_angle, self.min_angle, self.min_position, self.max_position,
                     self.operating_mode, self.profile_velocity, self.profile_acceleration, self.constant_offset,
-                    self.goal_current)
+                    self.goal_current, self.compensation)
 
     # updates the target position of this servo
     def set_target_position_from_angle(self, angle, all_angles=None):
+        """
+        :param angle: the angle to move to
+        :param all_angles: the commanded angles of all joints, indexed by servo id; with a compensation the
+            positions for the static load of that pose are added to the target
+        """
         if angle > self.max_angle:
             logging.debug("input angle is bigger than max input angle")
         if angle < self.min_angle:
@@ -45,11 +65,42 @@ class Servo:
                                                      [self.min_position, self.max_position])))
         self.target_position += self.constant_offset
 
+        direction = self._update_direction(angle)
+        self.compensation_positions = 0
+        if self.compensation is not None and all_angles is not None:
+            self.compensation_positions = self.compensation.positions(all_angles, direction)
+            self.target_position += self.compensation_positions
+
+    def _update_direction(self, angle):
+        """
+        the direction the commanded angle moves in: UP, DOWN or None before it first moved. The direction only turns
+        around when the angle has come back more than the deadband from the furthest point it reached.
+        """
+        if self._extreme_angle is None:
+            self._extreme_angle = angle
+            return None
+        if self._direction == UP and angle >= self._extreme_angle or \
+                self._direction == DOWN and angle <= self._extreme_angle:
+            self._extreme_angle = angle
+        elif angle > self._extreme_angle + self.direction_deadband:
+            self._direction, self._extreme_angle = UP, angle
+        elif angle < self._extreme_angle - self.direction_deadband:
+            self._direction, self._extreme_angle = DOWN, angle
+        return self._direction
+
     def clamp_position(self, position):
         """clamp the position to the calibrated range of this servo, including the constant offset"""
         lower = min(self.min_position, self.max_position) + self.constant_offset
         upper = max(self.min_position, self.max_position) + self.constant_offset
         return int(np.clip(position, lower, upper))
+
+    def clamp_target_position(self):
+        """
+        the target position with the uncompensated part clamped to the calibrated range, so the compensation is
+        kept at the ends of the range (the goal position may exceed the calibrated range by the compensation, the
+        servo handler clamps it to the physical range of the servo)
+        """
+        return self.clamp_position(self.target_position - self.compensation_positions) + self.compensation_positions
 
     def get_angle_from_position(self, position):
         if position is None:
