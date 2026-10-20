@@ -23,7 +23,7 @@ GRIPPER_ID = 7
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, robot_config, port_handler, packet_handler, servo_config=None, perform_safety_checks=True,
+    def __init__(self, robot_config, port_handler, packet_handler, servo_config, perform_safety_checks=True,
                  print_position_error=False):
         """
         :param robot_config: a RobotConfig object
@@ -39,8 +39,6 @@ class DynamixelRobotController(AbstractRobotController):
         self.perform_safety_checks = perform_safety_checks
         self.print_position_error = print_position_error
 
-        if servo_config is None:
-            servo_config = load_servo_config()
         missing = set(ARM_IDS + (GRIPPER_ID,)) - set(servo_config.servos)
         if missing:
             raise DynamixelError('the servo configuration has no servos with ids {}'.format(sorted(missing)))

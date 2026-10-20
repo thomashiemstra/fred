@@ -11,6 +11,7 @@ simulation_utils.start_simulated_robot.
 from functools import lru_cache
 
 from src import global_constants
+from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 
 _show_simulation = False
 
@@ -42,9 +43,12 @@ def get_robot():
     from src.robot_controllers.dynamixel_robot import dynamixel_x_config
     from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController, ARM_IDS
     from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers
+
     # the real robot first: when its servos don't answer nothing else is started and the next call simply retries
     port_handler, packet_handler = setup_dynamixel_handlers(None, dynamixel_x_config, ARM_IDS)
-    dynamixel_robot = DynamixelRobotController(global_constants.dynamixel_robot_config, port_handler, packet_handler)
+    servo_config = load_servo_config()
+    dynamixel_robot = DynamixelRobotController(global_constants.dynamixel_robot_config, port_handler, packet_handler, servo_config)
+
     simulated_robot = start_simulated_robot(use_gui=_show_simulation)
     return CombinedRobot(dynamixel_robot, simulated_robot)
 
