@@ -21,7 +21,8 @@ class ServoPositionRecorder:
         print(self._positions)
 
     def write(self) -> None:
+        """one line per recording: id, current position and target position of each servo"""
         with open("output.txt", "w") as txt_file:
-            for line in self._positions:
-                txt_file.write(" ".join(line) + "\n")  # type: ignore[arg-type]  # lines are lists, not str; works with any number of elements in a line
+            for recording in self._positions:
+                txt_file.write(" ".join(str(value) for servo in recording for value in servo) + "\n")
 
