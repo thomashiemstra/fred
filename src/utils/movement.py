@@ -14,7 +14,6 @@ classes at the end are the recorded moves of the xbox controller.
 """
 from __future__ import annotations
 
-import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -505,11 +504,6 @@ class Movement(ABC):
     def is_possible(self, robot: AbstractRobotController) -> bool:
         """whether the robot can execute the move: it can be planned and passes the checks of check_move"""
         pass
-
-    def to_json(self) -> str:
-        json_poses = [pose.to_json() for pose in self.poses]  # type: ignore[attr-defined]  # pose has no to_json
-        dump_dict = {'poses': json_poses}
-        return json.dumps(dump_dict)
 
     @staticmethod
     def is_robot_at_start_pose(start_pose: Pose, robot: AbstractRobotController) -> bool:
