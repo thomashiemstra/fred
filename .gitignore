@@ -103,7 +103,9 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# editor state of PyCharm and of the Claude Code plugin
 workspace.xml
+.idea/claudeCodeEditorTabs.xml
 test.py
 *.yaml
 *.yml
