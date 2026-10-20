@@ -27,12 +27,13 @@ class ArduinoAngleReader:
         self._running = True
         self._thread.start()
 
-    @synchronized_with_lock("lock")
     def stop(self) -> None:
-        if self._thread is None:
-            return
-        self._running = True
-        self._thread.join()
+        # join without the lock: the reading thread needs it to see that it has to stop
+        with self.lock:
+            thread = self._thread
+            self._running = False
+        if thread is not None:
+            thread.join()
 
     def _read_angle(self) -> int | None:
         raw_bytes = self._serial.readline()
