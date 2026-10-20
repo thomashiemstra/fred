@@ -5,6 +5,8 @@ from __future__ import print_function
 import logging
 import os
 import time
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import tensorflow as tf
@@ -158,28 +160,28 @@ def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles: bool,
 def create_envs(robot_env_no_obstacles: bool, num_parallel_environments: int,
                 scenarios: list[Scenario] | None = None,
                 train_scenarios: list[Scenario] | None = None) -> tuple[Any, Any]:
-    if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
-        if robot_env_no_obstacles:
-            tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
-            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
-        else:
-            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios + train_scenarios))  # type: ignore[operator]  # scenarios default to None
-            eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios, is_eval=True))
-
-        return tf_env, eval_tf_env
-
+    """
+    the training and the evaluation environment
+    :param scenarios: the scenarios to evaluate on, required for the environment with obstacles
+    :param train_scenarios: extra scenarios to train on, training uses scenarios + train_scenarios
+    """
+    make_env: Callable[[], RobotEnv]
+    make_eval_env: Callable[[], RobotEnv]
     if robot_env_no_obstacles:
-        tf_env = tf_py_environment.TFPyEnvironment(
-            parallel_py_environment.ParallelPyEnvironment(
-                [lambda: RobotEnv()] * num_parallel_environments))
+        make_env = RobotEnv
+        make_eval_env = partial(RobotEnv, is_eval=True)
+    else:
+        if scenarios is None:
+            raise ValueError('the environment with obstacles needs scenarios')
+        make_env = partial(RobotEnvWithObstacles, scenarios=scenarios + (train_scenarios or []))
+        make_eval_env = partial(RobotEnvWithObstacles, scenarios=scenarios, is_eval=True)
 
-        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
+    if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
+        tf_env = tf_py_environment.TFPyEnvironment(make_env())
     else:
         tf_env = tf_py_environment.TFPyEnvironment(
-            parallel_py_environment.ParallelPyEnvironment(
-                [lambda: RobotEnvWithObstacles()] * num_parallel_environments))
-
-        eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(is_eval=True))
+            parallel_py_environment.ParallelPyEnvironment([make_env] * num_parallel_environments))
+    eval_tf_env = tf_py_environment.TFPyEnvironment(make_eval_env())
 
     return tf_env, eval_tf_env
 

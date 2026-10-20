@@ -16,6 +16,7 @@ from tf_agents.utils import common
 from src import global_constants
 from src.kinematics.kinematics import jacobian_transpose_on_f
 from src.reinforcementlearning.environment import robot_env_utils
+from src.reinforcementlearning.environment.scenario import sensible_scenarios, train_scenarios
 from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, create_envs
 from src.utils.decorators import timer
@@ -159,7 +160,9 @@ def main(_: Any) -> None:
 
     global_step = tf.compat.v1.train.get_or_create_global_step()
 
-    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 20)
+    # the scenarios soft_actor_critic trains on, it starts from this agent
+    tf_env, eval_tf_env = create_envs(robot_env_no_obstacles, 20,
+                                      scenarios=sensible_scenarios, train_scenarios=train_scenarios)
     # tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(use_gui=True))
 
     tf_agent = create_agent(tf_env, None, robot_env_no_obstacles)
