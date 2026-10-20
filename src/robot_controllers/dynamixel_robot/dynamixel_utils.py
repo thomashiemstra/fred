@@ -2,6 +2,9 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Iterable, Iterator, Sequence
+from types import ModuleType
+from typing import Any
 
 import dynamixel_sdk as dynamixel
 import serial
@@ -19,7 +22,7 @@ class DynamixelError(RuntimeError):
     """raised when the dynamixel servos cannot be set up or controlled"""
 
 
-def set_torque(packet_handler, port_handler, config, servo_id, enable):
+def set_torque(packet_handler: Any, port_handler: Any, config: ModuleType, servo_id: int, enable: bool) -> bool:
     """Enable or disable the torque of a single servo, returns True on success"""
     if enable:
         val = config.TORQUE_ENABLE
@@ -34,13 +37,13 @@ def set_torque(packet_handler, port_handler, config, servo_id, enable):
     return True
 
 
-def write_1_byte(packet_handler, port_handler, address, servo_id, mode):
+def write_1_byte(packet_handler: Any, port_handler: Any, address: int, servo_id: int, mode: int) -> bool:
     """Write a single byte to a servo, returns True on success"""
     comm_result, error = packet_handler.write1ByteTxRx(port_handler, servo_id, address, mode)
     return check_result(packet_handler, servo_id, comm_result, error)
 
 
-def read_1_byte(packet_handler, port_handler, address, servo_id):
+def read_1_byte(packet_handler: Any, port_handler: Any, address: int, servo_id: int) -> int | None:
     """Read a single byte from a servo, returns None on failure"""
     value, comm_result, error = packet_handler.read1ByteTxRx(port_handler, servo_id, address)
     if not check_result(packet_handler, servo_id, comm_result, error):
@@ -48,7 +51,7 @@ def read_1_byte(packet_handler, port_handler, address, servo_id):
     return value
 
 
-def check_result(packet_handler, servo_id, comm_result, error=0):
+def check_result(packet_handler: Any, servo_id: int, comm_result: int, error: int = 0) -> bool:
     """log the communication or servo error if there is one, returns True if there was none"""
     if comm_result != dynamixel.COMM_SUCCESS:
         logger.warning("[ID:%03d] %s", servo_id, packet_handler.getTxRxResult(comm_result))
@@ -59,12 +62,12 @@ def check_result(packet_handler, servo_id, comm_result, error=0):
     return True
 
 
-def to_bytes(value, length):
+def to_bytes(value: float, length: int) -> list[int]:
     """convert a (possibly negative) value to the little endian byte list the servos expect"""
     return list((int(value) & ((1 << (8 * length)) - 1)).to_bytes(length, 'little'))
 
 
-def to_signed(value, length):
+def to_signed(value: int, length: int) -> int:
     """the sdk returns all values as unsigned, convert it back to a signed value"""
     bits = 8 * length
     if value >= 1 << (bits - 1):
@@ -90,7 +93,7 @@ class BlockingPortHandler(dynamixel.PortHandler):
     # latency timer a sync read of a few servos takes longer than the sdk timeout
     MIN_PACKET_TIMEOUT = 10.0  # milliseconds
 
-    def __init__(self, port_name, latency_timer=dynamixel.port_handler.LATENCY_TIMER):
+    def __init__(self, port_name: str, latency_timer: float = dynamixel.port_handler.LATENCY_TIMER) -> None:
         """
         :param port_name: the serial port the usb adapter is connected to
         :param latency_timer: the latency timer of the usb adapter in milliseconds
@@ -98,18 +101,18 @@ class BlockingPortHandler(dynamixel.PortHandler):
         super().__init__(port_name)
         self.latency_timer = latency_timer
 
-    def setupPort(self, cflag_baud):
+    def setupPort(self, cflag_baud: int) -> bool:
         result = super().setupPort(cflag_baud)
         # setting the timeout reconfigures the port, so it is only done once when the port is opened
         self.ser.timeout = self.READ_TIMEOUT
         return result
 
-    def setPacketTimeout(self, packet_length):
+    def setPacketTimeout(self, packet_length: int) -> None:
         self.packet_start_time = self.getCurrentTime()
         self.packet_timeout = max((self.tx_time_per_byte * packet_length) + (self.latency_timer * 2.0) + 2.0,
                                   self.MIN_PACKET_TIMEOUT)
 
-    def getCurrentTime(self):
+    def getCurrentTime(self) -> float:
         """the current time in milliseconds
 
         perf_counter is used because time.monotonic only has a resolution of 15.6ms on windows, which is longer than
@@ -118,7 +121,7 @@ class BlockingPortHandler(dynamixel.PortHandler):
         return time.perf_counter() * 1000.0
 
 
-def get_latency_timer(port):
+def get_latency_timer(port: str) -> int | None:
     """returns the latency timer of the usb adapter on the given port in milliseconds, or None if it is unknown"""
     try:
         if sys.platform.startswith('linux'):
@@ -130,13 +133,13 @@ def get_latency_timer(port):
     return None
 
 
-def _get_linux_latency_timer(port, sysfs_root='/sys/bus/usb-serial/devices'):
+def _get_linux_latency_timer(port: str, sysfs_root: str = '/sys/bus/usb-serial/devices') -> int:
     device = os.path.basename(os.path.realpath(port))
     with open(os.path.join(sysfs_root, device, 'latency_timer')) as latency_file:
         return int(latency_file.read().strip())
 
 
-def _get_windows_latency_timer(port):
+def _get_windows_latency_timer(port: str) -> int | None:
     """the ftdi driver stores the latency timer per device in the registry, next to the com port name"""
     import winreg
 
@@ -155,7 +158,7 @@ def _get_windows_latency_timer(port):
     return None
 
 
-def _registry_subkeys(key):
+def _registry_subkeys(key: Any) -> Iterator[str]:
     import winreg
 
     index = 0
@@ -167,7 +170,7 @@ def _registry_subkeys(key):
         index += 1
 
 
-def get_port_handler(port, baud_rate):
+def get_port_handler(port: str, baud_rate: int) -> BlockingPortHandler:
     latency_timer = get_latency_timer(port)
     if latency_timer is None:
         latency_timer = dynamixel.port_handler.LATENCY_TIMER
@@ -187,7 +190,7 @@ def get_port_handler(port, baud_rate):
     return port_handler
 
 
-def list_dynamixel_adapters():
+def list_dynamixel_adapters() -> list[tuple[str, str]]:
     """returns a list of (port, adapter name) of the connected usb adapters for dynamixel servos
 
     The adapters are recognised by their usb vendor and product id, other serial ports are never opened. Opening
@@ -201,7 +204,7 @@ def list_dynamixel_adapters():
     return sorted(adapters)
 
 
-def ping_servos(port, config, servo_ids):
+def ping_servos(port: str, config: ModuleType, servo_ids: Iterable[int]) -> dict[int, int]:
     """returns a mapping of servo id to model number of the servos that respond on the given port
 
     raises a serial.SerialException when the port can't be opened, e.g. because it is in use by another program
@@ -219,7 +222,7 @@ def ping_servos(port, config, servo_ids):
         port_handler.closePort()
 
 
-def find_dynamixel_port(config, servo_ids):
+def find_dynamixel_port(config: ModuleType, servo_ids: Sequence[int]) -> str:
     """returns the port of the usb adapter on which at least one of the servos responds"""
     adapters = list_dynamixel_adapters()
     if not adapters:
@@ -239,7 +242,8 @@ def find_dynamixel_port(config, servo_ids):
                          % (list(servo_ids), [port for port, _ in adapters]))
 
 
-def setup_dynamixel_handlers(port, config, servo_ids):
+def setup_dynamixel_handlers(port: str | None, config: ModuleType,
+                             servo_ids: Sequence[int]) -> tuple[BlockingPortHandler, Any]:
     """Initialize and return the dynamixel port and packet handler for reading and writing to and from servos
 
     :param port: the serial port of the usb adapter, or None to find the port on which the servos respond

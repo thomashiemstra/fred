@@ -1,3 +1,5 @@
+from typing import Any
+
 import matplotlib.pyplot as plt
 from numpy import cos, sin
 import numpy as np
@@ -26,7 +28,7 @@ y_axis = np.array(y)
 z_axis = np.array(z)
 
 
-def func(variables, a, b):
+def func(variables: tuple[np.ndarray, np.ndarray], a: float, b: float) -> np.ndarray:
     a2, a3 = variables
     return a * np.cos(a2) + b * np.cos(a2 + a3)
 
@@ -42,7 +44,7 @@ y_test = np.arange(0, 0.5 * np.pi)
 z_test = fit[0] * cos(x_test) + fit[1] * cos((x_test + y_test))
 
 
-def f(x, y):
+def f(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return fit[0] * cos(x) + fit[1] * cos((x + y))
 
 
@@ -50,7 +52,7 @@ X, Y = np.meshgrid(x_axis, y_axis)
 Z = f(X, Y)
 
 fig = plt.figure()
-ax = plt.axes(projection='3d')
+ax: Any = plt.axes(projection='3d')
 ax.contour3D(X, Y, Z, 50, cmap='binary')
 ax.set_xlabel('angle_2')
 ax.set_ylabel('angle_3')

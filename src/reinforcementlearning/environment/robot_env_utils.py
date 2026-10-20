@@ -1,10 +1,14 @@
+from collections.abc import Iterable, Sequence
+
 import numpy as np
 from numba import jit
 from numpy import pi
 import pybullet as p
 
+from src.kinematics.kinematics_utils import Pose
 
-def get_target_points(target_pose, d6):
+
+def get_target_points(target_pose: Pose, d6: float) -> tuple[None, np.ndarray, np.ndarray]:
     """gives the target 3d location for the control points on the robot
     point_3 is the tip of the gripper
     point_2 is the origin of frame 6
@@ -21,7 +25,8 @@ def get_target_points(target_pose, d6):
 
 
 @jit(nopython=True)
-def calculate_target_pose(x_3, y_3, z_3, t, d6):
+def calculate_target_pose(x_3: float, y_3: float, z_3: float, t: np.ndarray,
+                          d6: float) -> tuple[None, np.ndarray, np.ndarray]:
     point_3 = np.array([x_3, y_3, z_3])
 
     x_2 = x_3 - d6 * t[0, 2]
@@ -34,7 +39,9 @@ def calculate_target_pose(x_3, y_3, z_3, t, d6):
     return point_1, point_2, point_3
 
 
-def get_attractive_force_world(control_points, target_points, attractive_cutoff_distance=2, weights=None):
+def get_attractive_force_world(control_points: np.ndarray, target_points: np.ndarray,
+                               attractive_cutoff_distance: float = 2,
+                               weights: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """Calculates the vectors pointing from the control points on the robot to the target points
     The norm of the vectors will be between 0 and attractive_cutoff_distance
 
@@ -61,7 +68,8 @@ def get_attractive_force_world(control_points, target_points, attractive_cutoff_
 
 
 @jit(nopython=True)
-def calculate_forces(number_of_control_points, control_points, target_points, attractive_cutoff_distance, weights):
+def calculate_forces(number_of_control_points: int, control_points: np.ndarray, target_points: np.ndarray,
+                     attractive_cutoff_distance: float, weights: np.ndarray) -> tuple[np.ndarray, float]:
     workspace_forces = np.zeros((number_of_control_points, 3))
 
     total_distance = 0
@@ -87,7 +95,8 @@ def calculate_forces(number_of_control_points, control_points, target_points, at
     return workspace_forces, total_distance
 
 
-def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id, repulsive_cutoff_distance):
+def get_normal_and_distance(robot_body_id: int, obstacle_id: int, control_point_id: int, physics_client_id: int,
+                            repulsive_cutoff_distance: float) -> tuple[Sequence[float], float]:
     res = p.getClosestPoints(bodyA=robot_body_id,
                              bodyB=obstacle_id,
                              linkIndexA=control_point_id,
@@ -101,9 +110,9 @@ def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physic
     return normal_on_b, d * 100
 
 
-def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids,
-                               physics_client_id, repulsive_cutoff_distance=2,
-                               clip_force=None):
+def get_repulsive_forces_world(robot_body_id: int, control_points: np.ndarray, obstacle_ids: Iterable[int],
+                               physics_client_id: int, repulsive_cutoff_distance: float = 2,
+                               clip_force: float | None = None) -> np.ndarray:
     nr_of_control_points = control_points.shape[0]
     workspace_forces = np.zeros((3, nr_of_control_points))
 
@@ -131,6 +140,7 @@ def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids,
             if clip_force is not None:
                 constant_term = np.clip(constant_term, 0, clip_force)
 
+            assert closest_obstacle_normal is not None
             workspace_forces[i][0] += constant_term * closest_obstacle_normal[0]
             workspace_forces[i][1] += constant_term * closest_obstacle_normal[1]
             workspace_forces[i][2] += constant_term * closest_obstacle_normal[2]
@@ -138,7 +148,7 @@ def get_repulsive_forces_world(robot_body_id, control_points, obstacle_ids,
     return workspace_forces
 
 
-def get_control_point_pos(robot_body_id, point_id):
+def get_control_point_pos(robot_body_id: int, point_id: int) -> np.ndarray:
     """Get the 3d position of a control point on the robot
 
     Args:
@@ -150,11 +160,14 @@ def get_control_point_pos(robot_body_id, point_id):
     return np.array(pos) * 100  # convert from meters to centimeters
 
 
-def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces, attr_lines, rep_lines, line_size=4):
+def draw_debug_lines(physics_client_id: int, control_points: np.ndarray, attr_forces: np.ndarray,
+                     rep_forces: np.ndarray, attr_lines: list[int | None] | None,
+                     rep_lines: list[int | None] | None,
+                     line_size: float = 4) -> tuple[list[int | None], list[int | None]]:
     number_of_control_points = control_points.shape[0]
 
-    new_attr_lines = [None] * number_of_control_points
-    new_rep_lines = [None] * number_of_control_points
+    new_attr_lines: list[int | None] = [None] * number_of_control_points
+    new_rep_lines: list[int | None] = [None] * number_of_control_points
 
     for i in range(number_of_control_points):
         control_point_pos = control_points[i].position
@@ -178,7 +191,7 @@ def draw_debug_lines(physics_client_id, control_points, attr_forces, rep_forces,
     return new_attr_lines, new_rep_lines
 
 
-def get_clipped_state(angles):
+def get_clipped_state(angles: Sequence[float] | np.ndarray) -> np.ndarray:
     res = np.zeros(len(angles), dtype=np.float64)
     res[1] = np.clip(angles[1], 0, pi)
     res[2] = np.clip(angles[2], 0, pi)
@@ -189,8 +202,8 @@ def get_clipped_state(angles):
     return res
 
 
-def get_normalized_current_angles(angles):
-    res = []
+def get_normalized_current_angles(angles: Sequence[float] | np.ndarray) -> list[float]:
+    res: list[float] = []
     array_length = len(angles)
 
     if array_length == 0:
@@ -210,8 +223,8 @@ def get_normalized_current_angles(angles):
     return res
 
 
-def get_de_normalized_current_angles(normalized_angles):
-    res = []
+def get_de_normalized_current_angles(normalized_angles: Sequence[float] | np.ndarray) -> list[float]:
+    res: list[float] = []
     array_length = len(normalized_angles)
     if array_length == 0:
         return res

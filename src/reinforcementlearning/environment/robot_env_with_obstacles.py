@@ -1,19 +1,30 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.occupancy_grid_util import create_hilbert_curve_from_obstacles
 from src.reinforcementlearning.environment.occupancy_grid_util import create_occupancy_grid_from_obstacles
+from src.reinforcementlearning.environment.pose_recorder import PoseRecorder
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.scenario import Scenario, \
     sensible_scenarios
+from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
 from src.utils.obstacle import BoxObstacle
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
+if TYPE_CHECKING:
+    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+
 
 class RobotEnvWithObstacles(RobotEnv):
 
-    def __init__(self, use_gui=False, raw_obs=False, scenarios=None, is_eval=False, robot_controller=None,
-                 angle_control=False, draw_debug_lines=False, pose_recorder=None):
+    def __init__(self, use_gui: bool = False, raw_obs: bool = False, scenarios: list[Scenario] | None = None,
+                 is_eval: bool = False, robot_controller: SimulatedRobotController | CombinedRobot | None = None,
+                 angle_control: bool = False, draw_debug_lines: bool = False,
+                 pose_recorder: PoseRecorder | None = None) -> None:
         if scenarios is None:
             raise ValueError("RobotEnvWithObstacles should be initialized with scenarios, "
                              "otherwise we would default to no obstacle scenarios!")
@@ -30,14 +41,14 @@ class RobotEnvWithObstacles(RobotEnv):
         self._grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y, grid_size=self._grid_size)
 
-    def _reset(self):
+    def _reset(self) -> Any:
         super(RobotEnvWithObstacles, self)._reset()
         self._grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y, grid_size=self._grid_size)
         observation, _ = self._get_observations()
         return ts.restart(observation)
 
-    def _get_observations(self):
+    def _get_observations(self) -> tuple[dict[str, np.ndarray], float]:
         no_obstacle_obs, total_distance = super()._get_observations()
 
         grid = self._grid
@@ -49,7 +60,7 @@ class RobotEnvWithObstacles(RobotEnv):
 
         return total_observation, total_distance
 
-    def show_occupancy_grid_and_curve(self):
+    def show_occupancy_grid_and_curve(self) -> None:
         grid = create_occupancy_grid_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,
                                                           grid_len_y=self._grid_len_y, grid_size=self._grid_size)
         curve = create_hilbert_curve_from_obstacles(self._obstacles, grid_len_x=self._grid_len_x,

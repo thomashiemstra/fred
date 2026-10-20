@@ -1,10 +1,15 @@
+from collections.abc import Sequence
+
 import numpy as np
 import logging as log
 from numpy import pi
 
+from src.kinematics.kinematics_utils import Pose
+
 
 # Unused code, but it will probably come in handy later
-def get_rotation_matrix_params(start_pose, stop_pose, center):
+def get_rotation_matrix_params(start_pose: Pose, stop_pose: Pose, center: Sequence[float] | np.ndarray
+                               ) -> tuple[np.ndarray, list[int], np.ndarray, np.ndarray] | None:
     """
     We want the coordinate system for a plane spanned by (x,y,z) of the 2 poses and the center
     x will point from start_pose to stop_pose
@@ -44,7 +49,7 @@ def get_rotation_matrix_params(start_pose, stop_pose, center):
     return np.column_stack((x, y, z)), [0, 0, 0], p_0_p_1, p_0_p_c
 
 
-def get_center(pose1, pose2):
+def get_center(pose1: Pose, pose2: Pose) -> np.ndarray | None:
     """
     Use two poses both at the same z-height to determine a point in space
     Used to have the camera always look at the same point while moving
@@ -89,14 +94,14 @@ def get_center(pose1, pose2):
         x_center = pose2.x
         y_center = b1
     else:
-        x_center = (b2 - b1) / (a1 - a2)
-        y_center = a1*x_center + b1
+        x_center = (b2 - b1) / (a1 - a2)  # type: ignore[operator]  # a and b are only none for alpha 0, handled above
+        y_center = a1*x_center + b1  # type: ignore[operator]  # same
     z_center = pose1.z
 
     return np.array([x_center, y_center, z_center])
 
 
-def get_line_coefficients(alpha, x, y):
+def get_line_coefficients(alpha: float, x: float, y: float) -> tuple[float | None, float | None]:
     """
     calculates y = a*x + b
     find the coefficients of the line passing through x,y with gradient determined by the angle alpha

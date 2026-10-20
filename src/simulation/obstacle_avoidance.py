@@ -1,5 +1,6 @@
 import inspect
 import os
+from typing import Any
 
 import pybullet as p
 from functools import lru_cache
@@ -29,7 +30,7 @@ control_point_radii = np.array([5, 5, 3])
 control_point_base_radius = 1
 
 
-def get_target_points(pose, d6):
+def get_target_points(pose: Pose, d6: float) -> tuple[None, np.ndarray, np.ndarray]:
     x_3, y_3, z_3 = pose.x, pose.y, pose.z
     point_3 = np.array([x_3, y_3, z_3])
 
@@ -44,12 +45,13 @@ def get_target_points(pose, d6):
     return point_1, point_2, point_3
 
 
-def get_control_point_pos(robot_body_id, point_id):
+def get_control_point_pos(robot_body_id: int, point_id: int) -> np.ndarray:
     _, _, _, _, pos, _ = p.getLinkState(robot_body_id, point_id)
     return np.array(pos) * 100  # convert from meters to centimeters
 
 
-def get_attractive_force_world(control_points, target_points, d, weights=None):
+def get_attractive_force_world(control_points: np.ndarray, target_points: np.ndarray, d: float,
+                               weights: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     if control_points.size != target_points.size:
         raise Exception("control points and target points should have the same dimension!")
     num_points = control_points.shape[0]
@@ -58,7 +60,7 @@ def get_attractive_force_world(control_points, target_points, d, weights=None):
         weights = np.ones(num_points)
     workspace_forces = np.zeros((total_control_points, 3))
 
-    total_distance = 0
+    total_distance: float = 0
 
     for i in range(num_points):
         vector = control_points[i] - target_points[i]  # the vector from control point to target point
@@ -73,13 +75,14 @@ def get_attractive_force_world(control_points, target_points, d, weights=None):
             workspace_forces[i][0] = -weights[i] * vector[0]
             workspace_forces[i][1] = -weights[i] * vector[1]
             workspace_forces[i][2] = -weights[i] * vector[2]
-        total_distance += distance
+        total_distance += distance  # type: ignore[assignment]  # norm returns np.floating, a float64 at runtime
 
     return workspace_forces, total_distance
 
 
 @lru_cache(maxsize=32)
-def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physics_client_id):
+def get_normal_and_distance(robot_body_id: int, obstacle_id: int, control_point_id: int,
+                            physics_client_id: int) -> tuple[Any, float]:
     _, _, _, _, _, _, _, normal_on_b, d, *x = p.getClosestPoints(bodyA=robot_body_id, bodyB=obstacle_id,
                                                                  linkIndexA=control_point_id,
                                                                  distance=repulsive_cutoff_distance,
@@ -87,7 +90,8 @@ def get_normal_and_distance(robot_body_id, obstacle_id, control_point_id, physic
     return normal_on_b, d*100 + control_point_base_radius
 
 
-def get_repulsive_forces_world(robot_body_id, control_point_ids, obstacle_ids, physics_client_id):
+def get_repulsive_forces_world(robot_body_id: int, control_point_ids: np.ndarray, obstacle_ids: np.ndarray,
+                               physics_client_id: int) -> np.ndarray:
     workspace_forces = np.zeros((total_control_points, 3))
 
     get_normal_and_distance.cache_clear()
@@ -116,11 +120,13 @@ def get_repulsive_forces_world(robot_body_id, control_point_ids, obstacle_ids, p
     return workspace_forces
 
 
-def draw_debug_lines(physics_client_id, robot_id, control_point_ids, attr_forces, rep_forces, attr_lines, rep_lines):
+def draw_debug_lines(physics_client_id: int, robot_id: int, control_point_ids: np.ndarray, attr_forces: np.ndarray,
+                     rep_forces: np.ndarray, attr_lines: list[int | None] | None,
+                     rep_lines: list[int | None] | None) -> tuple[list[int | None], list[int | None]]:
     number_of_control_points = control_point_ids.size
 
-    new_attr_lines = [None] * number_of_control_points
-    new_rep_lines = [None] * number_of_control_points
+    new_attr_lines: list[int | None] = [None] * number_of_control_points
+    new_rep_lines: list[int | None] = [None] * number_of_control_points
 
     for i in range(number_of_control_points):
         control_point_pos = get_control_point_pos(robot_id, control_point_ids[i])
@@ -144,7 +150,7 @@ def draw_debug_lines(physics_client_id, robot_id, control_point_ids, attr_forces
     return new_attr_lines, new_rep_lines
 
 
-def create_visual_sphere(body_id, location, physics_client):
+def create_visual_sphere(body_id: int, location: np.ndarray, physics_client: int) -> None:
     target_sphere_1 = p.createCollisionShape(p.GEOM_SPHERE, radius=0.01, physicsClientId=physics_client)
     target_sphere_1_id = p.createMultiBody(0, target_sphere_1, -1, location/100, [0, 0, 0, 1], physicsClientId=physics_client)
     p.changeVisualShape(target_sphere_1_id, -1, rgbaColor=[1, 1, 0, 1], physicsClientId=physics_client)
@@ -163,7 +169,7 @@ p.setGravity(0, 0, -10)
 # planeId = p.loadURDF("urdf/plane.urdf")
 p.setRealTimeSimulation(1)
 
-current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe is optional in typeshed
 start_pos = [0, 0, 0]
 start_orientation = p.getQuaternionFromEuler([0, 0, 0])
 body_id = p.loadURDF(current_dir + "/urdf/fred_with_spheres.urdf", start_pos, start_orientation,

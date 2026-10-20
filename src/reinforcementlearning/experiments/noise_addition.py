@@ -1,3 +1,5 @@
+from typing import Any
+
 from tf_agents.environments import suite_gym, tf_py_environment
 from tf_agents.networks import actor_distribution_network
 from tf_agents.networks import normal_projection_network
@@ -14,9 +16,9 @@ observation_spec = time_step_spec.observation
 action_spec = tf_env.action_spec()
 
 
-def normal_projection_net(action_spec,
-                          init_action_stddev=0.35,
-                          init_means_output_factor=0.1):
+def normal_projection_net(action_spec: Any,
+                          init_action_stddev: float = 0.35,
+                          init_means_output_factor: float = 0.1) -> Any:
     del init_action_stddev
     return normal_projection_network.NormalProjectionNetwork(
         action_spec,

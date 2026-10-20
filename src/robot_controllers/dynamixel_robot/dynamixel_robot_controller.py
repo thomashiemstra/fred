@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import logging
 import threading
+from collections.abc import Iterable
 from timeit import default_timer as timer
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -14,6 +18,11 @@ from src.utils.decorators import synchronized_with_lock
 from src.utils.movement import move_from_current_angles
 from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
 
+if TYPE_CHECKING:
+    from src.kinematics.kinematics_utils import Pose, RobotConfig
+    from src.robot_controllers.dynamixel_robot.position_recorder import ServoPositionRecorder
+    from src.robot_controllers.dynamixel_robot.servo_config import ServoConfig
+
 logger = logging.getLogger(__name__)
 
 ARM_IDS = (1, 2, 3, 4, 5, 6)
@@ -23,8 +32,8 @@ GRIPPER_ID = 7
 # Facade for the robot as a whole, abstracting away the servo handling
 class DynamixelRobotController(AbstractRobotController):
 
-    def __init__(self, robot_config, port_handler, packet_handler, servo_config, perform_safety_checks=True,
-                 print_position_error=False):
+    def __init__(self, robot_config: RobotConfig, port_handler: Any, packet_handler: Any, servo_config: ServoConfig,
+                 perform_safety_checks: bool = True, print_position_error: bool = False) -> None:
         """
         :param robot_config: a RobotConfig object
         :param port_handler: the port handler of the usb adapter the servos are connected to
@@ -60,7 +69,7 @@ class DynamixelRobotController(AbstractRobotController):
                                           servo_config.buses)
         self.bus_lock = self.servo_handler.bus_lock
         # the servos that are warmer than the warning temperature, so the warning is only logged once
-        self._warm_servos = set()
+        self._warm_servos: set[int] = set()
 
         self.initialize_servos()
         self._current_angles = self._read_initial_angles()
@@ -69,18 +78,18 @@ class DynamixelRobotController(AbstractRobotController):
 
         self.gripper_state = 0  # 0 is completely open 100 is completely closed
         self.counter = 0
-        self._recorder = None
+        self._recorder: ServoPositionRecorder | None = None
 
-    def reboot_all_servos(self):
+    def reboot_all_servos(self) -> None:
         """reboot the servos and set them up again, the torque is disabled after a reboot"""
         if not self.servo_handler.reboot():
             raise DynamixelError("not all servos came back after the reboot")
         self.initialize_servos()
 
-    def set_recorder(self, recorder):
+    def set_recorder(self, recorder: ServoPositionRecorder) -> None:
         self._recorder = recorder
 
-    def initialize_servos(self):
+    def initialize_servos(self) -> None:
         success = self.set_control_mode()
         success = success & self.set_velocity_profile()
         success = success & self.set_pid()
@@ -89,14 +98,14 @@ class DynamixelRobotController(AbstractRobotController):
         if self.perform_safety_checks and not success:
             raise DynamixelError("failed to setup the dynamixel robot")
 
-    def _read_initial_angles(self):
+    def _read_initial_angles(self) -> np.ndarray | None:
         angles = self.get_current_angles()
         if angles is None and self.perform_safety_checks:
             raise DynamixelError("failed to read the initial position of the dynamixel robot")
         return angles
 
     @synchronized_with_lock("bus_lock")
-    def enable_servos(self):
+    def enable_servos(self) -> bool:
         """enable the torque of all servos, returns True on success"""
         if self.perform_safety_checks and not self.safety_check():
             logger.error('failed the safety check, disabling servos!')
@@ -122,38 +131,38 @@ class DynamixelRobotController(AbstractRobotController):
             self.disable_servos()
         return success
 
-    def safety_check(self):
+    def safety_check(self) -> bool:
         positions = self.get_current_positions()
         if positions is None:
             return False
         return servo_1_check(positions) and servo_2_check(positions)
 
-    def disable_servos(self):
+    def disable_servos(self) -> bool:
         """disable the torque of all servos, returns True on success"""
         success = self.servo_handler.set_torque(enable=False)
         if not success:
             logger.error('failed to disable all servos!')
         return success
 
-    def move_to_pose(self, pose):
+    def move_to_pose(self, pose: Pose) -> tuple[float, float]:
         angles = inverse_kinematics(pose, self.robot_config)
-        recommended_time = get_recommended_wait_time(self._current_angles, angles)
+        recommended_time = get_recommended_wait_time(self._current_angles, angles)  # type: ignore[arg-type]  # none when the first read failed
         time_taken = self.move_servos(angles)
         return recommended_time, time_taken
 
-    def move_to_pose_and_give_new_angles(self, pose):
+    def move_to_pose_and_give_new_angles(self, pose: Pose) -> np.ndarray:
         angles = inverse_kinematics(pose, self.robot_config)
         self.move_servos(angles)
         return angles
 
-    def get_current_pose(self):
+    def get_current_pose(self) -> Pose | None:
         """returns the current pose of the end effector, or None if the servos could not be read"""
         angles = self.get_current_angles()
         if angles is None:
             return None
         return forward_kinematics(angles, self.robot_config)
 
-    def get_angle_limits(self):
+    def get_angle_limits(self) -> dict[int, tuple[float, float]]:
         """returns a mapping of joint number to the (min angle, max angle) the servo can reach"""
         limits = {}
         for servo_id in ARM_IDS:
@@ -161,7 +170,7 @@ class DynamixelRobotController(AbstractRobotController):
             limits[servo_id] = (min(servo.min_angle, servo.max_angle), max(servo.min_angle, servo.max_angle))
         return limits
 
-    def get_hardware_errors(self):
+    def get_hardware_errors(self) -> dict[int, list[str]] | None:
         """
         returns a mapping of servo id to the names of its hardware errors, for the servos that shut down because of
         one, or None if the servos could not be read. A servo with a hardware error disables its torque and ignores
@@ -176,7 +185,7 @@ class DynamixelRobotController(AbstractRobotController):
                              'servos to clear the error', servo_id, ', '.join(names), temperature, voltage)
         return errors
 
-    def get_overheating_servos(self):
+    def get_overheating_servos(self) -> dict[int, int] | None:
         """
         returns a mapping of servo id to temperature of the servos that are warmer than the temperature limit of the
         servo configuration, or None if the temperatures could not be read. A warning is logged once when a servo gets
@@ -200,7 +209,7 @@ class DynamixelRobotController(AbstractRobotController):
             logger.error('servo %d is too warm: %dC, the limit is %dC', servo_id, temperature, limit)
         return overheating
 
-    def get_servos_outside_calibrated_range(self):
+    def get_servos_outside_calibrated_range(self) -> dict[int, tuple[int, tuple[int, int]]] | None:
         """returns a mapping of servo id to (present position, calibrated range) of the arm servos outside their
         calibrated range, their angle is clamped to the range so it differs from the actual angle"""
         outside = {}
@@ -213,14 +222,14 @@ class DynamixelRobotController(AbstractRobotController):
                 outside[servo_id] = (servo.current_position, calibrated_range)
         return outside
 
-    def get_current_gripper_position(self):
+    def get_current_gripper_position(self) -> np.ndarray:
         angles = self.get_current_angles()
-        _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)
+        _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)  # type: ignore[arg-type]  # none when the read failed
         return p6
 
     # returns the time in seconds it took to move the servos
     @synchronized_with_lock("bus_lock")
-    def move_servos(self, angles):
+    def move_servos(self, angles: np.ndarray) -> float:
         start = timer()
 
         if self.print_position_error:
@@ -242,7 +251,7 @@ class DynamixelRobotController(AbstractRobotController):
         end = timer()
         return end - start
 
-    def _print_position_error(self):
+    def _print_position_error(self) -> None:
         """print the difference between the current position and the previous target position of each servo, the
         target without its static load compensation, so the number is the remaining sag"""
         current_positions = self.get_current_positions()
@@ -257,16 +266,16 @@ class DynamixelRobotController(AbstractRobotController):
 
         print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
 
-    def get_present_currents(self, servo_ids=ARM_IDS):
+    def get_present_currents(self, servo_ids: Iterable[int] = ARM_IDS) -> dict[int, int] | None:
         """returns a mapping of servo id to the signed present current register of the servos, or None if they
         could not be read; the unit depends on the model, see ServoHandler.read_present_current"""
         return self.servo_handler.read_present_current(list(servo_ids))
 
-    def get_temperatures_and_voltages(self, servo_ids=ARM_IDS):
+    def get_temperatures_and_voltages(self, servo_ids: Iterable[int] = ARM_IDS) -> dict[int, tuple[int, float]] | None:
         """returns a mapping of servo id to (temperature in degrees celsius, input voltage), or None on failure"""
         return self.servo_handler.read_temperature_and_voltage(list(servo_ids))
 
-    def set_gripper(self, new_gripper_state):
+    def set_gripper(self, new_gripper_state: float) -> bool:
         """
         move the gripper to the state, this returns right away. The servo moves smoothly at its profile velocity, and
         when an object blocks the gripper it squeezes the object with at most the goal current of the servo.
@@ -276,35 +285,35 @@ class DynamixelRobotController(AbstractRobotController):
         self.servo_handler.set_angle(GRIPPER_ID, new_gripper_state)
         return self.servo_handler.move_to_angles([GRIPPER_ID])
 
-    def get_gripper_state(self):
+    def get_gripper_state(self) -> float | None:
         """returns the actual state of the gripper (0 to 100), or None if it could not be read"""
         if not self.servo_handler.read_current_pos([GRIPPER_ID]):
             return None
         return self.servo_handler.get_angle(GRIPPER_ID, self.servo7.current_position)
 
-    def set_velocity_profile(self):
+    def set_velocity_profile(self) -> bool:
         return self.servo_handler.set_profile_velocity_and_acceleration()
 
-    def set_goal_current(self):
+    def set_goal_current(self) -> bool:
         return self.servo_handler.set_configured_goal_current()
 
-    def set_control_mode(self):
+    def set_control_mode(self) -> bool:
         return self.servo_handler.set_configured_operating_mode()
 
-    def set_pid(self):
+    def set_pid(self) -> bool:
         return self.servo_handler.set_pid()
 
-    def set_profile_velocity_percentage(self, percentage):
+    def set_profile_velocity_percentage(self, percentage: float) -> bool:
         return self.servo_handler.set_profile_velocity_percentage(percentage)
 
     # debug function to control single servo
-    def move_servo(self, servo_id, angle, all_angles=None):
+    def move_servo(self, servo_id: int, angle: float, all_angles: np.ndarray | None = None) -> None:
         self._check_servo_id(servo_id)
         self.servo_handler.set_angle(servo_id, angle, all_angles)
         self.servo_handler.move_to_angles([servo_id])
 
     @synchronized_with_lock("bus_lock")
-    def get_current_angles(self):
+    def get_current_angles(self) -> np.ndarray | None:
         if not self.servo_handler.read_current_pos(ARM_IDS):
             return None
 
@@ -315,7 +324,7 @@ class DynamixelRobotController(AbstractRobotController):
         return angles
 
     @synchronized_with_lock("bus_lock")
-    def get_current_positions(self):
+    def get_current_positions(self) -> np.ndarray | None:
         """returns the current positions of the servos or None if they could not be read"""
         if not self.servo_handler.read_current_pos(ARM_IDS):
             return None
@@ -325,32 +334,32 @@ class DynamixelRobotController(AbstractRobotController):
             positions[servo_id] = self.servo_handler.get_servo(servo_id).current_position
         return positions
 
-    def pose_to_angles(self, pose):
+    def pose_to_angles(self, pose: Pose) -> np.ndarray:
         return inverse_kinematics(pose, self.robot_config)
 
     @synchronized_with_lock("lock")
-    def get_status(self):
+    def get_status(self) -> bool:
         return self.status
 
     @synchronized_with_lock("lock")
-    def change_status(self, new_state):
+    def change_status(self, new_state: bool) -> None:
         self.status = new_state
 
-    def set_pid_single_servo(self, servo_id, p, i, d):
+    def set_pid_single_servo(self, servo_id: int, p: int, i: int, d: int) -> bool:
         self._check_servo_id(servo_id)
         return self.servo_handler.set_pid_single_servo(servo_id, p, i, d)
 
-    def set_servo_position(self, servo_id, pos):
+    def set_servo_position(self, servo_id: int, pos: int) -> bool:
         self._check_servo_id(servo_id)
         return self.servo_handler.move_servo_to_pos(servo_id, pos)
 
-    def get_servo_position(self, servo_id):
+    def get_servo_position(self, servo_id: int) -> int | None:
         self._check_servo_id(servo_id)
         return self.servo_handler.read_current_pos_single_servo(servo_id)
 
-    def reset_to_pose(self, pose):
+    def reset_to_pose(self, pose: Pose) -> None:
         move_from_current_angles(self, pose, 4)
 
-    def _check_servo_id(self, servo_id):
+    def _check_servo_id(self, servo_id: int) -> None:
         if servo_id not in self.servo_handler.servo_map:
             raise ValueError("unknown servo id: {}".format(servo_id))

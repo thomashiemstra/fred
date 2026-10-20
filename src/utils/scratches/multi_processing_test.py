@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 from multiprocessing import Process, Lock, Array
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from multiprocessing.sharedctypes import SynchronizedArray
+    from multiprocessing.synchronize import Lock as LockType
 
 
-def f(lock, array):
+def f(lock: LockType, array: SynchronizedArray[float]) -> None:
     while True:
         with lock:
             print("content = {}, {}, {}".format(array[0], array[1], array[2]))

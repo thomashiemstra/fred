@@ -1,0 +1,2 @@
+# the hooks run in bash, which fails on the carriage returns of crlf line endings
+.githooks/* text eol=lf

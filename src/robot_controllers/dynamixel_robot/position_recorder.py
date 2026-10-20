@@ -3,11 +3,11 @@ from src.robot_controllers.dynamixel_robot.servo import Servo
 
 class ServoPositionRecorder:
 
-    def __init__(self):
-        self._positions = []
+    def __init__(self) -> None:
+        self._positions: list[list[list[int]]] = []
         super().__init__()
 
-    def record(self, servos: list[Servo]):
+    def record(self, servos: list[Servo]) -> None:
         data =  [[1, servos[1].current_position, servos[1].target_position],
                  [2, servos[2].current_position, servos[2].target_position],
                  [3, servos[3].current_position, servos[3].target_position],
@@ -17,11 +17,11 @@ class ServoPositionRecorder:
 
         self._positions.append(data)
 
-    def print(self):
+    def print(self) -> None:
         print(self._positions)
 
-    def write(self):
+    def write(self) -> None:
         with open("output.txt", "w") as txt_file:
             for line in self._positions:
-                txt_file.write(" ".join(line) + "\n")  # works with any number of elements in a line
+                txt_file.write(" ".join(line) + "\n")  # type: ignore[arg-type]  # lines are lists, not str; works with any number of elements in a line
 

@@ -1,10 +1,15 @@
+from collections.abc import Iterable, Sequence
+
 import numpy as np
 from hilbertcurve.hilbertcurve import HilbertCurve
+
+from src.utils.obstacle import BoxObstacle
 
 max_height = 40
 
 
-def is_point_in_obstacle(point_location, obstacle_location, obstacle_half_extends, obstacle_alpha):
+def is_point_in_obstacle(point_location: np.ndarray, obstacle_location: np.ndarray | Sequence[float],
+                         obstacle_half_extends: np.ndarray | Sequence[float], obstacle_alpha: float) -> bool:
     obstacle_to_point = point_location[0:2] - obstacle_location[0:2]
 
     c, s = np.cos(obstacle_alpha), np.sin(obstacle_alpha)
@@ -19,8 +24,8 @@ def is_point_in_obstacle(point_location, obstacle_location, obstacle_half_extend
     return np.abs(x) <= half_extend_x and np.abs(y) <= half_extend_y
 
 
-def get_height_tallest_obstacle(obstacles):
-    tallest_height = 0
+def get_height_tallest_obstacle(obstacles: Iterable[BoxObstacle]) -> float:
+    tallest_height: float = 0
     for obstacle in obstacles:
         obstacle_height = obstacle.dimensions[2]
         if obstacle_height > tallest_height:
@@ -29,7 +34,7 @@ def get_height_tallest_obstacle(obstacles):
 
 
 # Return all the obstacles that are overlapping the point
-def get_obstacles_for_point(point_location, obstacles):
+def get_obstacles_for_point(point_location: np.ndarray, obstacles: Iterable[BoxObstacle]) -> np.ndarray:
     res = []
     for obstacle in obstacles:
         if is_point_in_obstacle(point_location, obstacle.base_center_position, obstacle.half_extends, obstacle.alpha):
@@ -37,7 +42,8 @@ def get_obstacles_for_point(point_location, obstacles):
     return np.array(res)
 
 
-def create_occupancy_grid_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40, grid_size=5):
+def create_occupancy_grid_from_obstacles(obstacles: Iterable[BoxObstacle] | None, grid_len_x: int = 60,
+                                         grid_len_y: int = 40, grid_size: int = 5) -> np.ndarray:
     if grid_len_x % grid_size != 0:
         raise ValueError("grid_len_x has to be a multiple of grid_size")
     if grid_len_y % grid_size != 0:
@@ -66,7 +72,8 @@ def create_occupancy_grid_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40
     return result
 
 
-def create_hilbert_curve_from_obstacles(obstacles, grid_len_x=60, grid_len_y=40, iteration=3):
+def create_hilbert_curve_from_obstacles(obstacles: Iterable[BoxObstacle] | None, grid_len_x: int = 60,
+                                        grid_len_y: int = 40, iteration: int = 3) -> np.ndarray:
     dimension = 2
     hilbert_curve = HilbertCurve(iteration, dimension)
 

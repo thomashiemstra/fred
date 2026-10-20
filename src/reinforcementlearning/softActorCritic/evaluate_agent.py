@@ -10,11 +10,11 @@ from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
 from tf_agents.environments import tf_py_environment
 
 
-def main():
+def main() -> None:
     checkpoint_dir = 'rs_01_grid_new_network'
     robot_env_no_obstacles = False
 
-    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe never returns none on cpython
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
 
     train_dir = os.path.join(root_dir, 'train')

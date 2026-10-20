@@ -2,3 +2,7 @@
 dynamixel-sdk==4.1.0
 # builds the urdf of the simulated robot from fred.xacro (src/simulation/build_urdf.py)
 xacro==2.1.1
+# the type check of the pre-commit hook (.githooks/pre-commit, mypy.ini)
+mypy==2.4.0
+types-PyYAML==6.0.12.20260906
+types-pyserial==3.5.0.20260712

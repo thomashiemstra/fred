@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# runs the tests before every commit, enable it once per clone with: git config core.hooksPath .githooks
+# skip it for a single commit with: git commit --no-verify
+
+echo "Running pre-commit hook"
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# the tests only mean something with the packages of the project venv, its layout differs between windows and linux
+if [ -x venv/Scripts/python.exe ]; then
+  python=venv/Scripts/python.exe
+elif [ -x venv/bin/python ]; then
+  python=venv/bin/python
+else
+  echo "No venv found in $(pwd)/venv, create it and install requirements.txt before committing"
+  exit 1
+fi
+
+# the type check is fast, so it goes before the tests, mypy.ini says what is checked and how strictly
+if ! "$python" -m mypy; then
+  echo "The type check must pass before commit!"
+  exit 1
+fi
+
+# the test files are named *_tests.py and *_test.py, which the default pattern test*.py misses
+if ! "$python" -m unittest discover -s tests -t . -p "*test*.py"; then
+  echo "Tests must pass before commit!"
+  exit 1
+fi

@@ -28,7 +28,7 @@ plot_x = np.array(x)
 plot_y = np.array(y)
 
 
-def func(variables, a):
+def func(variables: np.ndarray, a: float) -> np.ndarray:
     a3 = variables
     return a * np.cos(a3)
 

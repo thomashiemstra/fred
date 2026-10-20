@@ -2,6 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from typing import Any
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tf_agents.distributions import utils as distribution_utils
@@ -11,7 +13,7 @@ from tf_agents.specs import distribution_spec
 from tf_agents.specs import tensor_spec
 
 
-def tanh_squash_to_spec(inputs, spec):
+def tanh_squash_to_spec(inputs: Any, spec: Any) -> Any:
     """Maps inputs with arbitrary range to range defined by spec using `tanh`."""
     means = (spec.maximum + spec.minimum) / 2.0
     magnitudes = (spec.maximum - spec.minimum) / 2.0
@@ -22,15 +24,15 @@ def tanh_squash_to_spec(inputs, spec):
 class NormalProjectionNetworkTrainable(network.DistributionNetwork):
 
     def __init__(self,
-                 sample_spec,
-                 activation_fn=None,
-                 init_means_output_factor=0.01,
-                 init_stds_output_factor=0.5,
-                 std_bias_initializer_value=0.0,
-                 mean_transform=tanh_squash_to_spec,
-                 std_transform=tf.nn.softplus,
-                 scale_distribution=False,
-                 name='NormalProjectionNetwork'):
+                 sample_spec: Any,
+                 activation_fn: Any = None,
+                 init_means_output_factor: float = 0.01,
+                 init_stds_output_factor: float = 0.5,
+                 std_bias_initializer_value: float = 0.0,
+                 mean_transform: Any = tanh_squash_to_spec,
+                 std_transform: Any = tf.nn.softplus,
+                 scale_distribution: bool = False,
+                 name: str = 'NormalProjectionNetwork') -> None:
         """Creates an instance of NormalProjectionNetwork.
 
         Args:
@@ -86,7 +88,7 @@ class NormalProjectionNetworkTrainable(network.DistributionNetwork):
                 value=std_bias_initializer_value),
             name='stddev_projection_layer')
 
-    def _output_distribution_spec(self, sample_spec, network_name):
+    def _output_distribution_spec(self, sample_spec: Any, network_name: str) -> Any:
         input_param_shapes = tfp.distributions.Normal.param_static_shapes(
             sample_spec.shape)
 
@@ -98,7 +100,7 @@ class NormalProjectionNetworkTrainable(network.DistributionNetwork):
             for name, shape in input_param_shapes.items()
         }
 
-        def distribution_builder(*args, **kwargs):
+        def distribution_builder(*args: Any, **kwargs: Any) -> Any:
             distribution = tfp.distributions.Normal(*args, **kwargs)
             if self._scale_distribution:
                 return distribution_utils.scale_distribution_to_spec(
@@ -108,7 +110,7 @@ class NormalProjectionNetworkTrainable(network.DistributionNetwork):
         return distribution_spec.DistributionSpec(
             distribution_builder, input_param_spec, sample_spec=sample_spec)
 
-    def call(self, inputs, outer_rank, training=False, mask=None):
+    def call(self, inputs: Any, outer_rank: int, training: bool = False, mask: Any = None) -> tuple[Any, tuple[()]]:
         if inputs.dtype != self._sample_spec.dtype:
             raise ValueError(
                 'Inputs to NormalProjectionNetwork must match the sample_spec.dtype.')
@@ -143,7 +145,7 @@ class NormalProjectionNetworkTrainable(network.DistributionNetwork):
 
         return self.output_spec.build_distribution(loc=means, scale=stds), ()
 
-    def call_raw(self, inputs, outer_rank, training=False, mask=None):
+    def call_raw(self, inputs: Any, outer_rank: int, training: bool = False, mask: Any = None) -> tuple[Any, Any]:
         if inputs.dtype != self._sample_spec.dtype:
             raise ValueError(
                 'Inputs to NormalProjectionNetwork must match the sample_spec.dtype.')

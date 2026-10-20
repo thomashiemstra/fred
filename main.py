@@ -9,7 +9,7 @@ flags.DEFINE_boolean('use_simulation', False, 'Use the simulation instead of the
 FLAGS = flags.FLAGS
 
 
-def main(_):
+def main(_: list[str]) -> None:
     global_constants.use_simulation = FLAGS.use_simulation
     global_constants.root_dir = os.getcwd()
     server.start_server()

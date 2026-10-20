@@ -1,3 +1,5 @@
+from typing import Any
+
 import tensorflow as tf
 from tf_agents.agents import tf_agent
 from tf_agents.agents import SacAgent
@@ -11,14 +13,18 @@ from tf_agents.utils import nest_utils
 
 
 class CustomSacAgent(SacAgent):
-    def __init__(self, time_step_spec, action_spec, critic_network, actor_network, actor_optimizer, critic_optimizer,
-                 alpha_optimizer, actor_loss_weight=1.0, critic_loss_weight=0.5, alpha_loss_weight=1.0,
-                 actor_policy_ctor=actor_policy.ActorPolicy, critic_network_2=None, target_critic_network=None,
-                 target_critic_network_2=None, target_update_tau=1.0, target_update_period=1,
-                 td_errors_loss_fn=tf.math.squared_difference, gamma=1.0, reward_scale_factor=1.0,
-                 initial_log_alpha=0.0, use_log_alpha_in_alpha_loss=True, target_entropy=None, gradient_clipping=None,
-                 debug_summaries=False, summarize_grads_and_vars=False, train_step_counter=None, name=None,
-                 bc_errors_loss_fn=tf.math.squared_difference):
+    def __init__(self, time_step_spec: Any, action_spec: Any, critic_network: Any, actor_network: Any,
+                 actor_optimizer: Any, critic_optimizer: Any, alpha_optimizer: Any, actor_loss_weight: float = 1.0,
+                 critic_loss_weight: float = 0.5, alpha_loss_weight: float = 1.0,
+                 actor_policy_ctor: Any = actor_policy.ActorPolicy, critic_network_2: Any = None,
+                 target_critic_network: Any = None, target_critic_network_2: Any = None,
+                 target_update_tau: float = 1.0, target_update_period: int = 1,
+                 td_errors_loss_fn: Any = tf.math.squared_difference, gamma: float = 1.0,
+                 reward_scale_factor: float = 1.0, initial_log_alpha: float = 0.0,
+                 use_log_alpha_in_alpha_loss: bool = True, target_entropy: float | None = None,
+                 gradient_clipping: float | None = None, debug_summaries: bool = False,
+                 summarize_grads_and_vars: bool = False, train_step_counter: Any = None, name: str | None = None,
+                 bc_errors_loss_fn: Any = tf.math.squared_difference) -> None:
         # loss function for behavioral cloning
         self.bc_errors_loss_fn = bc_errors_loss_fn
         super().__init__(time_step_spec, action_spec, critic_network, actor_network, actor_optimizer, critic_optimizer,
@@ -28,15 +34,15 @@ class CustomSacAgent(SacAgent):
                          use_log_alpha_in_alpha_loss, target_entropy, gradient_clipping, debug_summaries,
                          summarize_grads_and_vars, train_step_counter, name)
 
-    def get_actor_network(self):
+    def get_actor_network(self) -> Any:
         return self._actor_network
 
     def actor_loss_behavioral_cloning(self,
-                                      time_steps,
-                                      actions,
-                                      bc_errors_loss_fn,
-                                      training=False,
-                                      weights=None):
+                                      time_steps: Any,
+                                      actions: Any,
+                                      bc_errors_loss_fn: Any,
+                                      training: bool = False,
+                                      weights: Any = None) -> Any:
         means, stds, network_state = self._actor_network.call_raw(time_steps.observation,
                                                                   time_steps.step_type,
                                                                   (),
@@ -62,7 +68,7 @@ class CustomSacAgent(SacAgent):
 
         return total_loss
 
-    def train_behavioral_cloning(self, experience, weights=None):
+    def train_behavioral_cloning(self, experience: Any, weights: Any = None) -> tuple[Any, Any, Any]:
         """Returns a train op to update the agent's networks.
 
         This method trains with the provided batched experience.

@@ -25,7 +25,7 @@ if not cap.isOpened():
     print("Camera not connected, exiting!")
     sys.exit()
 
-cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # type: ignore[attr-defined]  # missing from the opencv stubs, exists at runtime
 cap.set(cv2.CAP_PROP_FPS, 30)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
@@ -34,41 +34,45 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 board = get_default_charuco_board(square_length=4, marker_length=3.2)
 
 
-def detect_and_draw_board(gray_image, captured_frame, detection_parameters):
-    corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, charuco_board_dictionary, parameters=detection_parameters)
-    aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)
+def detect_and_draw_board(gray_image: np.ndarray, captured_frame: np.ndarray,
+                          detection_parameters: aruco.DetectorParameters
+                          ) -> tuple[bool, np.ndarray | None, np.ndarray | None]:
+    corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, charuco_board_dictionary, parameters=detection_parameters)  # type: ignore[attr-defined]  # removed in opencv 4.7
+    aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)  # type: ignore[attr-defined]  # removed in opencv 4.7
 
     if ids is None:
         # nothing found
         return False, None, None
 
     # aruco.drawDetectedMarkers(frame, corners, ids)
-    charucoretval, charucoCorners, charucoIds = aruco.interpolateCornersCharuco(corners, ids, gray, board)
+    charucoretval, charucoCorners, charucoIds = aruco.interpolateCornersCharuco(corners, ids, gray, board)  # type: ignore[attr-defined]  # removed in opencv 4.7
     # im_with_charuco_board = aruco.drawDetectedCornersCharuco(frame, charucoCorners, charucoIds, (0, 255, 0))
-    retval, rvec, tvec = aruco.estimatePoseCharucoBoard(charucoCorners, charucoIds, board, cameraMatrix,
+    retval, rvec, tvec = aruco.estimatePoseCharucoBoard(charucoCorners, charucoIds, board, cameraMatrix,  # type: ignore[attr-defined]  # removed in opencv 4.7
                                                         distCoeffs, empty_array, empty_array,
                                                         useExtrinsicGuess=False)  # posture estimation from a charuco board
     if retval == True:
-        aruco.drawAxis(captured_frame, cameraMatrix, distCoeffs, rvec, tvec,
+        aruco.drawAxis(captured_frame, cameraMatrix, distCoeffs, rvec, tvec,  # type: ignore[attr-defined]  # removed in opencv 4.7
                        50)  # axis length 100 can be changed according to your requirement
         return retval, rvec, tvec
 
     return False, None, None
 
 
-def detect_and_draw_markers(gray_image, captured_frame, detection_parameters):
-    corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, aruco_marker_dictionary, parameters=detection_parameters)
-    aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)
+def detect_and_draw_markers(gray_image: np.ndarray, captured_frame: np.ndarray,
+                            detection_parameters: aruco.DetectorParameters
+                            ) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
+    corners, ids, rejectedImgPoints = aruco.detectMarkers(gray_image, aruco_marker_dictionary, parameters=detection_parameters)  # type: ignore[attr-defined]  # removed in opencv 4.7
+    aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)  # type: ignore[attr-defined]  # removed in opencv 4.7
 
     aruco_marker_length = 2.65
-    rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, aruco_marker_length, cameraMatrix, distCoeffs)
+    rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, aruco_marker_length, cameraMatrix, distCoeffs)  # type: ignore[attr-defined]  # removed in opencv 4.7
     aruco.drawDetectedMarkers(captured_frame, corners, ids)
 
     return ids, rvecs, tvecs
 
 
-def find_marker_indices(marker_ids, to_find_marker_id):
-    res = []
+def find_marker_indices(marker_ids: np.ndarray | None, to_find_marker_id: int) -> list[int]:
+    res: list[int] = []
     if marker_ids is None:
         return res
 
@@ -91,12 +95,13 @@ while cap.isOpened():
         break
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    parameters = aruco.DetectorParameters_create()
+    parameters = aruco.DetectorParameters_create()  # type: ignore[attr-defined]  # removed in opencv 4.7
     board_retval, board_rvec, board_tvec = detect_and_draw_board(gray, frame, parameters)
 
     marker_ids, markers_rvecs, markers_tvecs = detect_and_draw_markers(gray, frame, parameters)
 
     if board_retval:
+        assert board_rvec is not None and board_tvec is not None
         board_rotation_matrix, _ = cv2.Rodrigues(board_rvec)
         all_ids_of_marker_1 = find_marker_indices(marker_ids, 1)
         if all_ids_of_marker_1:

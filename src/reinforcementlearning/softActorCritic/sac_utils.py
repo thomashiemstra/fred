@@ -5,6 +5,7 @@ from __future__ import print_function
 import logging
 import os
 import time
+from typing import Any
 
 import tensorflow as tf
 from tf_agents.environments import suite_gym, parallel_py_environment, tf_py_environment
@@ -14,6 +15,8 @@ from tf_agents.utils import common
 
 from src.reinforcementlearning.environment.robot_env import RobotEnv
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
+from src.reinforcementlearning.environment.scenario import Scenario
+from src.reinforcementlearning.softActorCritic.IntervalManager import IntervalManager
 from src.reinforcementlearning.softActorCritic.custom_objects.actor_distribution_network_trainable import \
     ActorDistributionNetworkTrainable
 from src.reinforcementlearning.softActorCritic.custom_objects.custom_sac_agent import CustomSacAgent
@@ -24,34 +27,34 @@ from src.utils.os_utils import is_linux
 from tf_agents.agents.ddpg import critic_network
 
 
-def normal_projection_net(action_spec):
+def normal_projection_net(action_spec: Any) -> NormalProjectionNetworkTrainable:
     return NormalProjectionNetworkTrainable(
         action_spec,
         mean_transform=None,
         scale_distribution=True)
 
 
-def create_agent(env,
-                 global_step,
-                 robot_env_no_obstacles,
-                 actor_fc_layers=(32,),
-                 actor_preprocessing_layer=64,
-                 actor_preprocessing_layer_curve=64,
-                 critic_preprocessing_layer=64,
-                 critic_preprocessing_layer_curve=64,
-                 critic_preprocessing_layer_action=32,
-                 critic_fc_layers=(32,),
-                 target_update_tau=0.005,
-                 target_update_period=1,
-                 actor_learning_rate=3e-4,
-                 critic_learning_rate=3e-4,
-                 alpha_learning_rate=3e-4,
-                 gamma=0.99,
-                 reward_scale_factor=1.0,
-                 gradient_clipping=None,
-                 debug_summaries=False,
-                 summarize_grads_and_vars=False,
-                 entropy=None):
+def create_agent(env: Any,
+                 global_step: Any,
+                 robot_env_no_obstacles: bool,
+                 actor_fc_layers: tuple[int, ...] = (32,),
+                 actor_preprocessing_layer: int = 64,
+                 actor_preprocessing_layer_curve: int = 64,
+                 critic_preprocessing_layer: int = 64,
+                 critic_preprocessing_layer_curve: int = 64,
+                 critic_preprocessing_layer_action: int = 32,
+                 critic_fc_layers: tuple[int, ...] = (32,),
+                 target_update_tau: float = 0.005,
+                 target_update_period: int = 1,
+                 actor_learning_rate: float = 3e-4,
+                 critic_learning_rate: float = 3e-4,
+                 alpha_learning_rate: float = 3e-4,
+                 gamma: float = 0.99,
+                 reward_scale_factor: float = 1.0,
+                 gradient_clipping: float | None = None,
+                 debug_summaries: bool = False,
+                 summarize_grads_and_vars: bool = False,
+                 entropy: float | None = None) -> CustomSacAgent:
     print("reward scale = {}".format(reward_scale_factor))
     time_step_spec = env.time_step_spec()
     observation_spec = time_step_spec.observation
@@ -109,9 +112,9 @@ def create_agent(env,
     return agent
 
 
-def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles,
-                                               actor_preprocessing_layer,
-                                               actor_preprocessing_layer_curve):
+def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles: bool,
+                                               actor_preprocessing_layer: int,
+                                               actor_preprocessing_layer_curve: int) -> tuple[Any, Any]:
     if robot_env_no_obstacles:
         preprocessing_layer = (
             tf.keras.layers.Dense(actor_preprocessing_layer)
@@ -128,10 +131,10 @@ def get_actor_preprocessing_layer_and_combiner(robot_env_no_obstacles,
         return preprocessing_layer, tf.keras.layers.Concatenate(axis=-1)
 
 
-def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
-                                                 critic_preprocessing_layer,
-                                                 critic_preprocessing_layer_curve,
-                                                 critic_preprocessing_layer_action):
+def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles: bool,
+                                                 critic_preprocessing_layer: int,
+                                                 critic_preprocessing_layer_curve: int,
+                                                 critic_preprocessing_layer_action: int) -> Any:
     if robot_env_no_obstacles:
         preprocessing_layer = (
             tf.keras.layers.Dense(critic_preprocessing_layer),  # 20 observations
@@ -152,13 +155,15 @@ def get_cirit_input_spec_and_preprocessing_layer(robot_env_no_obstacles,
         return preprocessing_layer
 
 
-def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=None, train_scenarios=None):
+def create_envs(robot_env_no_obstacles: bool, num_parallel_environments: int,
+                scenarios: list[Scenario] | None = None,
+                train_scenarios: list[Scenario] | None = None) -> tuple[Any, Any]:
     if not is_linux() or num_parallel_environments == 1:  # Windows does not handle multiprocessing well
         if robot_env_no_obstacles:
             tf_env = tf_py_environment.TFPyEnvironment(RobotEnv())
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnv(is_eval=True))
         else:
-            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios + train_scenarios))
+            tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios + train_scenarios))  # type: ignore[operator]  # scenarios default to None
             eval_tf_env = tf_py_environment.TFPyEnvironment(RobotEnvWithObstacles(scenarios=scenarios, is_eval=True))
 
         return tf_env, eval_tf_env
@@ -179,12 +184,12 @@ def create_envs(robot_env_no_obstacles, num_parallel_environments, scenarios=Non
     return tf_env, eval_tf_env
 
 
-def compute_metrics(eval_metrics,
-                    eval_tf_env,
-                    eval_policy,
-                    num_eval_episodes,
-                    global_step,
-                    eval_summary_writer):
+def compute_metrics(eval_metrics: Any,
+                    eval_tf_env: Any,
+                    eval_policy: Any,
+                    num_eval_episodes: int,
+                    global_step: Any,
+                    eval_summary_writer: Any) -> Any:
     results = metric_utils.eager_compute(
         eval_metrics,
         eval_tf_env,
@@ -198,9 +203,10 @@ def compute_metrics(eval_metrics,
     return results
 
 
-def save_checkpoints(global_step_val, train_checkpoint_interval_manager, policy_checkpoint_interval_manager,
-                     rb_checkpoint_interval_manager, train_checkpointer, policy_checkpointer, rb_checkpointer,
-                     global_step):
+def save_checkpoints(global_step_val: int, train_checkpoint_interval_manager: IntervalManager,
+                     policy_checkpoint_interval_manager: IntervalManager,
+                     rb_checkpoint_interval_manager: IntervalManager, train_checkpointer: Any,
+                     policy_checkpointer: Any, rb_checkpointer: Any, global_step: Any) -> None:
     if train_checkpoint_interval_manager.should_trigger(global_step_val):
         logging.info("saving train")
         train_checkpointer.save(global_step=global_step)
@@ -214,12 +220,12 @@ def save_checkpoints(global_step_val, train_checkpoint_interval_manager, policy_
         rb_checkpointer.save(global_step=global_step)
 
 
-def make_and_initialze_checkpointers(train_dir,
-                                     tf_agent,
-                                     global_step,
-                                     eval_policy,
-                                     replay_buffer,
-                                     train_metrics):
+def make_and_initialze_checkpointers(train_dir: str,
+                                     tf_agent: Any,
+                                     global_step: Any,
+                                     eval_policy: Any,
+                                     replay_buffer: Any,
+                                     train_metrics: Any) -> tuple[Any, Any, Any]:
     train_checkpointer = common.Checkpointer(
         ckpt_dir=train_dir,
         agent=tf_agent,
@@ -240,7 +246,7 @@ def make_and_initialze_checkpointers(train_dir,
     return train_checkpointer, policy_checkpointer, rb_checkpointer
 
 
-def initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step):
+def initialize_and_restore_train_checkpointer(train_dir: str, tf_agent: Any, global_step: Any) -> None:
     train_checkpointer = common.Checkpointer(
         ckpt_dir=train_dir,
         agent=tf_agent,
@@ -249,7 +255,7 @@ def initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step):
     train_checkpointer.initialize_or_restore()
 
 
-def make_video(env_name, tf_agent, video_filename='test'):
+def make_video(env_name: str, tf_agent: Any, video_filename: str = 'test') -> None:
     import imageio
 
     video_filename += '.mp4'
@@ -265,7 +271,7 @@ def make_video(env_name, tf_agent, video_filename='test'):
                 video.append_data(eval_py_env.render())
 
 
-def show_progress(agent, env):
+def show_progress(agent: Any, env: Any) -> None:
     time_step = env.reset()
     steps = 0
     while not time_step.is_last() and steps < 400:
@@ -274,7 +280,7 @@ def show_progress(agent, env):
         steps += 1
 
 
-def print_time_progression(time_before_training, global_step_taken, total_train_steps):
+def print_time_progression(time_before_training: float, global_step_taken: int, total_train_steps: int) -> None:
     if global_step_taken == 0:
         return
     time_elapsed_so_far = time.time() - time_before_training

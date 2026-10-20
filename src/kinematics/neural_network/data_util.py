@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from src.reinforcementlearning.environment.robot_env_utils import get_de_normalized_current_angles
 
 
-def generate_data(items):
+def generate_data(items: int) -> tuple[np.ndarray, np.ndarray]:
     input = np.zeros((items, 6))
     output = np.zeros((items, 6))
 

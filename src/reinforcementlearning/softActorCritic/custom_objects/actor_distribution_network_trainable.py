@@ -1,3 +1,5 @@
+from typing import Any
+
 from tf_agents.networks import actor_distribution_network
 from tf_agents.networks.actor_distribution_network import ActorDistributionNetwork, _categorical_projection_net, \
     _normal_projection_net
@@ -7,30 +9,30 @@ import tensorflow as tf
 
 class ActorDistributionNetworkTrainable(ActorDistributionNetwork):
 
-    def __init__(self, input_tensor_spec,
-                 output_tensor_spec,
-                 preprocessing_layers=None,
-                 preprocessing_combiner=None,
-                 conv_layer_params=None,
-                 fc_layer_params=(200, 100),
-                 dropout_layer_params=None,
-                 activation_fn=tf.keras.activations.relu,
-                 kernel_initializer=None,
-                 batch_squash=True,
-                 dtype=tf.float32,
-                 discrete_projection_net=_categorical_projection_net,
-                 continuous_projection_net=_normal_projection_net,
-                 name='ActorDistributionNetwork'):
+    def __init__(self, input_tensor_spec: Any,
+                 output_tensor_spec: Any,
+                 preprocessing_layers: Any = None,
+                 preprocessing_combiner: Any = None,
+                 conv_layer_params: Any = None,
+                 fc_layer_params: Any = (200, 100),
+                 dropout_layer_params: Any = None,
+                 activation_fn: Any = tf.keras.activations.relu,
+                 kernel_initializer: Any = None,
+                 batch_squash: bool = True,
+                 dtype: Any = tf.float32,
+                 discrete_projection_net: Any = _categorical_projection_net,
+                 continuous_projection_net: Any = _normal_projection_net,
+                 name: str = 'ActorDistributionNetwork') -> None:
         super().__init__(input_tensor_spec, output_tensor_spec, preprocessing_layers, preprocessing_combiner,
                          conv_layer_params, fc_layer_params, dropout_layer_params, activation_fn, kernel_initializer,
                          batch_squash, dtype, discrete_projection_net, continuous_projection_net, name)
 
     def call_raw(self,
-             observations,
-             step_type,
-             network_state,
-             training=False,
-             mask=None):
+             observations: Any,
+             step_type: Any,
+             network_state: Any,
+             training: bool = False,
+             mask: Any = None) -> tuple[Any, Any, Any]:
         state, network_state = self._encoder(
             observations,
             step_type=step_type,
@@ -38,7 +40,7 @@ class ActorDistributionNetworkTrainable(ActorDistributionNetwork):
             training=training)
         outer_rank = nest_utils.get_outer_rank(observations, self.input_tensor_spec)
 
-        def call_projection_net(proj_net):
+        def call_projection_net(proj_net: Any) -> tuple[Any, Any]:
             means, stds = proj_net.call_raw(
                 state, outer_rank, training=training, mask=mask)
             return means, stds

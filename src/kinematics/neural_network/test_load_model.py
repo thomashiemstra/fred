@@ -28,7 +28,7 @@ model.compile(optimizer=tf.keras.optimizers.RMSprop(),  # Optimizer
               # List of metrics to monitor
               metrics=['sparse_categorical_accuracy'])
 
-current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe never returns none on cpython
 
 checkpoint_path = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
 

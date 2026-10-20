@@ -15,8 +15,8 @@ pose3 = Pose(3, arr[0], arr[0], alpha=arr[1], beta=arr[1], gamma=arr[1])
 poses1 = [pose1, pose2]
 poses2 = [pose1, pose2, pose3]
 
-test1 = SplineMovement(None, poses1, 2)
-test2 = SplineMovement(None, poses2, 3)
+test1 = SplineMovement(None, poses1, 2)  # type: ignore[arg-type]  # poses and time are in the wrong place
+test2 = SplineMovement(None, poses2, 3)  # type: ignore[arg-type]  # same
 
 movements = [test1, test2]
 

@@ -1,12 +1,14 @@
 from time import sleep, time
 import matplotlib.pyplot as plt
 from src.global_objects import get_robot
+from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 
 servo_id = 1
 target = 2048
 
 
 robot = get_robot()
+assert isinstance(robot, CombinedRobot), 'this script needs the real robot'
 
 robot.enable_servos()
 # p  i  d
@@ -17,13 +19,14 @@ y = []
 y_target = []
 
 prev_pos = robot.get_servo_position(servo_id)
+assert prev_pos is not None, 'could not read servo {}'.format(servo_id)
 if prev_pos > 1500:
     target = 1024
 else:
     target = 3072
 
 robot.set_servo_position(servo_id, target)
-elapsed_time = 0
+elapsed_time: float = 0
 for i in range(300):
     start = time()
     pos = robot.get_servo_position(servo_id)

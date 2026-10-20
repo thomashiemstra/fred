@@ -1,11 +1,21 @@
 # Handler for dynamixel X servos
+from __future__ import annotations
+
 import logging
 import threading
 import time
+from collections.abc import Iterable
+from types import ModuleType
+from typing import TYPE_CHECKING, Any
 
 import dynamixel_sdk as dynamixel
 import src.robot_controllers.dynamixel_robot.dynamixel_utils as utils
 from src.utils.decorators import synchronized_with_lock
+
+if TYPE_CHECKING:
+    import numpy as np
+
+    from src.robot_controllers.dynamixel_robot.servo import Servo
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +32,8 @@ class ServoHandler(object):
     are read with one sync read per bus.
     """
 
-    def __init__(self, servos, config, port_handler, packet_handler, buses=None):
+    def __init__(self, servos: dict[int, Servo], config: ModuleType, port_handler: Any, packet_handler: Any,
+                 buses: Iterable[Iterable[int]] | None = None) -> None:
         """"
         Args:
             servos: a mapping of servo id to servo object
@@ -48,20 +59,20 @@ class ServoHandler(object):
         # guards the usb connection, all communication with the servos goes through this lock
         self.bus_lock = threading.RLock()
 
-    def get_servo(self, servo_id):
+    def get_servo(self, servo_id: int) -> Servo:
         """return the servo object corresponding to the id"""
         return self.servo_map[servo_id]
 
-    def set_angle(self, servo_id, angle, all_angles=None):
+    def set_angle(self, servo_id: int, angle: float, all_angles: np.ndarray | None = None) -> None:
         """Set the target position based on the angle for the specific servo"""
         self.servo_map[servo_id].set_target_position_from_angle(angle, all_angles)
 
-    def get_angle(self, servo_id, position):
+    def get_angle(self, servo_id: int, position: int) -> float:
         """converts the position to a servo angle"""
         return self.servo_map[servo_id].get_angle_from_position(position)
 
     @synchronized_with_lock("bus_lock")
-    def reboot(self, servo_ids=None, timeout=3.0):
+    def reboot(self, servo_ids: Iterable[int] | None = None, timeout: float = 3.0) -> bool:
         """reboot the servos and wait until they respond again, returns True if all of them came back
 
         A reboot disables the torque and wipes all settings that are not stored in the eeprom (pid, profile, etc.)
@@ -85,7 +96,7 @@ class ServoHandler(object):
         return not waiting
 
     @synchronized_with_lock("bus_lock")
-    def set_torque(self, enable, servo_ids=None):
+    def set_torque(self, enable: bool, servo_ids: Iterable[int] | None = None) -> bool:
         """Enable or disable the torque of the servos, returns True if it succeeded for all of them
 
         The servos are written one at a time so every servo confirms the write.
@@ -97,7 +108,7 @@ class ServoHandler(object):
         return success
 
     @synchronized_with_lock("bus_lock")
-    def set_configured_operating_mode(self, servo_ids=None):
+    def set_configured_operating_mode(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the configured operating mode of the servos, returns True if it succeeded for all of them"""
         success = True
         for servo_id in self.__ids(servo_ids):
@@ -105,7 +116,7 @@ class ServoHandler(object):
         return success
 
     @synchronized_with_lock("bus_lock")
-    def set_operating_mode(self, servo_id, mode):
+    def set_operating_mode(self, servo_id: int, mode: int) -> bool:
         """set the operating mode of a servo, returns True on success
 
         The operating mode can only be changed while the torque is disabled, so the write is skipped when the servo
@@ -120,7 +131,7 @@ class ServoHandler(object):
         return utils.write_1_byte(self.packet_handler, self.port_handler, self.config.ADDR_OPERATING_MODE,
                                   servo_id, mode)
 
-    def set_profile_velocity_and_acceleration(self, servo_ids=None):
+    def set_profile_velocity_and_acceleration(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the velocity profile of the servos, this get's wiped after a reboot"""
         # the acceleration and velocity registers are adjacent, so they are written in a single packet
         data = {}
@@ -131,7 +142,7 @@ class ServoHandler(object):
         return self.__sync_write(self.config.ADDR_PROFILE_ACCELERATION,
                                  self.config.LEN_PROFILE_ACCELERATION + self.config.LEN_PROFILE_VELOCITY, data)
 
-    def set_profile_velocity_percentage(self, percentage, servo_ids=None):
+    def set_profile_velocity_percentage(self, percentage: float, servo_ids: Iterable[int] | None = None) -> bool:
         """
         set the profile velocity as percentage of the maximum configured
         :param percentage: a value between 0 and 100
@@ -148,16 +159,16 @@ class ServoHandler(object):
 
         return self.__sync_write_values(self.config.ADDR_PROFILE_VELOCITY, self.config.LEN_PROFILE_VELOCITY, values)
 
-    def set_configured_goal_current(self, servo_ids=None):
+    def set_configured_goal_current(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the goal current for the servos that have one configured"""
         values = {servo_id: self.servo_map[servo_id].goal_current for servo_id in self.__ids(servo_ids)
                   if self.servo_map[servo_id].goal_current is not None}
-        return self.__sync_write_values(self.config.ADDR_GOAL_CURRENT, self.config.LEN_GOAL_CURRENT, values)
+        return self.__sync_write_values(self.config.ADDR_GOAL_CURRENT, self.config.LEN_GOAL_CURRENT, values)  # type: ignore[arg-type]  # none filtered out above
 
-    def set_goal_current(self, servo_id, val):
+    def set_goal_current(self, servo_id: int, val: int) -> bool:
         return self.__sync_write_values(self.config.ADDR_GOAL_CURRENT, self.config.LEN_GOAL_CURRENT, {servo_id: val})
 
-    def set_pid(self, servo_ids=None):
+    def set_pid(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the configured pid values of the servos, this get's wiped after a reboot"""
         pid = {}
         for servo_id in self.__ids(servo_ids):
@@ -165,11 +176,11 @@ class ServoHandler(object):
             pid[servo_id] = (servo.p, servo.i, servo.d)
         return self.__write_pid(pid)
 
-    def set_pid_single_servo(self, servo_id, p, i, d):
+    def set_pid_single_servo(self, servo_id: int, p: int, i: int, d: int) -> bool:
         """set the pid values of a single servo, this get's wiped after a reboot"""
         return self.__write_pid({servo_id: (p, i, d)})
 
-    def move_to_angles(self, servo_ids=None):
+    def move_to_angles(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the physical servos to their target position"""
         values = {}
         for servo_id in self.__ids(servo_ids):
@@ -178,11 +189,11 @@ class ServoHandler(object):
         return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION, values)
 
     # debug function to move a single servo to a raw position, this is not clamped to the calibrated range
-    def move_servo_to_pos(self, servo_id, position):
+    def move_servo_to_pos(self, servo_id: int, position: int) -> bool:
         return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION,
                                         {servo_id: position})
 
-    def read_current_pos(self, servo_ids=None):
+    def read_current_pos(self, servo_ids: Iterable[int] | None = None) -> bool:
         """update the current_position parameter of the servo objects
 
         The positions are only updated when all servos could be read, so they are never partially stale.
@@ -198,7 +209,7 @@ class ServoHandler(object):
         return True
 
     @synchronized_with_lock("bus_lock")
-    def hold_current_position(self, servo_ids=None):
+    def hold_current_position(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the target and goal position of the servos to their present position, returns True on success
 
         This keeps the servos in place when the torque is enabled, instead of moving to an old goal position.
@@ -214,18 +225,18 @@ class ServoHandler(object):
             values[servo_id] = servo.current_position
         return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION, values)
 
-    def read_current_pos_single_servo(self, servo_id):
+    def read_current_pos_single_servo(self, servo_id: int) -> int | None:
         """update the current_position parameter of a single servo, returns the position or None on failure"""
         if not self.read_current_pos([servo_id]):
             return None
         return self.servo_map[servo_id].current_position
 
-    def read_profile_velocity(self, servo_ids=None):
+    def read_profile_velocity(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
         """returns a mapping of servo id to profile velocity, or None if the servos could not be read"""
         return self.__sync_read(self.config.ADDR_PROFILE_VELOCITY, self.config.LEN_PROFILE_VELOCITY,
                                 self.__ids(servo_ids))
 
-    def read_hardware_errors(self, servo_ids=None):
+    def read_hardware_errors(self, servo_ids: Iterable[int] | None = None) -> dict[int, list[str]] | None:
         """returns a mapping of servo id to a list of the names of its hardware errors, for the servos that have one
 
         A servo with a hardware error disables its torque and ignores goal positions until it is rebooted.
@@ -241,7 +252,7 @@ class ServoHandler(object):
                 errors[servo_id] = [name for bit, name in self.config.HARDWARE_ERRORS.items() if status & (1 << bit)]
         return errors
 
-    def read_present_current(self, servo_ids=None):
+    def read_present_current(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
         """returns a mapping of servo id to the signed value of its present current register, or None on failure
 
         The unit depends on the model: 2.69mA for the XM430 and XM540, 1mA for the XL330. The XC430 has no current
@@ -255,12 +266,14 @@ class ServoHandler(object):
         return {servo_id: utils.to_signed(value, self.config.LEN_PRESENT_CURRENT)
                 for servo_id, value in values.items()}
 
-    def read_temperatures(self, servo_ids=None):
+    def read_temperatures(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
         """returns a mapping of servo id to temperature in degrees celsius, or None on failure"""
         return self.__sync_read(self.config.ADDR_PRESENT_TEMPERATURE, self.config.LEN_PRESENT_TEMPERATURE,
                                 self.__ids(servo_ids))
 
-    def read_temperature_and_voltage(self, servo_ids=None):
+    def read_temperature_and_voltage(
+            self, servo_ids: Iterable[int] | None = None
+    ) -> dict[int, tuple[int, float]] | None:
         """returns a mapping of servo id to (temperature in degrees celsius, input voltage), or None on failure"""
         servo_ids = self.__ids(servo_ids)
         temperatures = self.read_temperatures(servo_ids)
@@ -271,12 +284,12 @@ class ServoHandler(object):
         # the input voltage is in units of 0.1V
         return {servo_id: (temperatures[servo_id], voltages[servo_id] / 10.0) for servo_id in servo_ids}
 
-    def __ids(self, servo_ids):
+    def __ids(self, servo_ids: Iterable[int] | None) -> list[int]:
         if servo_ids is None:
             return list(self.servo_map)
         return list(servo_ids)
 
-    def __clamp_target_position(self, servo_id):
+    def __clamp_target_position(self, servo_id: int) -> None:
         """clamp the target position to both the calibrated and the physical range of the servo
 
         The calibrated range applies to the target before its static load compensation, the compensation is kept at
@@ -290,7 +303,7 @@ class ServoHandler(object):
                            servo_id, servo.target_position, clamped)
             servo.target_position = clamped
 
-    def __write_pid(self, pid):
+    def __write_pid(self, pid: dict[int, tuple[int, int, int]]) -> bool:
         """write a mapping of servo id to (p, i, d)"""
         # the d, i and p registers are adjacent (in that order), so they are written in a single packet
         data = {}
@@ -300,13 +313,13 @@ class ServoHandler(object):
                               utils.to_bytes(p, self.config.LEN_PID))
         return self.__sync_write(self.config.ADDR_D, 3 * self.config.LEN_PID, data)
 
-    def __sync_write_values(self, address, length, values):
+    def __sync_write_values(self, address: int, length: int, values: dict[int, int]) -> bool:
         """write a mapping of servo id to value to the given address"""
         data = {servo_id: utils.to_bytes(value, length) for servo_id, value in values.items()}
         return self.__sync_write(address, length, data)
 
     @synchronized_with_lock("bus_lock")
-    def __sync_write(self, address, length, data):
+    def __sync_write(self, address: int, length: int, data: dict[int, list[int]]) -> bool:
         """write a mapping of servo id to byte list to the given address in a single packet, returns True on success
 
         The servos don't respond to a sync write, so only failures to send the packet are detected.
@@ -327,7 +340,7 @@ class ServoHandler(object):
         return True
 
     @synchronized_with_lock("bus_lock")
-    def __sync_read(self, address, length, servo_ids):
+    def __sync_read(self, address: int, length: int, servo_ids: list[int]) -> dict[int, int] | None:
         """read the given address of all servos with a single packet per bus
 
         returns a mapping of servo id to the unsigned value, or None if any of the servos could not be read
@@ -343,7 +356,7 @@ class ServoHandler(object):
             values.update(bus_values)
         return values
 
-    def __sync_read_bus(self, address, length, servo_ids):
+    def __sync_read_bus(self, address: int, length: int, servo_ids: list[int]) -> dict[int, int] | None:
         """read the given address of servos that are on the same bus in a single packet"""
         group_sync_read = dynamixel.GroupSyncRead(self.port_handler, self.packet_handler, address, length)
         for servo_id in servo_ids:

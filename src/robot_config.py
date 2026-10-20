@@ -1,5 +1,6 @@
 """Loads the link lengths of the robots from a yaml file, see robot_config.yaml for the format."""
 import os
+from typing import Any
 
 import yaml
 
@@ -15,7 +16,7 @@ class RobotConfigError(ValueError):
     """raised when the robot configuration is not valid"""
 
 
-def load_robot_configs(path=DEFAULT_ROBOT_CONFIG_PATH):
+def load_robot_configs(path: str = DEFAULT_ROBOT_CONFIG_PATH) -> dict[str, RobotConfig]:
     """
     read the link lengths of the robots, returns a mapping of robot name ('dynamixel_robot', 'simulated_robot') to a
     new RobotConfig. Every call returns new objects.
@@ -29,7 +30,7 @@ def load_robot_configs(path=DEFAULT_ROBOT_CONFIG_PATH):
     return parse_robot_configs(data, path)
 
 
-def parse_robot_configs(data, source='robot configuration'):
+def parse_robot_configs(data: Any, source: str = 'robot configuration') -> dict[str, RobotConfig]:
     """
     create the RobotConfig objects from the parsed yaml data: a mapping of robot name to the lengths d1, a2, d4 and d6
     in cm. The dynamixel robot is required, the simulated robot gets the same lengths when it has no section.
@@ -49,7 +50,7 @@ def parse_robot_configs(data, source='robot configuration'):
     return configs
 
 
-def _parse_lengths(data, source):
+def _parse_lengths(data: Any, source: str) -> RobotConfig:
     if not isinstance(data, dict):
         raise RobotConfigError('{}: should be a mapping with {}'.format(source, ', '.join(LENGTHS)))
     missing = set(LENGTHS) - set(data)

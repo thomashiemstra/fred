@@ -10,9 +10,12 @@ Test script that moves the physical robot, run it from the project root:
 
 Ctrl+C stops the movement, the servos keep holding their last position until the torque is disabled.
 """
+from __future__ import annotations
+
 import logging
 import sys
 from time import sleep
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -22,23 +25,26 @@ from src.global_objects import get_robot
 from src.utils.movement import plan_move_to_pose, execute_move, check_move
 from src.utils.movement_exception import MovementException
 
+if TYPE_CHECKING:
+    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+
 # all the way to the right, the same start pose as the xbox controller
 START_POSE = Pose(30, 25.0, 5)
 # the angle of a servo outside of its calibrated range is clamped, the first step would make it jump this far
 MAX_OUTSIDE_CALIBRATED_RANGE = 50  # positions, 4096 positions is a full turn
 
 
-def print_pose(name, pose):
+def print_pose(name: str, pose: Pose) -> None:
     print('{}: x={:.1f} y={:.1f} z={:.1f} alpha={:.2f} beta={:.2f} gamma={:.2f} flip={}'.format(
         name, pose.x, pose.y, pose.z, pose.alpha, pose.beta, pose.gamma, pose.flip))
 
 
-def print_angles(name, angles):
+def print_angles(name: str, angles: np.ndarray) -> None:
     print('{}: {}'.format(name, ' '.join('{}={:.1f}deg'.format(joint, np.degrees(angles[joint]))
                                          for joint in range(1, 7))))
 
 
-def check_calibrated_range(robot):
+def check_calibrated_range(robot: CombinedRobot) -> bool:
     outside = robot.get_servos_outside_calibrated_range()
     if outside is None:
         print('failed to read the servo positions')
@@ -56,17 +62,17 @@ def check_calibrated_range(robot):
     return ok
 
 
-def compare_to_target(robot, target_pose):
+def compare_to_target(robot: CombinedRobot, target_pose: Pose) -> None:
     pose = robot.get_current_pose()
     if pose is None:
         print('failed to read the pose after the movement')
         return
     print_pose('reached pose', pose)
     position_error = np.linalg.norm([pose.x - target_pose.x, pose.y - target_pose.y, pose.z - target_pose.z])
-    print('position error: {:.2f}cm'.format(position_error))
+    print('position error: {:.2f}cm'.format(position_error))  # type: ignore[str-format]  # numpy floating is a float
 
 
-def disable_torque_on_request(robot):
+def disable_torque_on_request(robot: CombinedRobot) -> None:
     try:
         input('\npress enter to disable the torque, SUPPORT THE ARM, it will drop. '
               'Ctrl+C to exit and keep the torque enabled\n')
@@ -76,12 +82,12 @@ def disable_torque_on_request(robot):
     robot.disable_servos()
 
 
-def main():
+def main() -> int:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
     robot = get_robot()
 
-    if not check_calibrated_range(robot):
+    if not check_calibrated_range(robot):  # type: ignore[arg-type]  # needs the real robot, the simulation has no servos
         return 1
 
     current_angles = robot.get_current_angles()
@@ -115,13 +121,13 @@ def main():
         check_move(move, robot, current_angles=angles_after_enabling)
         execute_move(robot, move)
         sleep(0.5)  # let the servos settle
-        compare_to_target(robot, START_POSE)
+        compare_to_target(robot, START_POSE)  # type: ignore[arg-type]  # needs the real robot, the simulation has no servos
     except MovementException as e:
         print('stopped: {}'.format(e))
     except KeyboardInterrupt:
         print('\nstopped, the servos are holding their last position')
 
-    disable_torque_on_request(robot)
+    disable_torque_on_request(robot)  # type: ignore[arg-type]  # needs the real robot, the simulation has no servos
     return 0
 
 

@@ -23,22 +23,22 @@ CDN(app)
 
 
 @app.route('/')
-def index():
+def index() -> str:
     return render_template('index.html', username='dinges')
 
 
 @app.route('/xbox')
-def xbox():
+def xbox() -> str:
     return render_template('xbox_control.html')
 
 
 @app.route('/camera')
-def camera():
+def camera() -> str:
     return render_template('camera_control.html')
 
 
 @app.route('/getJsonList', methods=['GET'])
-def getJsonList():
+def getJsonList() -> Response:
     list = [
        "one", "two", "three"
     ]
@@ -46,14 +46,14 @@ def getJsonList():
 
 
 @app.route('/test', methods=['POST'])
-def test():
+def test() -> Response:
     print(request.get_json())
     resp = jsonify(success=True)
     return resp
 
 
 @app.route('/test2')
-def test2():
+def test2() -> Response:
     robot = global_objects.get_robot()
     print(robot)
     resp = jsonify(success=True)
@@ -61,27 +61,27 @@ def test2():
 
 
 @app.route('/startcamera', methods=['POST'])
-def start_camera():
+def start_camera() -> Response:
     camera = global_objects.get_camera()
     camera.start_camera()
     return jsonify(success=True)
 
 
 @app.route('/startcameraRecording', methods=['POST'])
-def start_camera_recording():
+def start_camera_recording() -> Response:
     camera = global_objects.get_camera()
     camera.start_camera_recording()
     return jsonify(success=True)
 
 
 @app.route('/stopcamera', methods=['POST'])
-def stop_camera():
+def stop_camera() -> Response:
     camera = global_objects.get_camera()
     camera.stop_camera()
     return jsonify(success=True)
 
 
-def start_server():
+def start_server() -> None:
     # the server is the one process that shows the simulation, see global_objects.configure
     global_objects.configure(show_simulation=True)
     app.run(debug=False, host='0.0.0.0')

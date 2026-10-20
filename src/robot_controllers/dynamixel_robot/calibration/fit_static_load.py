@@ -14,12 +14,14 @@ import argparse
 import csv
 import sys
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import numpy as np
 
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names, SPRING_TERMS, \
-    UP, DOWN
+    UP, DOWN, SpringGeometry
 
 DEGREES_PER_POSITION = 360.0 / 4096
 DEFAULT_JOINTS = (2, 3, 5)
@@ -28,7 +30,8 @@ DEFAULT_JOINTS = (2, 3, 5)
 class Sample:
     """one pose with the error of every servo: the static load (mean of both directions) and the hysteresis"""
 
-    def __init__(self, angles, static, hysteresis, by_direction):
+    def __init__(self, angles: np.ndarray, static: dict[int, float], hysteresis: dict[int, float],
+                 by_direction: dict[str, dict[int, float]]) -> None:
         self.angles = angles  # 7 element array, radians
         self.static = static  # mapping of servo id to the mean error in positions
         self.hysteresis = hysteresis  # mapping of servo id to half the difference between the directions
@@ -41,8 +44,9 @@ MAX_CONDITION = 1000.0  # above this the fit is warned about: some terms can't b
 class Fit:
     """the result of fitting one joint"""
 
-    def __init__(self, joint, names, coefficients, standard_errors, condition, rms_train, rms_holdout, train_count,
-                 holdout_count):
+    def __init__(self, joint: int, names: Sequence[str], coefficients: np.ndarray, standard_errors: np.ndarray,
+                 condition: float, rms_train: float, rms_holdout: float | None, train_count: int,
+                 holdout_count: int) -> None:
         self.joint = joint
         self.names = names
         self.coefficients = dict(zip(names, coefficients))
@@ -53,12 +57,12 @@ class Fit:
         self.train_count = train_count
         self.holdout_count = holdout_count
 
-    def undetermined(self):
+    def undetermined(self) -> list[str]:
         """the terms whose coefficient is smaller than twice its standard error: the data doesn't pin them down"""
         return [name for name in self.names
                 if abs(self.coefficients[name]) < 2 * self.standard_errors[name]]
 
-    def warnings(self):
+    def warnings(self) -> list[str]:
         lines = []
         if self.condition > MAX_CONDITION:
             lines.append('condition number {:.0f}: some terms can not be told apart in this data, vary the joints '
@@ -69,7 +73,7 @@ class Fit:
         return lines
 
 
-def read_rows(paths):
+def read_rows(paths: Iterable[str]) -> list[dict[str, str]]:
     """the rows of the csv files of record_static_load.py, with the file they came from under 'file'"""
     rows = []
     for path in paths:
@@ -80,14 +84,14 @@ def read_rows(paths):
     return rows
 
 
-def samples_from_rows(rows):
+def samples_from_rows(rows: Iterable[dict[str, str]]) -> list[Sample]:
     """
     group the rows per pose: the angles of the pose and the error per servo for both directions. Poses without
     both directions are left out. The pose index only counts within a file, so rows need a 'file' field when they
     come from more than one file.
     """
-    by_pose = defaultdict(lambda: defaultdict(dict))  # (file, pose) -> direction -> servo -> error
-    angles_of_pose = {}
+    by_pose: defaultdict[tuple[str, int], defaultdict[str, dict[int, float]]] = defaultdict(lambda: defaultdict(dict))  # (file, pose) -> direction -> servo -> error
+    angles_of_pose: dict[tuple[str, int], np.ndarray] = {}
     for row in rows:
         key = (row.get('file', ''), int(row['pose']))
         servo = int(row['servo'])
@@ -105,7 +109,9 @@ def samples_from_rows(rows):
     return samples
 
 
-def fit_joint(joint, samples, spring=None, holdout=0.2, rng=None, direction=None, names=None):
+def fit_joint(joint: int, samples: Sequence[Sample], spring: SpringGeometry | None = None, holdout: float = 0.2,
+              rng: np.random.Generator | None = None, direction: str | None = None,
+              names: Sequence[str] | None = None) -> Fit:
     """
     fit the terms of a joint to the samples
     :param spring: SpringGeometry, with it the spring terms are fitted too
@@ -117,7 +123,8 @@ def fit_joint(joint, samples, spring=None, holdout=0.2, rng=None, direction=None
     rng = rng if rng is not None else np.random.default_rng(0)
     if names is None:
         names = tuple(name for name in term_names(joint) if spring is not None or name not in SPRING_TERMS)
-    rows, targets = [], []
+    rows: Any = []
+    targets: Any = []
     for sample in samples:
         errors = sample.static if direction is None else sample.by_direction[direction]
         if joint not in errors:
@@ -147,11 +154,11 @@ def fit_joint(joint, samples, spring=None, holdout=0.2, rng=None, direction=None
                holdout_count)
 
 
-def _rms(residuals):
+def _rms(residuals: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(residuals)))) if len(residuals) else 0.0
 
 
-def yaml_block(fits, max_positions, directional=None):
+def yaml_block(fits: dict[int, Fit], max_positions: int, directional: dict[int, dict[str, Fit]] | None = None) -> str:
     """
     the compensation blocks for servo_config.yaml. The fits describe the error (present minus goal) and the
     compensation is added to the goal to cancel it, so the coefficients in the yaml are the negated fits.
@@ -170,12 +177,12 @@ def yaml_block(fits, max_positions, directional=None):
     return '\n'.join(lines) + '\n'
 
 
-def _terms_line(error_coefficients):
+def _terms_line(error_coefficients: dict[str, float]) -> str:
     """the coefficients of the compensation: minus the coefficients of the error"""
     return '{' + ', '.join('{}: {:.3f}'.format(name, -value) for name, value in error_coefficients.items()) + '}'
 
 
-def describe(fit):
+def describe(fit: Fit) -> str:
     """one paragraph about a fit"""
     lines = ['joint {}: {} poses fitted, {} held out, condition {:.1f}'.format(
         fit.joint, fit.train_count, fit.holdout_count, fit.condition)]
@@ -192,7 +199,7 @@ def describe(fit):
     return '\n'.join(lines)
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='fit the static load compensation to recorded data')
     parser.add_argument('files', nargs='+', help='csv files of record_static_load.py')
     parser.add_argument('--joints', type=int, nargs='+', default=list(DEFAULT_JOINTS))
@@ -220,7 +227,7 @@ def main(argv=None):
         print()
         print(describe(fits[joint]))
         print('  hysteresis (half the up/down difference): mean {:.1f}, max {:.0f} positions'.format(
-            np.mean(hysteresis), np.max(hysteresis)))
+            np.mean(hysteresis), np.max(hysteresis)))  # type: ignore[str-format]  # numpy floating is not a float for mypy
         if args.split:
             directional[joint] = {direction: fit_joint(joint, samples, spring, args.holdout,
                                                        np.random.default_rng(args.seed), direction)

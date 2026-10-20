@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
 
 from src.camera.util import base_marker_offset
 from src.utils.obstacle import BoxObstacle
 import numpy as np
+
+if TYPE_CHECKING:
+    from src.camera.image_handlers import DetectedMarker
 
 
 RED_COLOR = [1, 0, 0, 1]
@@ -12,12 +18,12 @@ BLUE_COLOR = [0, 0, 1, 1]
 block_ids = [6, 7, 10, 11, 12, 13]
 
 
-def get_rotation_around_z_from_marker(found_marker):
+def get_rotation_around_z_from_marker(found_marker: DetectedMarker) -> float:
     matrix = found_marker.relative_rotation_matrix
     return math.atan2(matrix[1][0], matrix[0][0])
 
 
-def get_obstacle_from_marker(found_marker):
+def get_obstacle_from_marker(found_marker: DetectedMarker) -> BoxObstacle | None:  # type: ignore[return]  # falls through to none for unknown markers, the caller checks for it
     alpha = get_rotation_around_z_from_marker(found_marker)
 
     marker_id = found_marker.id

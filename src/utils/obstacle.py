@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from abc import ABC
+from collections.abc import Sequence
+
 import pybullet as p
 import numpy as np
 from absl import logging
@@ -6,16 +10,16 @@ from absl import logging
 
 class Obstacle(ABC):
 
-    def __init__(self):
-        self.obstacle_id = None
+    def __init__(self) -> None:
+        self.obstacle_id: int | None = None
 
-    def build(self, physics_client):
+    def build(self, physics_client: int) -> None:
         raise NotImplementedError("obstacle should have a build function")
 
-    def destroy(self, physics_client):
+    def destroy(self, physics_client: int) -> None:
         raise NotImplementedError("obstacle should have a destroy function")
 
-    def copy(self):
+    def copy(self) -> Obstacle:
         raise NotImplementedError("obstacle should have a copy function")
 
 
@@ -25,7 +29,8 @@ class BoxObstacle(Obstacle):
     The obstacle will be placed with it's base at the given z height
     """
 
-    def __init__(self, dimensions, raw_base_center_position, alpha=0, color=None):
+    def __init__(self, dimensions: Sequence[float] | np.ndarray, raw_base_center_position: Sequence[float] | np.ndarray,
+                 alpha: float = 0, color: Sequence[float] | None = None) -> None:
         """
 
         Args:
@@ -49,7 +54,7 @@ class BoxObstacle(Obstacle):
         self.color = color
         self.obstacle_id = None
 
-    def build(self, physics_client):
+    def build(self, physics_client: int) -> None:
 
         collision_box_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[i/200 for i in self.dimensions],
                                                   physicsClientId=physics_client)
@@ -64,26 +69,26 @@ class BoxObstacle(Obstacle):
         if self.color is not None:
             p.changeVisualShape(self.obstacle_id, -1, rgbaColor=self.color, physicsClientId=physics_client)
 
-    def destroy(self, physics_client):
+    def destroy(self, physics_client: int) -> None:
         if self.obstacle_id is None:
             logging.warning("no obstacle to destroy, call build() first")
             return
         p.removeBody(self.obstacle_id, physicsClientId=physics_client)
 
-    def copy(self):
+    def copy(self) -> BoxObstacle:
         return BoxObstacle(self.dimensions, self.raw_base_center_position, alpha=self.alpha, color=self.color)
 
 
 class SphereObstacle(Obstacle):
 
-    def __init__(self, radius, center_position, color=None):
+    def __init__(self, radius: float, center_position: Sequence[float], color: Sequence[float] | None = None) -> None:
         super().__init__()
         self.radius = radius
         self.center_position = center_position
         self.color = color
         self.obstacle_id = None
 
-    def build(self, physics_client):
+    def build(self, physics_client: int) -> None:
         collision_spere_id = p.createCollisionShape(p.GEOM_SPHERE, radius=self.radius/100,
                                                     physicsClientId=physics_client)
 
@@ -96,13 +101,13 @@ class SphereObstacle(Obstacle):
             p.changeVisualShape(self.obstacle_id, -1, rgbaColor=self.color, physicsClientId=physics_client)
 
 
-    def destroy(self, physics_client):
+    def destroy(self, physics_client: int) -> None:
         if self.obstacle_id is None:
             logging.warn("no obstacle to destroy, call build() first")
             return
         p.removeBody(self.obstacle_id, physicsClientId=physics_client)
 
-    def copy(self):
+    def copy(self) -> SphereObstacle:
         return SphereObstacle(self.radius, self.center_position, color=self.color)
 
 if __name__ == '__main__':

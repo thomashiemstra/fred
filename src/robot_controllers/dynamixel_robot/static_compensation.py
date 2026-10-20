@@ -24,6 +24,8 @@ of zero free length, and such a spring pulls exactly like a mass does: its torqu
 sin/cos terms as gravity (the regressor of L dL/dq is collinear with the gravity terms, condition numbers of 1e11).
 So that part is absorbed by the gravity coefficients and only dL/dq is a term of its own.
 """
+from collections.abc import Mapping, Sequence
+
 import numpy as np
 
 UP = 'up'
@@ -53,14 +55,15 @@ class SpringGeometry:
     :param a2: the length of the lower arm (joint 2 to joint 3)
     """
 
-    def __init__(self, base_anchor, arm_anchor, a2):
+    def __init__(self, base_anchor: Sequence[float] | np.ndarray, arm_anchor: Sequence[float] | np.ndarray,
+                 a2: float) -> None:
         self.base_anchor = np.array(base_anchor, dtype=np.float64)
         self.arm_anchor = np.array(arm_anchor, dtype=np.float64)
         self.a2 = float(a2)
         if self.base_anchor.shape != (2,) or self.arm_anchor.shape != (2,):
             raise ValueError('the anchors of the spring are (radial, up) and (along, perpendicular) pairs')
 
-    def length(self, q2, q3):
+    def length(self, q2: float, q3: float) -> float:
         """the length of the spring at the angles, in cm"""
         phi = q2 + q3
         along, perpendicular = self.arm_anchor
@@ -69,26 +72,26 @@ class SpringGeometry:
                            self.a2 * np.sin(q2) - along * np.cos(phi) + perpendicular * np.sin(phi)])
         return float(np.linalg.norm(anchor - self.base_anchor))
 
-    def length_and_gradient(self, q2, q3, h=1e-6):
+    def length_and_gradient(self, q2: float, q3: float, h: float = 1e-6) -> tuple[float, float, float]:
         """returns the length and its derivatives to angle 2 and angle 3, in cm and cm per radian"""
         length = self.length(q2, q3)
         d_q2 = (self.length(q2 + h, q3) - self.length(q2 - h, q3)) / (2 * h)
         d_q3 = (self.length(q2, q3 + h) - self.length(q2, q3 - h)) / (2 * h)
         return length, d_q2, d_q3
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (isinstance(other, SpringGeometry) and np.array_equal(self.base_anchor, other.base_anchor)
                 and np.array_equal(self.arm_anchor, other.arm_anchor) and self.a2 == other.a2)
 
 
-def term_names(joint):
+def term_names(joint: int) -> tuple[str, ...]:
     """the names of the terms of the holding load of the joint, in the order of regressor_row"""
     if joint not in TERMS_OF_JOINT:
         raise ValueError('joint {} has no static load terms, only joints {} have'.format(joint, sorted(TERMS_OF_JOINT)))
     return TERMS_OF_JOINT[joint]
 
 
-def term_values(joint, angles, spring=None):
+def term_values(joint: int, angles: np.ndarray, spring: SpringGeometry | None = None) -> dict[str, float]:
     """
     the value of every term of the joint at the angles
     :param joint: 2 to 5
@@ -115,7 +118,8 @@ def term_values(joint, angles, spring=None):
     return {name: values[name] for name in term_names(joint) if name in values}
 
 
-def regressor_row(joint, angles, spring=None, names=None):
+def regressor_row(joint: int, angles: np.ndarray, spring: SpringGeometry | None = None,
+                  names: Sequence[str] | None = None) -> np.ndarray:
     """
     the values of the terms of the joint as a row of the regressor
     :param names: the terms to include, by default all terms of the joint (the spring ones when a spring is given)
@@ -144,7 +148,11 @@ class StaticCompensation:
     :param spring: a SpringGeometry, needed for the spring terms
     """
 
-    def __init__(self, joint, terms, max_positions, up=None, down=None, spring=None):
+    directional: dict[str | None, dict[str, float]]
+
+    def __init__(self, joint: int, terms: Mapping[str, float], max_positions: int,
+                 up: Mapping[str, float] | None = None, down: Mapping[str, float] | None = None,
+                 spring: SpringGeometry | None = None) -> None:
         self.joint = joint
         self.max_positions = int(max_positions)
         self.spring = spring
@@ -153,9 +161,9 @@ class StaticCompensation:
         if (up is None) != (down is None):
             raise ValueError('up and down have to be given together')
         self.terms = self._checked(terms)
-        self.directional = {UP: self._checked(up), DOWN: self._checked(down)} if up is not None else {}
+        self.directional = {UP: self._checked(up), DOWN: self._checked(down)} if up is not None else {}  # type: ignore[arg-type]  # down is given when up is
 
-    def _checked(self, terms):
+    def _checked(self, terms: Mapping[str, float]) -> dict[str, float]:
         names = term_names(self.joint)
         unknown = [name for name in terms if name not in names]
         if unknown:
@@ -164,11 +172,11 @@ class StaticCompensation:
             raise ValueError('the spring terms of joint {} need the spring geometry'.format(self.joint))
         return {name: float(coefficient) for name, coefficient in terms.items()}
 
-    def coefficients(self, direction=None):
+    def coefficients(self, direction: str | None = None) -> dict[str, float]:
         """the coefficients used for a direction, the mean terms without one or without a directional fit"""
         return self.directional.get(direction, self.terms)
 
-    def positions(self, angles, direction=None):
+    def positions(self, angles: np.ndarray, direction: str | None = None) -> int:
         """
         the positions to add to the target for the static load at the angles
         :param angles: the commanded angles of all joints, indexed by servo id, in radians
@@ -182,11 +190,11 @@ class StaticCompensation:
         total = sum(coefficient * values[name] for name, coefficient in coefficients.items())
         return int(np.clip(np.rint(total), -self.max_positions, self.max_positions))
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (isinstance(other, StaticCompensation) and self.joint == other.joint and self.terms == other.terms
                 and self.max_positions == other.max_positions and self.directional == other.directional
                 and self.spring == other.spring)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return 'StaticCompensation(joint={}, terms={}, max_positions={}, directional={})'.format(
             self.joint, self.terms, self.max_positions, self.directional)

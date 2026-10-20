@@ -10,7 +10,7 @@ class CaptureConfig:
     screen_height = 1080
     fps = 60
     marker_size = 20
-    image_format = cv2.VideoWriter_fourcc(*'MJPG')
+    image_format = cv2.VideoWriter_fourcc(*'MJPG')  # type: ignore[attr-defined]  # missing from the opencv stubs, exists at runtime
     FOURCC =  cv2.VideoWriter.fourcc('m', 'j', 'p', 'g')
     FOURCC2 = cv2.VideoWriter.fourcc('M', 'J', 'P', 'G')
 
@@ -24,17 +24,17 @@ aruco_marker_length = 2.65
 base_marker_offset = [-26.5, 8, 0]
 
 
-def get_default_charuco_board(squares_x=6,
-                              squares_y=3,
-                              square_length=1,
-                              marker_length=0.8,
-                              dictionary=charuco_board_dictionary
-                              ):
+def get_default_charuco_board(squares_x: int = 6,
+                              squares_y: int = 3,
+                              square_length: float = 1,
+                              marker_length: float = 0.8,
+                              dictionary: cv2.aruco.Dictionary = charuco_board_dictionary
+                              ) -> cv2.aruco.CharucoBoard:
 
     return cv2.aruco.CharucoBoard((squares_x, squares_y), square_length, marker_length, dictionary)
 
 
-def get_calibrations(path):
+def get_calibrations(path: str) -> tuple[np.ndarray, np.ndarray]:
     try:
         with open(path, 'r') as calibartion_file:
             string = calibartion_file.read()
@@ -50,7 +50,9 @@ def get_calibrations(path):
     return cameraMatrix, distCoeffs
 
 
-def find_relative_vector_and_rotation(base_rotation_matrix, base_tvec, target_rotation_matrix, target_tvec):
+def find_relative_vector_and_rotation(base_rotation_matrix: np.ndarray, base_tvec: np.ndarray,
+                                      target_rotation_matrix: np.ndarray,
+                                      target_tvec: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     base_to_target_vec = target_tvec.reshape((3, 1)) - base_tvec
 
     relative_tvec = np.matmul(base_rotation_matrix.transpose(), base_to_target_vec)

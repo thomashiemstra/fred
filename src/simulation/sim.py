@@ -17,7 +17,7 @@ p.setRealTimeSimulation(1)
 collision_box_id_1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0.2], physicsClientId=physics_client)
 box1 = p.createMultiBody(0, collision_box_id_1, -1, [-0.4, 0.1, 0.1], [0, 0, 0, 1], physicsClientId=physics_client)
 
-current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe is optional in typeshed
 start_pos = [0, 0, 0]
 start_orientation = p.getQuaternionFromEuler([0, 0, 0])
 
@@ -33,7 +33,7 @@ arc_3 = Pose(25, 30, 25)
 
 poses = [arc_1, arc_2, arc_3]
 
-move = create_move(simulated_robot, poses, 15, None, None)
+move = create_move(simulated_robot, poses, 15, None, None)  # type: ignore[call-arg]  # create_move takes 4 arguments, script is stale
 simulated_robot.reset_to_pose(arc_1)
 _, _, _, _, pos, orientation_quaterions = p.getLinkState(robot_body_id, 7)
 
@@ -46,5 +46,5 @@ print(normal_on_b, distance)
 print(distance)
 # # move.go_to_start_of_move(simulated_robot, 2)
 while True:
-    move.move(simulated_robot)
-    move.move_reversed(simulated_robot)
+    move.move(simulated_robot)  # type: ignore[union-attr]  # create_move can return none
+    move.move_reversed(simulated_robot)  # type: ignore[union-attr]  # create_move can return none

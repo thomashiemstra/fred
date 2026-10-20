@@ -1,12 +1,14 @@
 import inspect
 import os
 from time import sleep
+from typing import Any
 
 import tensorflow as tf
 
+from src.kinematics.kinematics_utils import Pose
 from src.reinforcementlearning.environment.pose_recorder import PoseRecorder
 from src.reinforcementlearning.environment.robot_env_with_obstacles import RobotEnvWithObstacles
-from src.reinforcementlearning.environment.scenario import sensible_scenarios, test
+from src.reinforcementlearning.environment.scenario import Scenario, sensible_scenarios, test
 from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, \
     initialize_and_restore_train_checkpointer
 from tf_agents.environments import tf_py_environment
@@ -17,12 +19,12 @@ from src.utils.movement import b_spline_plot
 import numpy as np
 
 
-def pose_to_pose_distance(p1, p2):
+def pose_to_pose_distance(p1: Pose, p2: Pose) -> float:
     return np.sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2) + pow(p1.z - p2.z, 2))
 
 
-def get_usable_poses(poses, target_pose):
-    result = []
+def get_usable_poses(poses: list[Pose], target_pose: Pose) -> list[Pose]:
+    result: list[Pose] = []
     current_pose = poses[0]
     result.append(current_pose)
 
@@ -36,7 +38,7 @@ def get_usable_poses(poses, target_pose):
     return result
 
 
-def run_agent(eval_py_env, tf_agent, initial_state=None):
+def run_agent(eval_py_env: Any, tf_agent: Any, initial_state: Any = None) -> None:
     if initial_state is None:
         time_step = eval_py_env.reset()
     else:
@@ -46,11 +48,11 @@ def run_agent(eval_py_env, tf_agent, initial_state=None):
         time_step = eval_py_env.step(action_step.action)
 
 
-def main():
+def main() -> None:
     checkpoint_dir = 'rs_01_grid_new_network'
     robot_env_no_obstacles = False
 
-    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe never returns none on cpython
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
 
     train_dir = os.path.join(root_dir, 'train')
@@ -68,7 +70,7 @@ def main():
         tf_agent = create_agent(eval_py_env, None, robot_env_no_obstacles)
         initialize_and_restore_train_checkpointer(train_dir, tf_agent, global_step)
 
-    scenario = None
+    scenario: Scenario | None = None
     physics_client = robot_controller.physics_client
     for _ in range(len(sensible_scenarios)):
         run_agent(eval_py_env, tf_agent)
@@ -79,6 +81,7 @@ def main():
             scenario.destroy_scenario(physics_client)
 
         scenario = env.get_current_scenario()
+        assert scenario is not None
         usable_poses = get_usable_poses(recoded_poses, scenario.target_pose)
 
         smoothing_factor = 1000

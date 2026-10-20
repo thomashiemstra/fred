@@ -11,13 +11,16 @@ from numpy import pi
 # root window
 from src.robot_controllers.dynamixel_robot.arduino.ArduinoAngleReader import ArduinoAngleReader
 from src.global_objects import get_robot
+from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 
 
 class Servo2Manager:
 
-    def __init__(self, debug=False) -> None:
+    def __init__(self, debug: bool = False) -> None:
         self.debug = debug
-        self.robot = get_robot()
+        robot = get_robot()
+        assert isinstance(robot, CombinedRobot), 'servo 2 can only be managed on the real robot'
+        self.robot = robot
 
         self.servo_id = 2
         self.servo = self.robot.servo2
@@ -26,37 +29,37 @@ class Servo2Manager:
         self.angle3 = 0.5
         self.step_size = 0.05
 
-        self.servo_2offsets_dict = {}
-        self.servo_3offsets_dict = {}
-        self.servo_3_direct_offsets_dict = {}
+        self.servo_2offsets_dict: dict[float, dict[float, int]] = {}
+        self.servo_3offsets_dict: dict[float, dict[float, int]] = {}
+        self.servo_3_direct_offsets_dict: dict[float, list[int]] = {}
         self.angle2_reader = ArduinoAngleReader()
         self.angle2_reader.start()
 
-    def _add_keyboard_shortcuts(self):
+    def _add_keyboard_shortcuts(self) -> None:
         keyboard.add_hotkey('s', lambda: self.switch_servo())
         keyboard.add_hotkey('up', lambda: self.move_current_servo_up())
         keyboard.add_hotkey('down', lambda: self.move_current_servo_down())
         keyboard.add_hotkey('space', lambda: self.record_offset())
         keyboard.add_hotkey('p', lambda: self.print_offset_json())
 
-    def start(self):
+    def start(self) -> None:
         self._add_keyboard_shortcuts()
         self._start_internal()
         keyboard.wait()
 
-    def start_no_keyboard(self):
+    def start_no_keyboard(self) -> None:
         self._start_internal()
 
-    def _start_internal(self):
+    def _start_internal(self) -> None:
         self.robot.enable_servos()
         self.robot.move_servo(3, self.angle3 * pi)
         self.robot.move_servo(2, self.angle2 * pi)
 
-    def print_offset_json(self):
+    def print_offset_json(self) -> None:
         print(json.dumps(self.servo_2offsets_dict))
         print(json.dumps(self.servo_3_direct_offsets_dict))
 
-    def record_offset(self):
+    def record_offset(self) -> None:
         current_positions = self.robot.get_current_positions()
         servo2_target = self.robot.servo2.target_position
         servo2_offset = current_positions[2] - servo2_target
@@ -84,7 +87,7 @@ class Servo2Manager:
         angle2_list.append(int(servo3_offset))
         self.servo_3_direct_offsets_dict[combined_angle] = angle2_list
 
-    def switch_servo(self):
+    def switch_servo(self) -> None:
         if self.servo_id == 2:
             self.servo_id = 3
             self.servo = self.robot.servo3
@@ -96,7 +99,7 @@ class Servo2Manager:
             if self.debug:
                 print("switched to servo2")
 
-    def move_current_servo_up(self):
+    def move_current_servo_up(self) -> None:
         if self.servo_id == 2:
             self.angle2 = self.angle2 + self.step_size if self.angle2 < 1 else self.angle2
             self.robot.move_servo(self.servo_id, self.angle2 * pi)
@@ -104,7 +107,7 @@ class Servo2Manager:
             self.angle3 = self.angle3 + self.step_size if self.angle3 < 0.5 else self.angle3
             self.robot.move_servo(self.servo_id, self.angle3 * pi)
 
-    def move_current_servo_down(self):
+    def move_current_servo_down(self) -> None:
         if self.servo_id == 2:
             self.angle2 = self.angle2 - self.step_size if self.angle2 > 0 else self.angle2
             self.robot.move_servo(self.servo_id, self.angle2 * pi)

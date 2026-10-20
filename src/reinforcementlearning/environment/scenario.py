@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from src.kinematics.kinematics_utils import Pose
 from src.utils.obstacle import BoxObstacle
 import numpy as np
@@ -7,20 +9,20 @@ red = [1, 0, 0, 1]
 
 class Scenario:
 
-    def __init__(self, obstacles, start_pose, target_pose):
+    def __init__(self, obstacles: list[BoxObstacle], start_pose: Pose, target_pose: Pose) -> None:
         self.obstacles = obstacles
         self.target_pose = target_pose
         self.start_pose = start_pose
 
-    def build_scenario(self, physics_client):
+    def build_scenario(self, physics_client: int) -> None:
         for obstacle in self.obstacles:
             obstacle.build(physics_client)
 
-    def destroy_scenario(self, physics_client):
+    def destroy_scenario(self, physics_client: int) -> None:
         for obstacle in self.obstacles:
             obstacle.destroy(physics_client)
 
-    def copy(self):
+    def copy(self) -> Scenario:
         obstacles_copy = [obstacle.copy() for obstacle in self.obstacles]
         return Scenario(obstacles_copy, self.start_pose, self.target_pose)
 

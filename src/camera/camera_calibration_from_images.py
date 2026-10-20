@@ -30,7 +30,7 @@ for fname in images:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
 
-    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD,
+    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD,  # type: ignore[call-overload]  # flags are passed as the corners argument
                                              cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
                                              + cv2.CALIB_CB_NORMALIZE_IMAGE)
 
@@ -63,7 +63,7 @@ detected corners (imgpoints)
 """
 
 print("calculating calibration parameters for {} images".format(img_counter))
-retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
+retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)  # type: ignore[call-overload]  # stubs do not accept none for the matrices, opencv does
 
 print("Camera matrix : \n")
 print(cameraMatrix)

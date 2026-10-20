@@ -3,16 +3,25 @@ The check whether a pose of the arm is inside its workspace limits, see global_c
 expose it as AbstractRobotController.check_workspace(angles); whoever moves the robot runs it before executing a
 move, move_servos itself doesn't.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from src.kinematics.kinematics import forward_position_kinematics
 from src.utils.movement_exception import MovementException
 
+if TYPE_CHECKING:
+    from src.global_constants import WorkSpaceLimits
+    from src.kinematics.kinematics_utils import RobotConfig
+
 # a pose on a limit comes out of the kinematics a rounding error past it, that is still inside
 TOLERANCE = 1e-6  # cm
 
 
-def workspace_violation(angles, robot_config, limits):
+def workspace_violation(angles: np.ndarray, robot_config: RobotConfig,
+                        limits: type[WorkSpaceLimits] | WorkSpaceLimits | None) -> str | None:
     """
     why the pose of the angles is outside the limits, or None when it is inside
     :param angles: the joint angles, indexed by servo id, in radians
@@ -26,7 +35,7 @@ def workspace_violation(angles, robot_config, limits):
 
     radius = np.linalg.norm(end_effector)
     if radius < limits.radius_min - TOLERANCE or radius > limits.radius_max + TOLERANCE:
-        return 'the end effector would move to {}, {:.1f}cm from the base, outside of [{}, {}]'.format(
+        return 'the end effector would move to {}, {:.1f}cm from the base, outside of [{}, {}]'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f
             np.round(end_effector, 1), radius, limits.radius_min, limits.radius_max)
     if end_effector[2] < limits.z_min - TOLERANCE:
         return 'the end effector would move to {}, below the minimum height of {}'.format(
@@ -41,7 +50,8 @@ def workspace_violation(angles, robot_config, limits):
     return None
 
 
-def check_workspace(angles, robot_config, limits):
+def check_workspace(angles: np.ndarray, robot_config: RobotConfig,
+                    limits: type[WorkSpaceLimits] | WorkSpaceLimits | None) -> None:
     """
     :raises MovementException: when the pose of the angles is outside the limits
     """

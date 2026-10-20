@@ -35,7 +35,7 @@ OPEN_STATE = 0
 CLOSED_STATE = 100
 
 
-def read_present_current(handler):
+def read_present_current(handler: ServoHandler) -> int | None:
     current, comm_result, error = handler.packet_handler.read2ByteTxRx(
         handler.port_handler, GRIPPER_ID, cfg.ADDR_PRESENT_CURRENT)
     if comm_result != 0:
@@ -43,14 +43,14 @@ def read_present_current(handler):
     return to_signed(current, cfg.LEN_PRESENT_CURRENT)
 
 
-def gripper_state(handler):
+def gripper_state(handler: ServoHandler) -> float | None:
     if not handler.read_current_pos():
         return None
     servo = handler.get_servo(GRIPPER_ID)
     return servo.get_angle_from_position(servo.current_position)
 
 
-def print_status(handler, name):
+def print_status(handler: ServoHandler, name: str) -> dict[int, list[str]] | None:
     state = gripper_state(handler)
     current = read_present_current(handler)
     errors = handler.read_hardware_errors()
@@ -62,14 +62,14 @@ def print_status(handler, name):
     return errors
 
 
-def read_temperature(handler):
+def read_temperature(handler: ServoHandler) -> int | None:
     temperature_and_voltage = handler.read_temperature_and_voltage()
     if temperature_and_voltage is None:
         return None
     return temperature_and_voltage[GRIPPER_ID][0]
 
 
-def move_and_wait(handler, state):
+def move_and_wait(handler: ServoHandler, state: float) -> int:
     """move the gripper to the state and wait until it stops moving, returns the peak current while moving"""
     handler.set_angle(GRIPPER_ID, state)
     handler.move_to_angles()
@@ -93,7 +93,7 @@ def move_and_wait(handler, state):
     return peak_current
 
 
-def measure_current(handler, duration):
+def measure_current(handler: ServoHandler, duration: float) -> tuple[float, int]:
     """returns the average and peak absolute current over the duration"""
     currents = []
     start = perf_counter()
@@ -105,7 +105,7 @@ def measure_current(handler, duration):
     return sum(currents) / max(len(currents), 1), max(currents, default=0)
 
 
-def closed_end_test(handler):
+def closed_end_test(handler: ServoHandler) -> bool:
     """returns False if the gripper shut down"""
     goal_current = handler.get_servo(GRIPPER_ID).goal_current
     move_and_wait(handler, OPEN_STATE)
@@ -115,14 +115,14 @@ def closed_end_test(handler):
     average_current, _ = measure_current(handler, 1.0)
     print('peak current while closing: {}mA, current when closed: {:.0f}mA'.format(peak_current, average_current))
     errors = print_status(handler, 'closed')
-    if average_current > 0.5 * goal_current:
+    if average_current > 0.5 * goal_current:  # type: ignore[operator]  # the gripper has a goal current in the servo config
         print('the gripper pushes against its mechanical end when it is closed, the closed end of its range '
               '(position {}) is further than the gripper can close'.format(handler.get_servo(GRIPPER_ID).max_position))
     move_and_wait(handler, OPEN_STATE)
     return not errors
 
 
-def squeeze_tests(handler):
+def squeeze_tests(handler: ServoHandler) -> bool:
     """squeeze with increasing goal currents, returns False if the gripper shut down"""
     for goal_current in GOAL_CURRENTS:
         if input('\nsqueeze with a goal current of {}mA? (enter to continue, s to stop) '.format(goal_current)) \
@@ -146,7 +146,7 @@ def squeeze_tests(handler):
     return True
 
 
-def lead_tests(handler):
+def lead_tests(handler: ServoHandler) -> None:
     """squeeze with the target a few states beyond the object, like the xbox controller does"""
     goal_current = handler.get_servo(GRIPPER_ID).goal_current
     print('\nsqueezing with the target a few states beyond the object, with the configured goal current of {}mA'
@@ -165,14 +165,14 @@ def lead_tests(handler):
         sleep(0.5)
         average_current, peak_current = measure_current(handler, 1.5)
         print('target {} beyond the object: average {:.0f}mA ({:.0f}% of the goal current), peak {}mA'.format(
-            lead, average_current, 100 * average_current / goal_current, peak_current))
+            lead, average_current, 100 * average_current / goal_current, peak_current))  # type: ignore[operator]  # the gripper has a goal current in the servo config
         if print_status(handler, 'squeezing'):
             print('the gripper shut down, stopping the lead tests')
             return
     move_and_wait(handler, OPEN_STATE)
 
 
-def main():
+def main() -> int:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
     gripper = load_servo_config().servos[GRIPPER_ID]

@@ -5,7 +5,7 @@ gripper_min_pwm = 60
 gripper_max_pwm = 160
 gripper_servo_pin = 9
 
-def convert_gripper_state_to_pwm(state):
+def convert_gripper_state_to_pwm(state: float) -> float:
     return gripper_min_pwm + ((gripper_max_pwm - gripper_min_pwm) * (state / 100))
 
 

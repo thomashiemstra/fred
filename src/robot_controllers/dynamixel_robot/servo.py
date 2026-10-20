@@ -1,11 +1,17 @@
+from __future__ import annotations
+
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Optional, Callable, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import logging
 from numpy import pi
 
 from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
+
+if TYPE_CHECKING:
+    from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
 
 
 class Servo:
@@ -15,8 +21,10 @@ class Servo:
     current_position = -1  # set by the servo handler
     DIRECTION_DEADBAND_POSITIONS = 3
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
-                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None, compensation=None):
+    def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
+                 profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
+                 d: int = 500, offset: int = 0, goal_current: int | None = None,
+                 compensation: StaticCompensation | None = None) -> None:
         """
         :param compensation: a StaticCompensation, the positions it gives for the commanded angles of all joints
             are added to every target position (see static_compensation.py)
@@ -35,14 +43,14 @@ class Servo:
         self.goal_current = goal_current
         self.compensation = compensation
         self.compensation_positions = 0  # the positions the compensation added to the last target
-        self._direction = None
-        self._extreme_angle = None  # the furthest commanded angle in the current direction
+        self._direction: str | None = None
+        self._extreme_angle: float | None = None  # the furthest commanded angle in the current direction
         # the direction only turns around when the commanded angle has come back more than this from the furthest
         # point, so a target that dithers around a value doesn't flip the up/down compensation every step
         positions_per_radian = abs(max_position - min_position) / (max_angle - min_angle) if max_angle != min_angle else 0
         self.direction_deadband = self.DIRECTION_DEADBAND_POSITIONS / positions_per_radian if positions_per_radian else 0.0
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
                "profile_velocity={} profile_acceleration={} offset={} goal_current={} compensation={}" \
             .format(self.p, self.i, self.d, self.max_angle, self.min_angle, self.min_position, self.max_position,
@@ -50,7 +58,7 @@ class Servo:
                     self.goal_current, self.compensation)
 
     # updates the target position of this servo
-    def set_target_position_from_angle(self, angle, all_angles=None):
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         """
         :param angle: the angle to move to
         :param all_angles: the commanded angles of all joints, indexed by servo id; with a compensation the
@@ -71,7 +79,7 @@ class Servo:
             self.compensation_positions = self.compensation.positions(all_angles, direction)
             self.target_position += self.compensation_positions
 
-    def _update_direction(self, angle):
+    def _update_direction(self, angle: float) -> str | None:
         """
         the direction the commanded angle moves in: UP, DOWN or None before it first moved. The direction only turns
         around when the angle has come back more than the deadband from the furthest point it reached.
@@ -88,13 +96,13 @@ class Servo:
             self._direction, self._extreme_angle = DOWN, angle
         return self._direction
 
-    def clamp_position(self, position):
+    def clamp_position(self, position: float) -> int:
         """clamp the position to the calibrated range of this servo, including the constant offset"""
         lower = min(self.min_position, self.max_position) + self.constant_offset
         upper = max(self.min_position, self.max_position) + self.constant_offset
         return int(np.clip(position, lower, upper))
 
-    def clamp_target_position(self):
+    def clamp_target_position(self) -> int:
         """
         the target position with the uncompensated part clamped to the calibrated range, so the compensation is
         kept at the ends of the range (the goal position may exceed the calibrated range by the compensation, the
@@ -102,7 +110,7 @@ class Servo:
         """
         return self.clamp_position(self.target_position - self.compensation_positions) + self.compensation_positions
 
-    def get_angle_from_position(self, position):
+    def get_angle_from_position(self, position: int | None) -> float:
         if position is None:
             return 0
         if position > self.max_position:
@@ -111,10 +119,10 @@ class Servo:
             logging.debug("input position is smaller than min position")
 
         if self.min_position > self.max_position:
-            return np.interp(position - self.constant_offset, [self.max_position, self.min_position],
+            return np.interp(position - self.constant_offset, [self.max_position, self.min_position],  # type: ignore[return-value]  # scalar in, scalar out
                              [self.max_angle, self.min_angle])
         else:
-            return np.interp(position - self.constant_offset, [self.min_position, self.max_position],
+            return np.interp(position - self.constant_offset, [self.min_position, self.max_position],  # type: ignore[return-value]  # scalar in, scalar out
                              [self.min_angle, self.max_angle])
 
 
@@ -125,9 +133,10 @@ class AdjustmentDirections(Enum):
 
 class ServoWithOffsetFunction(Servo):
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, offset_function_up,
-                 offset_function_down, profile_velocity=100, profile_acceleration=50, p=1000, i=600, d=500,
-                 offset=0, goal_current=None):
+    def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
+                 offset_function_up: Callable[[np.ndarray], int], offset_function_down: Callable[[np.ndarray], int],
+                 profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
+                 d: int = 500, offset: int = 0, goal_current: int | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
                          profile_acceleration, p, i, d, offset, goal_current)
         if offset_function_up is None or offset_function_down is None:
@@ -137,7 +146,7 @@ class ServoWithOffsetFunction(Servo):
         self._last_commanded_angle = 0.0
         self._last_adjustment_direction = AdjustmentDirections.UP
 
-    def set_target_position_from_angle(self, angle, all_angles=None):
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         super().set_target_position_from_angle(angle)
         if all_angles is None:
             return
@@ -149,7 +158,7 @@ class ServoWithOffsetFunction(Servo):
             self.target_position -= self.offset_function_down(all_angles)
         self._last_commanded_angle = angle
 
-    def _get_adjustment_direction(self, angle):
+    def _get_adjustment_direction(self, angle: float) -> AdjustmentDirections:
         if angle == self._last_commanded_angle:
             return self._last_adjustment_direction
         elif angle > self._last_commanded_angle:
@@ -162,22 +171,24 @@ class ServoWithOffsetFunction(Servo):
 
 class Servo2(Servo):
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
-                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None, dynamic_offsets=None):
+    def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
+                 profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
+                 d: int = 500, offset: int = 0, goal_current: int | None = None,
+                 dynamic_offsets: dict[str, dict[str, int]] | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
                          profile_acceleration, p, i, d, offset, goal_current)
         self.dynamic_offsets = dynamic_offsets
-        self.dynamic_offsets_info = self._get_dynamic_offsets_info(dynamic_offsets)
+        self.dynamic_offsets_info = self._get_dynamic_offsets_info(dynamic_offsets)  # type: ignore[arg-type]  # fails on none
         self.angle2_lookup_min = self.dynamic_offsets_info['min']
         self.angle2_lookup_max = self.dynamic_offsets_info['max']
 
-    def set_target_position_from_angle(self, angle, all_angles=None):
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         super().set_target_position_from_angle(angle)
         self.target_position -= self._get_dynamic_offsets(all_angles)
 
     @staticmethod
-    def _get_dynamic_offsets_info(dynamic_offsets):
-        info = {}
+    def _get_dynamic_offsets_info(dynamic_offsets: dict[str, dict[str, int]]) -> dict[str, Any]:
+        info: dict[str, Any] = {}
         angle2_values = []
 
         for angle2 in dynamic_offsets:
@@ -197,7 +208,7 @@ class Servo2(Servo):
 
         return info
 
-    def _get_dynamic_offsets(self, all_angles):
+    def _get_dynamic_offsets(self, all_angles: np.ndarray | None) -> int:
         if self.dynamic_offsets is None or all_angles is None:
             return 0
         angle2rounded = round(all_angles[2] / pi, 1)
@@ -219,19 +230,21 @@ class Servo2(Servo):
 
 class Servo3(Servo):
 
-    def __init__(self, min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity=100,
-                 profile_acceleration=50, p=1000, i=600, d=500, offset=0, goal_current=None, dynamic_offsets=None):
+    def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
+                 profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
+                 d: int = 500, offset: int = 0, goal_current: int | None = None,
+                 dynamic_offsets: dict[str, int] | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode,
                          profile_velocity, profile_acceleration, p, i, d, offset, goal_current)
         self.dynamic_offsets = dynamic_offsets
-        self.angle_lookup_min, self.angle_lookup_max = self._get_dynamic_offsets_info(dynamic_offsets)
+        self.angle_lookup_min, self.angle_lookup_max = self._get_dynamic_offsets_info(dynamic_offsets)  # type: ignore[arg-type]  # fails on none
 
-    def set_target_position_from_angle(self, angle, all_angles=None):
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         super().set_target_position_from_angle(angle)
         self.target_position -= self._get_dynamic_offsets(all_angles)
 
     @staticmethod
-    def _get_dynamic_offsets_info(dynamic_offset):
+    def _get_dynamic_offsets_info(dynamic_offset: dict[str, int]) -> tuple[float, float]:
         angles = []
         for angle in dynamic_offset:
             angles.append(round(float(angle), 1))
@@ -240,7 +253,7 @@ class Servo3(Servo):
         max_angle = sorted_angles[-1]
         return min_angle, max_angle
 
-    def _get_dynamic_offsets(self, all_angles):
+    def _get_dynamic_offsets(self, all_angles: np.ndarray | None) -> int:
         if self.dynamic_offsets is None or all_angles is None:
             return 0
         angle_rounded = round((all_angles[2] + all_angles[3])/pi, 1)

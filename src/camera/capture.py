@@ -1,6 +1,8 @@
 import cv2
+import numpy as np
 import threading
 
+from src.camera.image_handlers import ImageHandler
 from src.camera.util import CaptureConfig
 from src.utils.decorators import synchronized_with_lock
 
@@ -17,21 +19,21 @@ class CameraCapture:
     marker_y_low = int(half__height - 20)
     marker_y_high = int(half__height + 20)
 
-    def __init__(self, camera, image_handlers=None):
+    def __init__(self, camera: int, image_handlers: list[ImageHandler] | None = None) -> None:
         if image_handlers is None:
             image_handlers = []
 
         self._camera = camera
-        self._cap = None
+        self._cap: cv2.VideoCapture | None = None
         self._running = False
         self.lock = threading.RLock()
         self.run_lock = threading.RLock()
         self.image_handlers_lock = threading.RLock()
         self._image_handlers = image_handlers
-        self._thread = None
+        self._thread: threading.Thread | None = None
 
     @synchronized_with_lock("lock")
-    def start_camera(self):
+    def start_camera(self) -> None:
         if self._running:
             print("camera already running")
             return
@@ -53,7 +55,7 @@ class CameraCapture:
         self._thread.start()
 
     @synchronized_with_lock("lock")
-    def start_camera_recording(self):
+    def start_camera_recording(self) -> None:
         if self._running:
             print("camera already running")
             return
@@ -75,16 +77,17 @@ class CameraCapture:
         self._thread.start()
 
     @synchronized_with_lock("lock")
-    def stop_camera(self):
+    def stop_camera(self) -> None:
         if self._thread is None:
             return
         with self.run_lock:
             self._running = False
         self._thread.join()
 
-    def __capture_camera(self):
+    def __capture_camera(self) -> None:
         while self.__is_running():
             # Capture frame-by-frame
+            assert self._cap is not None
             ret, frame = self._cap.read()
             if not ret:
                 continue
@@ -99,18 +102,19 @@ class CameraCapture:
         for image_handler in self._image_handlers:
             image_handler.deactivate_handler()
 
+        assert self._cap is not None
         self._cap.release()
         cv2.destroyAllWindows()
 
-    def __is_running(self):
+    def __is_running(self) -> bool:
         with self.run_lock:
             return self._running
 
     @synchronized_with_lock("image_handlers_lock")
-    def use_image_handlers(self, frame, gray):
+    def use_image_handlers(self, frame: np.ndarray, gray: np.ndarray) -> None:
         for image_handler in self._image_handlers:
             image_handler.handle_frame(frame, gray)
 
     @synchronized_with_lock("image_handlers_lock")
-    def add_image_handler(self, image_handler):
+    def add_image_handler(self, image_handler: ImageHandler) -> None:
         self._image_handlers.append(image_handler)

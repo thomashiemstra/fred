@@ -1,10 +1,13 @@
 from src.global_objects import get_robot
+from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 import numpy as np
 from time import sleep
 import json
 
 
-robot = get_robot()
+real_robot = get_robot()
+assert isinstance(real_robot, CombinedRobot), 'this script needs the real robot'
+robot = real_robot
 servo_id = 5
 servo = robot.servo5
 
@@ -13,7 +16,7 @@ robot.move_servo(servo_id, 0)
 sleep(2)
 
 
-def get_offset():
+def get_offset() -> int:
     current_positions = robot.get_current_positions()
     servo2_target = servo.target_position
     return int(current_positions[servo_id] - servo2_target)

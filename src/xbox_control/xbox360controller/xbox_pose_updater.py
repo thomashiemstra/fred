@@ -1,6 +1,7 @@
-from __future__ import division
+from __future__ import division, annotations
 
 import threading
+from typing import TYPE_CHECKING
 
 from src import global_constants
 from src.kinematics.kinematics_utils import Pose
@@ -15,11 +16,19 @@ from src.utils.decorators import synchronized_with_lock, timer
 from src.utils.movement import get_angles_center
 from src.utils.os_utils import is_linux
 
+if TYPE_CHECKING:
+    from src.xbox_control.xbox360controller.XboxController import XboxController
+
 
 class XboxPoseUpdater:
+    v_x: float
+    v_y: float
+    v_z: float
+    v_alpha: float
+    v_gamma: float
 
-    def __init__(self, controller, maximum_speed=5.0, ramp_up_time=0.1,
-                 workspace_limits=WorkSpaceLimits):
+    def __init__(self, controller: XboxController, maximum_speed: float = 5.0, ramp_up_time: float = 0.1,
+                 workspace_limits: type[WorkSpaceLimits] | None = WorkSpaceLimits) -> None:
         self.workspace_limits = workspace_limits
         self.v_x, self.v_y, self.v_z = 0, 0, 0
         self.v_alpha, self.v_gamma = 0, 0
@@ -34,17 +43,17 @@ class XboxPoseUpdater:
 
     @property
     @synchronized_with_lock("lock")
-    def maximum_speed(self):
+    def maximum_speed(self) -> float:
         return self._maximum_speed
 
     @maximum_speed.setter
     @synchronized_with_lock("lock")
-    def maximum_speed(self, value):
+    def maximum_speed(self, value: float) -> None:
         self._maximum_speed = value
         self._dv = self._maximum_speed / (self.ramp_up_time * self.steps_per_second)
 
-    def input_to_delta_velocity(self, controller_input, velocity, maximum_velocity):
-        new_velocity = 0
+    def input_to_delta_velocity(self, controller_input: float, velocity: float, maximum_velocity: float) -> float:
+        new_velocity: float = 0
         direction = np.sign(controller_input)
         if controller_input != 0:
             new_velocity = velocity + direction * self._dv
@@ -56,12 +65,12 @@ class XboxPoseUpdater:
                 new_velocity = velocity + self._dv if velocity + self._dv < 0 else 0
         return new_velocity
 
-    def get_xyz_from_poller(self):
+    def get_xyz_from_poller(self) -> tuple[float, float, float]:
         x_in, y_in = self.controller.get_left_thumb()
         z_in = self.controller.get_lr_trigger()
         return x_in, y_in, z_in
 
-    def __update_orientation_velocities(self, find_center_mode):
+    def __update_orientation_velocities(self, find_center_mode: bool) -> None:
         right_thumb_x, right_thumb_y = self.controller.get_right_thumb()
         if not self.is_linux:
             right_thumb_x *= -1
@@ -76,7 +85,7 @@ class XboxPoseUpdater:
         else:
             self.v_gamma = self.input_to_delta_velocity(right_thumb_y, self.v_gamma, v_gamma_max)
 
-    def __update_position_velocities(self, find_center_mode):
+    def __update_position_velocities(self, find_center_mode: bool) -> None:
         x, y, z = self.get_xyz_from_poller()
 
         v_x_max = self.maximum_speed * (x / 100)
@@ -90,7 +99,7 @@ class XboxPoseUpdater:
         else:
             self.v_z = self.input_to_delta_velocity(z, self.v_z, v_z_max)
 
-    def get_updated_pose_from_controller(self, old_pose, find_center_mode, center):
+    def get_updated_pose_from_controller(self, old_pose: Pose, find_center_mode: bool, center: np.ndarray | None) -> Pose:
         self.__update_position_velocities(find_center_mode)
         self.__update_orientation_velocities(find_center_mode)
 
@@ -122,7 +131,7 @@ class XboxPoseUpdater:
 
         return Pose(x, y, z, flip=old_pose.flip, alpha=alpha, gamma=gamma, beta=0.0)
 
-    def get_orientation(self, old_pose, center):
+    def get_orientation(self, old_pose: Pose, center: np.ndarray | None) -> tuple[float, float]:
         if center is not None:
             alpha, _, gamma = get_angles_center(old_pose.x, old_pose.y, old_pose.z, center)
         else:
@@ -131,7 +140,7 @@ class XboxPoseUpdater:
 
         return alpha, gamma
 
-    def stop(self):
+    def stop(self) -> None:
         self.controller.stop()
 
 

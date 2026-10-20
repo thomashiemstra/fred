@@ -3,10 +3,10 @@ from numpy import arctan2, sin, cos, pi, power
 from numpy import sqrt
 from numba import jit
 
-from src.kinematics.kinematics_utils import Pose, calculate_angles_from_euler_matrix
+from src.kinematics.kinematics_utils import Pose, RobotConfig, calculate_angles_from_euler_matrix
 
 
-def inverse_kinematics(pose, robot_config):
+def inverse_kinematics(pose: Pose, robot_config: RobotConfig) -> np.ndarray:
     """
     Given a target pose and link lengths of a 6 DOF robot arm, calculate the corresponding angles to reach it.
     For a more detailed explanation, see ik_documentation.pdf.
@@ -19,7 +19,8 @@ def inverse_kinematics(pose, robot_config):
 
 
 @jit()
-def calculate_ik(x, y, z, d1, d6, a2, d4, t, flip):
+def calculate_ik(x: float, y: float, z: float, d1: float, d6: float, a2: float, d4: float, t: np.ndarray,
+                 flip: bool) -> np.ndarray:
     # First find the position of the wrist
     xc = x - d6 * t[0, 2]
     yc = y - d6 * t[1, 2]
@@ -84,7 +85,7 @@ def calculate_ik(x, y, z, d1, d6, a2, d4, t, flip):
     return angles
 
 
-def forward_kinematics(angles, robot_config):
+def forward_kinematics(angles: np.ndarray, robot_config: RobotConfig) -> Pose:
     """
     The inverse of inverse_kinematics, calculate the pose of the end effector for the given angles.
     :param angles: array of angles, this array starts at 1.
@@ -97,7 +98,8 @@ def forward_kinematics(angles, robot_config):
     return Pose(p6[0], p6[1], p6[2], flip=bool(angles[5] < 0), alpha=alpha, beta=beta, gamma=gamma)
 
 
-def forward_position_kinematics(angles, robot_config):
+def forward_position_kinematics(angles: np.ndarray, robot_config: RobotConfig
+                                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     d1 = robot_config.d1
     d4 = robot_config.d4
     d6 = robot_config.d6
@@ -141,7 +143,7 @@ def forward_position_kinematics(angles, robot_config):
     return p1, p2, p3, p4, p6
 
 
-def forward_orientation_kinematics(angles):
+def forward_orientation_kinematics(angles: np.ndarray) -> np.ndarray:
     q1 = angles[1]
     q2 = angles[2]
     q3 = angles[3]
@@ -167,7 +169,8 @@ def forward_orientation_kinematics(angles):
     return res
 
 
-def jacobian_transpose_on_f(workspace_force, angles, robot_config, c1_location):
+def jacobian_transpose_on_f(workspace_force: np.ndarray, angles: np.ndarray, robot_config: RobotConfig,
+                            c1_location: float) -> np.ndarray:
     """
     compute the jacobian transpose on 3 control points on the robot, this translates world forces on each joint
     into joint forces. The join forces add up in joint space.

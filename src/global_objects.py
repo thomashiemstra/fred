@@ -8,15 +8,24 @@ decided once per process by its entry point with configure(): the server shows i
 Fresh simulated robots for the reinforcement learning environments and the visualiser come from
 simulation_utils.start_simulated_robot.
 """
+from __future__ import annotations
+
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from src import global_constants
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 
+if TYPE_CHECKING:
+    from src.camera.capture import CameraCapture
+    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+    from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
+    from src.xbox_control.xbox_robot_controller import XboxRobotController
+
 _show_simulation = False
 
 
-def configure(show_simulation):
+def configure(show_simulation: bool) -> None:
     """
     decides what the robot of this process looks like, to be called by the entry point before the robot is built
     :param show_simulation: open the pybullet window for the simulation (the server does, scripts keep it headless)
@@ -29,7 +38,7 @@ def configure(show_simulation):
 
 
 @lru_cache(maxsize=1)
-def get_robot():
+def get_robot() -> SimulatedRobotController | CombinedRobot:
     """
     the robot of this process, built on the first call: the simulated robot, or the real robot mirrored in the
     simulation (headless unless configure(show_simulation=True) was called); the serial port of the real robot is
@@ -55,7 +64,7 @@ def get_robot():
 
 
 @lru_cache(maxsize=1)
-def get_xbox_robot_controller():
+def get_xbox_robot_controller() -> XboxRobotController:
     from src.xbox_control.xbox360controller.XboxController import XboxController
     from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
     from src.xbox_control.xbox_robot_controller import XboxRobotController
@@ -68,6 +77,6 @@ def get_xbox_robot_controller():
 
 
 @lru_cache(maxsize=1)
-def get_camera(camera=0):
+def get_camera(camera: int = 0) -> CameraCapture:
     from src.camera.capture import CameraCapture
     return CameraCapture(camera, [])

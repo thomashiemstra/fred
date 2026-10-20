@@ -27,13 +27,16 @@ import csv
 import logging
 import sys
 import time
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 
 from src.global_constants import WorkSpaceLimits
 from src.global_objects import get_robot
-from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS
+from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
 from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
 from src.utils.movement import plan_move_to_angles, execute_move, check_move, PlannedMove
@@ -61,14 +64,15 @@ class StopRecording(Exception):
     """raised to stop the recording, with the reason"""
 
 
-def limits_with_floor(floor, limits=WorkSpaceLimits):
+def limits_with_floor(floor: float, limits: type[WorkSpaceLimits] = WorkSpaceLimits) -> type[WorkSpaceLimits]:
     """the workspace limits with the floor of the gripper tip (z_min, cm above the table) replaced; the wrist keeps
     its own floor unless this one is higher"""
     wrist_z_min = max(float(floor), getattr(limits, 'wrist_z_min', float(floor)))
     return type('RecordingLimits', (limits,), {'z_min': float(floor), 'wrist_z_min': wrist_z_min})
 
 
-def sampling_ranges(angle_limits, joints, margin, overrides=None):
+def sampling_ranges(angle_limits: dict[int, tuple[float, float]], joints: Iterable[int], margin: float,
+                    overrides: dict[int, tuple[float, float]] | None = None) -> dict[int, tuple[float, float]]:
     """
     the range of every varied joint: the servo range less the margin, narrowed by DEFAULT_RANGES and the overrides
     :param angle_limits: mapping of joint to (min angle, max angle) of the servos in radians
@@ -89,7 +93,8 @@ def sampling_ranges(angle_limits, joints, margin, overrides=None):
     return ranges
 
 
-def pose_is_accepted(pose, robot, delta, joints):
+def pose_is_accepted(pose: np.ndarray, robot: DynamixelRobotController | CombinedRobot, delta: float,
+                     joints: Iterable[int]) -> bool:
     """whether the planner accepts the pose and the two overshoot poses it is approached from: every move is
     checked against the workspace limits of the robot (the wrist and the gripper tip) and its joint ranges"""
     for overshoot, target, _ in approach_sequence(pose, delta, joints, robot.get_angle_limits()):
@@ -101,7 +106,9 @@ def pose_is_accepted(pose, robot, delta, joints):
     return True
 
 
-def sample_poses(count, ranges, base_angle, rng, accept=None, attempts=SAMPLING_ATTEMPTS):
+def sample_poses(count: int, ranges: dict[int, tuple[float, float]], base_angle: float, rng: np.random.Generator,
+                 accept: Callable[[np.ndarray], bool] | None = None,
+                 attempts: int = SAMPLING_ATTEMPTS) -> list[np.ndarray]:
     """
     random poses in joint space
     :param count: number of poses
@@ -112,7 +119,7 @@ def sample_poses(count, ranges, base_angle, rng, accept=None, attempts=SAMPLING_
         the list is returned short
     :return: list of 7 element angle arrays
     """
-    poses = []
+    poses: list[np.ndarray] = []
     tries = 0
     while len(poses) < count and tries < attempts * count:
         tries += 1
@@ -125,7 +132,8 @@ def sample_poses(count, ranges, base_angle, rng, accept=None, attempts=SAMPLING_
     return poses
 
 
-def approach_sequence(pose, delta, joints, angle_limits):
+def approach_sequence(pose: np.ndarray, delta: float, joints: Iterable[int],
+                      angle_limits: dict[int, tuple[float, float]]) -> list[tuple[np.ndarray, np.ndarray, str]]:
     """
     the moves that approach a pose from both directions: [(overshoot pose, pose, direction), ...]
     :param delta: how far beyond the pose the varied joints go first, in radians
@@ -141,7 +149,7 @@ def approach_sequence(pose, delta, joints, angle_limits):
     return sequence
 
 
-def current_in_units(raw, model):
+def current_in_units(raw: float, model: str | None) -> tuple[float | None, str]:
     """returns (current, unit name) for the raw register value of a servo model, (None, '?') for an unknown model"""
     if model not in CURRENT_UNITS:
         return None, '?'
@@ -149,7 +157,8 @@ def current_in_units(raw, model):
     return raw * per_unit, unit
 
 
-def readings(robot, models, pose_index, direction, angles, now):
+def readings(robot: DynamixelRobotController | CombinedRobot, models: dict[int, str], pose_index: int, direction: str,
+             angles: np.ndarray, now: float) -> list[dict[str, Any]] | None:
     """
     read every arm servo once and return a csv row per servo, or None when a read fails
     :param models: mapping of servo id to model name
@@ -175,7 +184,7 @@ def readings(robot, models, pose_index, direction, angles, now):
     return rows
 
 
-def check_servos(robot, temperature_warning):
+def check_servos(robot: DynamixelRobotController | CombinedRobot, temperature_warning: float) -> None:
     """raises StopRecording when a servo has a hardware error or is warmer than the warning temperature"""
     errors = robot.get_hardware_errors()
     if errors is None:
@@ -191,7 +200,8 @@ def check_servos(robot, temperature_warning):
         raise StopRecording('servos {} are warmer than {}C, let them cool down'.format(warm, temperature_warning))
 
 
-def move_to(robot, target, angular_speed, should_stop=None):
+def move_to(robot: DynamixelRobotController | CombinedRobot, target: np.ndarray, angular_speed: float,
+            should_stop: Callable[[], bool] | None = None) -> bool:
     """plan and execute a joint space move from the current angles, returns False when the planner refuses it"""
     current = robot.get_current_angles()
     if current is None:
@@ -206,8 +216,10 @@ def move_to(robot, target, angular_speed, should_stop=None):
     return True
 
 
-def record(robot, poses, writer, models, temperature_warning, joints=DEFAULT_JOINTS, delta=np.radians(5.0),
-           settle=3.0, angular_speed=0.5, sleep=time.sleep, clock=time.time):
+def record(robot: DynamixelRobotController | CombinedRobot, poses: Sequence[np.ndarray], writer: csv.DictWriter[str],
+           models: dict[int, str], temperature_warning: float, joints: Sequence[int] = DEFAULT_JOINTS,
+           delta: float = np.radians(5.0), settle: float = 3.0, angular_speed: float = 0.5,
+           sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.time) -> int:
     """
     visit the poses from both directions and write a row per servo and reading, returns the number of poses done
     :param robot: the robot of global_objects.get_robot with its servos enabled; every move is checked against its workspace
@@ -241,7 +253,7 @@ def record(robot, poses, writer, models, temperature_warning, joints=DEFAULT_JOI
     return done
 
 
-def disable_torque_on_request(robot):
+def disable_torque_on_request(robot: DynamixelRobotController | CombinedRobot) -> None:
     try:
         input('\npress enter to disable the torque, SUPPORT THE ARM, it will drop. '
               'Ctrl+C to exit and keep the torque enabled\n')
@@ -251,7 +263,7 @@ def disable_torque_on_request(robot):
     robot.disable_servos()
 
 
-def parse_ranges(values):
+def parse_ranges(values: Iterable[str]) -> dict[int, tuple[float, float]]:
     """--range entries like 5=-45:45 (degrees) into a mapping of joint to (min, max) in radians"""
     ranges = {}
     for value in values:
@@ -264,7 +276,7 @@ def parse_ranges(values):
     return ranges
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='record the static load of the arm servos at random poses')
     parser.add_argument('--poses', type=int, default=40, help='number of poses')
     parser.add_argument('--joints', type=int, nargs='+', default=list(DEFAULT_JOINTS), help='the joints to vary')
@@ -292,6 +304,9 @@ def main(argv=None):
         robot = get_robot()
     except DynamixelError as e:
         print(e)
+        return 1
+    if not isinstance(robot, CombinedRobot):
+        print('the static load can only be recorded on the real robot, use_simulation is set')
         return 1
     if args.floor is not None:
         robot.workspace_limits = limits_with_floor(args.floor, robot.workspace_limits)

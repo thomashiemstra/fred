@@ -9,7 +9,7 @@ if not cap.isOpened():
     print("Camera not connected, exiting!")
     sys.exit()
 
-cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # type: ignore[attr-defined]  # missing from the opencv stubs, exists at runtime
 cap.set(cv2.CAP_PROP_FPS, 30)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
@@ -42,7 +42,7 @@ while cap.isOpened():
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
 
-    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD,
+    ret, corners = cv2.findChessboardCorners(gray, CHECKERBOARD,  # type: ignore[call-overload]  # flags are passed as the corners argument
                                              cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
                                              + cv2.CALIB_CB_NORMALIZE_IMAGE)
 
@@ -89,7 +89,7 @@ and corresponding pixel coordinates of the
 detected corners (imgpoints)
 """
 
-retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)
+retval, cameraMatrix, distCoeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, last_frame.shape[::-1], None, None)  # type: ignore[call-overload]  # stubs do not accept none for the matrices, opencv does
 
 print("Camera matrix : \n")
 print(cameraMatrix)

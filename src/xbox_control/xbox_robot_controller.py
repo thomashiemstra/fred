@@ -1,10 +1,11 @@
-from __future__ import division
+from __future__ import division, annotations
 
 import json
 import logging
 import queue
 import threading
 from copy import copy
+from typing import TYPE_CHECKING
 
 import jsonpickle
 import numpy as np
@@ -18,6 +19,16 @@ from src.utils.linalg_utils import get_center
 from src.utils.movement import PoseToPoseMovement, SplineMovement
 from src.utils.movement_exception import MovementException
 from time import sleep, perf_counter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.kinematics.kinematics_utils import RobotConfig
+    from src.robot_controllers.abstract_robot_controller import AbstractRobotController
+    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+    from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
+    from src.utils.movement import Movement, PlannedMove
+    from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +55,8 @@ class XboxRobotController:
     """
     start_pose = Pose(30, 22.0, 4)
 
-    def __init__(self, dynamixel_robot_config, robot, pose_updater):
+    def __init__(self, dynamixel_robot_config: RobotConfig, robot: SimulatedRobotController | CombinedRobot,
+                 pose_updater: XboxPoseUpdater) -> None:
         self.pose_updater = pose_updater
         self.dynamixel_robot_config = dynamixel_robot_config
         self.robot = robot
@@ -55,21 +67,21 @@ class XboxRobotController:
         # set when the control loop should stop, an event so stopping doesn't wait for the lock
         self._stop_requested = threading.Event()
         # functions that the control loop calls, so only the control loop moves the robot
-        self._commands = queue.Queue()
+        self._commands: queue.Queue[Callable[[], None]] = queue.Queue()
         self._crashed = False
-        self._start_move = None
+        self._start_move: PlannedMove | None = None
         self._outside_workspace = False  # the gamepad asks for a pose outside the workspace, the robot holds
-        self.recorded_positions = []
-        self.current_pose = None
-        self.thread = None
+        self.recorded_positions: list[Pose] = []
+        self.current_pose: Pose = None  # type: ignore[assignment]  # set by start before the control loop uses it
+        self.thread: threading.Thread | None = None
         self.find_center_mode = False
         # 3d position in front of the robot to keep the end effector pointed towards
         # (i.e. make sure the camera stays focused on an object)
-        self.center = None
+        self.center: np.ndarray | None = None
         self.move_speed = 10
-        self.recorded_moves = []
-        self.gripper_state = 0
-        self.current_scenario_id = None
+        self.recorded_moves: list[Movement] = []
+        self.gripper_state: float = 0
+        self.current_scenario_id: int | None = None
         # dependency inject?
         self.scenarios = medium_scenarios
         # the action of each button, when multiple buttons are pressed only the first one in this order is handled
@@ -85,17 +97,17 @@ class XboxRobotController:
             'pad_down': self._decrease_maximum_speed,
         }
 
-    def is_running(self):
+    def is_running(self) -> bool:
         """
         True from a successful start until stop. This includes a control loop that stopped because of an error,
         the servos keep holding their position until stop disables them.
         """
         return self.thread is not None
 
-    def is_done(self):
+    def is_done(self) -> bool:
         return self._stop_requested.is_set()
 
-    def start(self):
+    def start(self) -> bool:
         """
         Start controlling the robot. The robot first moves in a straight line to the start pose, the robot doesn't
         start if that movement is not possible or there is no gamepad.
@@ -140,7 +152,7 @@ class XboxRobotController:
             self.thread.start()
             return True
 
-    def stop(self):
+    def stop(self) -> bool:
         """
         Stop controlling the robot, it moves back to the start pose and the servos are disabled.
         :return: False if the robot wasn't running
@@ -157,7 +169,7 @@ class XboxRobotController:
             self._clear_commands()
             return True
 
-    def request_find_center_mode(self):
+    def request_find_center_mode(self) -> bool:
         """
         Reset the orientation of the end effector and record the next 2 positions, the end effector is then kept
         pointed towards the center between them.
@@ -169,7 +181,7 @@ class XboxRobotController:
         return True
 
     # Record 2 poses to define the center the end effector should be pointing towards
-    def __start_find_center_mode(self):
+    def __start_find_center_mode(self) -> None:
         with self.lock:
             self.recorded_positions = []
             self.center = None
@@ -177,14 +189,14 @@ class XboxRobotController:
         self._reset_orientation()
 
     @synchronized_with_lock("lock")
-    def clear_center(self):
+    def clear_center(self) -> None:
         self.center = None
 
     @synchronized_with_lock("lock")
-    def set_profile_velocity_percentage(self, percentage):
+    def set_profile_velocity_percentage(self, percentage: float) -> None:
         self.robot.set_profile_velocity_percentage(percentage)
 
-    def __start_internal(self):
+    def __start_internal(self) -> None:
         try:
             self.__control_robot()
         except Exception:
@@ -193,9 +205,9 @@ class XboxRobotController:
             logger.exception('controlling the robot failed, the servos keep holding their last position. '
                              'Stop to disable them')
 
-    def __control_robot(self):
+    def __control_robot(self) -> None:
         # the start move can be stopped halfway, the control loop then stops right away and moves back
-        if execute_move(self.robot, self._start_move, should_stop=self.is_done):
+        if execute_move(self.robot, self._start_move, should_stop=self.is_done):  # type: ignore[arg-type]  # none until start
             self.open_gripper()
 
         pose_update_sleep_time = self.pose_updater.dt
@@ -222,7 +234,7 @@ class XboxRobotController:
 
         self.stop_robot()
 
-    def _update_pose_within_the_workspace(self, new_pose):
+    def _update_pose_within_the_workspace(self, new_pose: Pose) -> None:
         """the pose the gamepad asks for becomes the current pose when it is inside the workspace limits of the
         robot, otherwise the robot holds the current pose (logged once)"""
         violation = self.robot.workspace_violation(self.robot.pose_to_angles(new_pose))
@@ -233,7 +245,7 @@ class XboxRobotController:
             logger.warning('holding the pose, the gamepad asks for one outside the workspace: %s', violation)
             self._outside_workspace = True
 
-    def __handle_commands(self):
+    def __handle_commands(self) -> None:
         while True:
             try:
                 command = self._commands.get_nowait()
@@ -241,14 +253,14 @@ class XboxRobotController:
                 return
             command()
 
-    def _clear_commands(self):
+    def _clear_commands(self) -> None:
         while True:
             try:
                 self._commands.get_nowait()
             except queue.Empty:
                 return
 
-    def check_hardware_errors(self):
+    def check_hardware_errors(self) -> None:
         """
         A servo that shut down because of a hardware error doesn't move anymore, so stop controlling the robot right
         away. When a servo gets too warm, the robot stops like it does when it is stopped, while all servos still work.
@@ -267,7 +279,7 @@ class XboxRobotController:
                          sorted(overheating))
             self._stop_requested.set()
 
-    def _plan_move_to(self, pose):
+    def _plan_move_to(self, pose: Pose) -> PlannedMove | None:
         """plan a straight line from the current pose of the robot to the pose, returns None if it is not possible"""
         angles = self.robot.get_current_angles()
         if angles is None:
@@ -279,7 +291,7 @@ class XboxRobotController:
             logger.error('can not move to %s: %s', pose, e)
             return None
 
-    def _move_to(self, pose):
+    def _move_to(self, pose: Pose) -> Pose | None:
         """move in a straight line to the pose, returns the reached pose, or None if the movement is not possible"""
         move = self._plan_move_to(pose)
         if move is None:
@@ -287,15 +299,15 @@ class XboxRobotController:
         execute_move(self.robot, move)
         return forward_kinematics(move.angles[-1], self.robot.robot_config)
 
-    def stop_robot(self):
+    def stop_robot(self) -> None:
         if self._move_to(self.start_pose) is None:
             logger.warning('not moving back to the start pose before disabling the servos')
         self.robot.disable_servos()
 
-    def open_gripper(self):
+    def open_gripper(self) -> None:
         self.robot.set_gripper(self.gripper_state)
 
-    def __move_gripper(self, delta):
+    def __move_gripper(self, delta: float) -> None:
         """
         Move the target state of the gripper, it stays within GRIPPER_MAX_LEAD of the actual state. When an object
         blocks the gripper it squeezes harder the further the target is beyond the object, and when the gripper is
@@ -311,7 +323,7 @@ class XboxRobotController:
             self.robot.set_gripper(new_state)
             self.gripper_state = new_state
 
-    def handle_buttons(self):
+    def handle_buttons(self) -> None:
         """perform the action of the first pressed button, in the order of _button_actions"""
         buttons = self.pose_updater.controller.get_buttons()
         for button, action in self._button_actions.items():
@@ -319,55 +331,55 @@ class XboxRobotController:
                 action()
                 return
 
-    def _play_back(self):
+    def _play_back(self) -> None:
         if len(self.recorded_moves) < 1:
             return
         self.current_pose = self.playback_recorded_moves(self.recorded_moves)
 
-    def _decrease_gripper_state(self):
+    def _decrease_gripper_state(self) -> None:
         self.__move_gripper(-GRIPPER_STEP)
 
-    def _increase_gripper_state(self):
+    def _increase_gripper_state(self) -> None:
         self.__move_gripper(GRIPPER_STEP)
 
-    def _reset_orientation(self):
+    def _reset_orientation(self) -> None:
         """turn the end effector to the neutral orientation, in place; the pose stays when the turn is not possible"""
         try:
             self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config, self.robot)
         except MovementException as e:
             logger.warning('can not reset the orientation: %s', e)
 
-    def _toggle_flip(self):
+    def _toggle_flip(self) -> None:
         self.current_pose.flip = not self.current_pose.flip
 
-    def _record_position(self):
+    def _record_position(self) -> None:
         self.recorded_positions.append(self.current_pose)
         if self.should_set_center():
             self.set_center()
         print("added position!")
         print(self.current_pose)
 
-    def _create_move(self):
+    def _create_move(self) -> None:
         if not self.has_enough_recorded_positions():
             print("not enough positions for a movement")
             return
         move = create_move(self.robot, self.recorded_positions, self.move_speed, self.center)
         self.store_move_or_go_back(move)
 
-    def _increase_maximum_speed(self):
+    def _increase_maximum_speed(self) -> None:
         self.__change_maximum_speed(MAXIMUM_SPEED_STEP)
 
-    def _decrease_maximum_speed(self):
+    def _decrease_maximum_speed(self) -> None:
         self.__change_maximum_speed(-MAXIMUM_SPEED_STEP)
 
-    def __change_maximum_speed(self, delta):
+    def __change_maximum_speed(self, delta: float) -> None:
         self.pose_updater.maximum_speed = np.clip(self.pose_updater.maximum_speed + delta,
                                                   MINIMUM_SPEED, MAXIMUM_SPEED)
 
-    def has_enough_recorded_positions(self):
+    def has_enough_recorded_positions(self) -> bool:
         return len(self.recorded_positions) > 1
 
-    def store_move_or_go_back(self, move):
+    def store_move_or_go_back(self, move: Movement | None) -> None:
         if move is None:
             print('move outside workspace limits, not adding this move!')
             self.recorded_positions = [self.recorded_positions[0]]
@@ -380,18 +392,18 @@ class XboxRobotController:
             self.recorded_positions = [copy(self.recorded_positions[-1])]
 
     @synchronized_with_lock("lock")
-    def should_set_center(self):
+    def should_set_center(self) -> bool:
         return self.find_center_mode and len(self.recorded_positions) == 2
 
     @synchronized_with_lock("lock")
-    def set_center(self):
+    def set_center(self) -> None:
         self.center = get_center(self.recorded_positions[0], self.recorded_positions[1])
-        print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))
+        print('setting center x={}, y={}, z={}'.format(self.center[0], self.center[1], self.center[2]))  # type: ignore[index]  # get_center can return none
         self.find_center_mode = False
         self.recorded_positions = []
 
     @synchronized_with_lock("lock")
-    def save_recorded_moves_to_file(self, filename):
+    def save_recorded_moves_to_file(self, filename: str) -> bool:
         if len(self.recorded_moves) < 1:
             return False
         json_string = jsonpickle.encode(self.recorded_moves, make_refs=False)
@@ -400,24 +412,24 @@ class XboxRobotController:
         return True
 
     @synchronized_with_lock("lock")
-    def restore_recorded_moves_from_file(self, filename):
+    def restore_recorded_moves_from_file(self, filename: str) -> None:
         with open(filename, 'r') as infile:
             string = infile.read()
         moves = jsonpickle.decode(string)
         self.recorded_moves = moves
 
     @synchronized_with_lock("lock")
-    def clear_recorded_moves_and_positions(self):
+    def clear_recorded_moves_and_positions(self) -> None:
         self.recorded_moves = []
         self.recorded_positions = []
         print('cleared recorded moves and positions!')
 
     @synchronized_with_lock("lock")
-    def set_maximum_speed(self, new_maximum_speed):
+    def set_maximum_speed(self, new_maximum_speed: float) -> None:
         self.pose_updater.maximum_speed = new_maximum_speed
 
     @synchronized_with_lock("lock")
-    def set_scenario(self, scneario_id):
+    def set_scenario(self, scneario_id: int) -> bool:
         if scneario_id < 0 or scneario_id > len(self.scenarios):
             return False
 
@@ -431,7 +443,7 @@ class XboxRobotController:
 
         return True
 
-    def playback_recorded_moves(self, recorded_moves):
+    def playback_recorded_moves(self, recorded_moves: list[Movement]) -> Pose:
         """play back the recorded moves, the playback stops between moves when the robot is stopped"""
         recorded_moves[0].go_to_start_of_move(self.robot)
         try:
@@ -449,12 +461,13 @@ class XboxRobotController:
         return recorded_moves[-1].poses[-1]
 
 
-def create_move(servo_controller, poses, speed, center):
+def create_move(servo_controller: AbstractRobotController, poses: list[Pose], speed: float,
+                center: np.ndarray | None) -> Movement | None:
     """a movement through the poses at the speed, or None when it leaves the workspace limits of the robot"""
     time = determine_time(poses, speed)
 
     if len(poses) == 2:
-        move = PoseToPoseMovement(poses, time, center)  # orientation adjustment
+        move: Movement = PoseToPoseMovement(poses, time, center)  # orientation adjustment
     else:
         move = SplineMovement(poses, time, center)
     try:
@@ -465,7 +478,7 @@ def create_move(servo_controller, poses, speed, center):
     return move if is_ok else None
 
 
-def determine_time(poses, speed):
+def determine_time(poses: list[Pose], speed: float) -> float:
     if speed == 0:
         raise ValueError("Cannot have zero speed")
 
@@ -486,7 +499,8 @@ def determine_time(poses, speed):
     return dr / speed
 
 
-def reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_controller):
+def reset_orientation(current_pose: Pose, dynamixel_robot_config: RobotConfig,
+                      dynamixel_servo_controller: AbstractRobotController) -> Pose:
     # the wrist keeps its flip, changing it in place would make the wrist turn around
     dynamixel_robot_config.restore_initial_values()
     new_orientation = copy(current_pose)

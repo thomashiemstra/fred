@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import threading
+from typing import TYPE_CHECKING, Any
 
 from tf_agents.environments import tf_py_environment
 
@@ -19,10 +22,16 @@ from src.utils.decorators import synchronized_with_lock
 from src.utils.movement import SplineMovement
 from src.utils.movement_exception import MovementException
 
+if TYPE_CHECKING:
+    from src.camera.image_handlers import ArucoImageHandler
+    from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+    from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
+    from src.utils.obstacle import BoxObstacle
+
 
 class ObstacleAvoidance:
 
-    def __init__(self, aruco_image_handler, robot):
+    def __init__(self, aruco_image_handler: ArucoImageHandler, robot: SimulatedRobotController | CombinedRobot) -> None:
         self.aruco_image_handler = aruco_image_handler
         self.robot = robot
         self.lock = threading.RLock()
@@ -30,17 +39,17 @@ class ObstacleAvoidance:
         self.done = False
         self.start_pose = Pose(-25, 25, 10, flip=True)
         self.target_pose = Pose(25, 25, 10, flip=True)
-        self.env = None
-        self.tf_env = None
-        self.eval_tf_env = None
+        self.env: RobotEnvWithObstacles | None = None
+        self.tf_env: Any = None
+        self.eval_tf_env: Any = None
         self.control_point_1_position = 11.2
         self.stopped = False
-        self.thread = None
-        self._initial_state = None
-        self.tf_agent = None
+        self.thread: threading.Thread | None = None
+        self._initial_state: Any = None
+        self.tf_agent: Any = None
         self.pose_recorder = PoseRecorder()
 
-    def start_sac(self):
+    def start_sac(self) -> Any:
         tf.compat.v1.enable_v2_behavior()
         global_step = tf.compat.v1.train.create_global_step()
         with tf.compat.v2.summary.record_if(False):
@@ -50,19 +59,19 @@ class ObstacleAvoidance:
         return tf_agent
 
     @synchronized_with_lock("stop_lock")
-    def is_stopped(self):
+    def is_stopped(self) -> bool:
         return self.stopped
 
     @synchronized_with_lock("stop_lock")
-    def set_stopped(self, val):
+    def set_stopped(self, val: bool) -> None:
         self.stopped = val
 
-    def change_flip(self):
+    def change_flip(self) -> None:
         self.start_pose.flip = not self.start_pose.flip
         self.target_pose.flip = not self.target_pose.flip
         self.create_and_set_scenario()
 
-    def _find_obstacles(self):
+    def _find_obstacles(self) -> list[BoxObstacle]:
         detected_markers = self.aruco_image_handler.get_detected_markers()
 
         obstacles = []
@@ -74,7 +83,7 @@ class ObstacleAvoidance:
         return obstacles
 
     @synchronized_with_lock("lock")
-    def create_and_set_scenario(self):
+    def create_and_set_scenario(self) -> None:
         if self.tf_env is not None:
             self.tf_env.close()
 
@@ -84,7 +93,7 @@ class ObstacleAvoidance:
         self.env, self.tf_env, self.eval_tf_env = self.get_env(obstacles)
         self._initial_state = self.env.reset()
 
-    def get_env(self, obstacles):
+    def get_env(self, obstacles: list[BoxObstacle]) -> tuple[RobotEnvWithObstacles, Any, RobotEnvWithObstacles]:
         scenario = Scenario(obstacles, start_pose=self.start_pose, target_pose=self.target_pose)
         env = RobotEnvWithObstacles(scenarios=[scenario],
                                     robot_controller=self.robot, is_eval=True,
@@ -99,13 +108,13 @@ class ObstacleAvoidance:
         tf_env = tf_py_environment.TFPyEnvironment(env)
         return env, tf_env, eval_env
 
-    def enable_servos(self):
+    def enable_servos(self) -> None:
         self.robot.enable_servos()
 
-    def disable_servos(self):
+    def disable_servos(self) -> None:
         self.robot.disable_servos()
 
-    def stop(self):
+    def stop(self) -> None:
         if self.thread is None:
             print("already stopped")
             return
@@ -115,7 +124,7 @@ class ObstacleAvoidance:
         self.set_stopped(False)
 
     @synchronized_with_lock("lock")
-    def obstacle_avoidance_sac(self):
+    def obstacle_avoidance_sac(self) -> None:
         if self.thread is not None:
             print("already have thread running, shut it down first!")
             return
@@ -125,7 +134,7 @@ class ObstacleAvoidance:
         self.thread.join()
         self.stop()
 
-    def __start_sac(self):
+    def __start_sac(self) -> None:
         if self.tf_env is None:
             print("first set a scenario based on the image in order to create an env")
             return
@@ -160,7 +169,7 @@ class ObstacleAvoidance:
             print("unable to perform reverse move")
 
     @synchronized_with_lock("lock")
-    def obstacle_avoidance_gradient_descent(self):
+    def obstacle_avoidance_gradient_descent(self) -> None:
         if self.thread is not None:
             print("already have thread running, shut it down first!")
             return
@@ -170,12 +179,13 @@ class ObstacleAvoidance:
         self.thread.join()
         self.stop()
 
-    def __start_gradient_descent(self):
+    def __start_gradient_descent(self) -> None:
         if self.tf_env is None:
             print("first set a scenario based on the image in order to create an env")
             return
 
         state = self._initial_state
+        assert self.env is not None
         self.env.set_angle_control(True)
 
         while not self.is_stopped():

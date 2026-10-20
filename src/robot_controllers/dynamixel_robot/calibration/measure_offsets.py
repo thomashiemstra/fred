@@ -16,12 +16,14 @@ import argparse
 import logging
 import re
 import sys
+from collections.abc import Iterable, Sequence
 from statistics import median
 
 import numpy as np
 
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixel_handlers, to_signed, DynamixelError
+from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config, DEFAULT_SERVO_CONFIG_PATH
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 
@@ -29,25 +31,25 @@ DEFAULT_JIG = {1: 90.0, 2: 0.0, 4: 0.0}  # servo id -> angle in degrees the jig 
 MAX_SPREAD = 2  # positions, the readings have to agree this well, otherwise the joint isn't seated in the jig
 
 
-def calibrated_position(servo, angle_degrees):
+def calibrated_position(servo: Servo, angle_degrees: float) -> int:
     """the position of the angle without the offset of the servo"""
     return int(np.rint(np.interp(np.radians(angle_degrees), [servo.min_angle, servo.max_angle],
                                  [servo.min_position, servo.max_position])))
 
 
-def new_offset(servo, angle_degrees, raw_position):
+def new_offset(servo: Servo, angle_degrees: float, raw_position: int) -> int:
     """offset = raw position at a known angle - calibrated position of that angle"""
     return int(raw_position) - calibrated_position(servo, angle_degrees)
 
 
-def raw_range(servo, offset):
+def raw_range(servo: Servo, offset: int) -> tuple[int, int]:
     """the raw positions of the ends of the calibrated range with the given offset"""
     lower = min(servo.min_position, servo.max_position) + offset
     upper = max(servo.min_position, servo.max_position) + offset
     return lower, upper
 
 
-def replace_offsets(yaml_text, offsets, note=''):
+def replace_offsets(yaml_text: str, offsets: dict[int, int], note: str | dict[int, str] = '') -> str:
     """
     return the yaml text with the offset of every servo in offsets replaced (or added after its angles line),
     everything else is kept as it is
@@ -91,7 +93,7 @@ def replace_offsets(yaml_text, offsets, note=''):
     return ''.join(lines)
 
 
-def parse_jig(values):
+def parse_jig(values: Iterable[str]) -> dict[int, float]:
     jig = {}
     for value in values:
         try:
@@ -102,7 +104,7 @@ def parse_jig(values):
     return jig
 
 
-def read_registers(handler, servo_ids):
+def read_registers(handler: ServoHandler, servo_ids: Sequence[int]) -> dict[int, tuple[int, int]] | None:
     """returns {servo id: (torque enabled, homing offset)}, or None when a servo doesn't answer"""
     registers = {}
     for servo_id in servo_ids:
@@ -117,9 +119,9 @@ def read_registers(handler, servo_ids):
     return registers
 
 
-def read_positions(handler, servo_ids, samples):
+def read_positions(handler: ServoHandler, servo_ids: Sequence[int], samples: int) -> dict[int, list[int]] | None:
     """returns {servo id: [raw positions]} or None when a read fails"""
-    readings = {servo_id: [] for servo_id in servo_ids}
+    readings: dict[int, list[int]] = {servo_id: [] for servo_id in servo_ids}
     for _ in range(samples):
         if not handler.read_current_pos(servo_ids):
             print('failed to read the positions')
@@ -129,7 +131,7 @@ def read_positions(handler, servo_ids, samples):
     return readings
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='measure the servo offsets with the jig and write them to the yaml')
     default_jig = ['{}={:g}'.format(servo_id, angle) for servo_id, angle in DEFAULT_JIG.items()]
     parser.add_argument('--jig', nargs='+', default=default_jig,

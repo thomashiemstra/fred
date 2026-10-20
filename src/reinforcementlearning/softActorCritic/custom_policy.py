@@ -2,17 +2,21 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from typing import Any
+
 import tensorflow as tf
 import numpy as np
 from tf_agents.policies import tf_policy
 from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import policy_step
 from src import global_constants
+from src.kinematics.kinematics_utils import RobotConfig
 from numpy import  sin, cos, pi
 
 
 @tf.function
-def jacobian_transpose_on_f_tf(workspace_force, angles, robot_config, c1_location):
+def jacobian_transpose_on_f_tf(workspace_force: Any, angles: Any, robot_config: RobotConfig,
+                               c1_location: float) -> Any:
     """
     compute the jacobian transpose on 3 control points on the robot, this translates world forces on each joint
     into joint forces. The join forces add up in joint space.
@@ -66,7 +70,7 @@ class CustomPolicy(tf_policy.Base):
     values that have nothing to do with the emitted actions.
   """
 
-    def __init__(self, time_step_spec, action_spec, *args, **kwargs):
+    def __init__(self, time_step_spec: Any, action_spec: Any, *args: Any, **kwargs: Any) -> None:
         observation_and_action_constraint_splitter = (
             kwargs.get('observation_and_action_constraint_splitter', None))
         self._accepts_per_arm_features = (
@@ -90,13 +94,13 @@ class CustomPolicy(tf_policy.Base):
         super(CustomPolicy, self).__init__(time_step_spec, action_spec, *args,
                                            **kwargs)
 
-    def _setup_specs(self):
+    def _setup_specs(self) -> None:
         super()._setup_specs()
 
-    def _variables(self):
+    def _variables(self) -> list[Any]:
         return []
 
-    def get_de_normalized_current_angles(self, normalized_angles):
+    def get_de_normalized_current_angles(self, normalized_angles: Any) -> list[Any]:
         return [
             (pi / 2) * (normalized_angles[0] + 1),
             (pi / 2) * (normalized_angles[1] + 1),
@@ -106,7 +110,7 @@ class CustomPolicy(tf_policy.Base):
         ]
 
     @tf.function
-    def act(self, raw_observation):
+    def act(self, raw_observation: Any) -> Any:
         observation = raw_observation[0]
 
         c1_attr = np.zeros(3)
@@ -135,7 +139,7 @@ class CustomPolicy(tf_policy.Base):
 
 
 
-    def _action(self, time_step, policy_state, seed):
+    def _action(self, time_step: Any, policy_state: Any, seed: Any) -> Any:
         # action_ = tf.constant([1, 0, 0, 0, 0], shape=(1, 5), dtype=tf.float32)
         action_ = self.act(time_step.observation)
 
@@ -146,6 +150,6 @@ class CustomPolicy(tf_policy.Base):
         step = policy_step.PolicyStep(action_, policy_state, ())
         return step
 
-    def _distribution(self, time_step, policy_state):
+    def _distribution(self, time_step: Any, policy_state: Any) -> Any:
         raise NotImplementedError(
             'CustomPolicy does not support distributions yet.')

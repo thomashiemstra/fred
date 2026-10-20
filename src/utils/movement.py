@@ -12,12 +12,16 @@ robot's own move_servos checks nothing, so whoever moves the robot plans and che
 move_between_poses and move_from_current_angles plan a joint space move and execute it right away. The Movement
 classes at the end are the recorded moves of the xbox controller.
 """
+from __future__ import annotations
+
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Sequence
 from copy import copy
 from math import ceil
 from time import perf_counter, sleep
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.interpolate import splev, splprep
@@ -27,6 +31,9 @@ import src.global_constants
 from src.kinematics.kinematics import inverse_kinematics, forward_kinematics, forward_position_kinematics
 from src.kinematics.kinematics_utils import Pose
 from src.utils.movement_exception import MovementException
+
+if TYPE_CHECKING:
+    from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +50,12 @@ MAX_STRETCH = 4.0
 ALREADY_THERE = 0.2  # rad
 
 
-def get_curve_val(t):
+def get_curve_val(t: float) -> float:
     """the progress (0 to 1) along a minimum jerk curve at the time fraction t (0 to 1)"""
     return 6 * np.power(t, 5) - 15 * np.power(t, 4) + 10 * np.power(t, 3)
 
 
-def _get_curve_values(duration):
+def _get_curve_values(duration: float) -> np.ndarray:
     """the progress (0 to 1) along a minimum jerk curve for every step of a movement, both ends included"""
     total_steps = max(ceil(duration * src.global_constants.steps_per_second), 1)
     return np.array([get_curve_val(i / total_steps) for i in range(total_steps + 1)])
@@ -57,19 +64,19 @@ def _get_curve_values(duration):
 class PlannedMove:
     """the angles of every step of a movement, see execute_move"""
 
-    def __init__(self, description, angles, duration):
+    def __init__(self, description: str, angles: np.ndarray, duration: float) -> None:
         self.description = description
         self.angles = angles  # array of shape (steps, 7), the angles of each step start at index 1
         self.duration = duration
 
-    def __str__(self):
+    def __str__(self) -> str:
         return '{} in {:.1f}s ({} steps)'.format(self.description, self.duration, len(self.angles))
 
 
 # checking and executing
 
 
-def check_move(move, robot, current_angles=None):
+def check_move(move: PlannedMove, robot: AbstractRobotController, current_angles: np.ndarray | None = None) -> None:
     """
     check every step of a planned movement against the robot: the joint speeds, the ranges of the servos
     (robot.get_angle_limits(), nothing is checked when it returns None) and the workspace limits
@@ -91,7 +98,7 @@ def check_move(move, robot, current_angles=None):
 
     angle_limits = robot.get_angle_limits()
     if angle_limits is not None:
-        for joint, (min_angle, max_angle) in angle_limits.items():
+        for joint, (min_angle, max_angle) in angle_limits.items():  # type: ignore[assignment]  # joint was an index above
             joint_angles = move.angles[:, joint]
             below = min_angle - joint_angles.min()
             above = joint_angles.max() - max_angle
@@ -103,7 +110,8 @@ def check_move(move, robot, current_angles=None):
         robot.check_workspace(angles)
 
 
-def execute_move(robot, move: PlannedMove, should_stop=None):
+def execute_move(robot: AbstractRobotController, move: PlannedMove,
+                 should_stop: Callable[[], bool] | None = None) -> bool:
     """
     send every step of a planned movement to the robot, at src.global_constants.steps_per_second
     :param move: the PlannedMove to be executed
@@ -121,12 +129,12 @@ def execute_move(robot, move: PlannedMove, should_stop=None):
     return True
 
 
-def _joint_speeds(angles):
+def _joint_speeds(angles: np.ndarray) -> np.ndarray:
     """the speed of every joint between consecutive steps, in rad/s"""
     return np.abs(np.diff(angles[:, 1:], axis=0)) * src.global_constants.steps_per_second
 
 
-def _within_speed_limit(plan, duration):
+def _within_speed_limit(plan: Callable[[float], np.ndarray], duration: float) -> tuple[np.ndarray, float]:
     """
     the angles of plan(duration), with the duration stretched (up to MAX_STRETCH times) until no joint turns
     faster than recommended_max_servo_speed; beyond that the angles of the longest duration are returned and
@@ -151,7 +159,8 @@ def _within_speed_limit(plan, duration):
 # straight lines
 
 
-def plan_move_to_pose(robot, current_angles, target_pose, linear_speed=5.0, angular_speed=0.5):
+def plan_move_to_pose(robot: AbstractRobotController, current_angles: np.ndarray, target_pose: Pose,
+                      linear_speed: float = 5.0, angular_speed: float = 0.5) -> PlannedMove:
     """
     Plan a straight line from the current pose of the robot to the target pose.
 
@@ -172,7 +181,8 @@ def plan_move_to_pose(robot, current_angles, target_pose, linear_speed=5.0, angu
     return plan_straight_line(robot, current_pose, target_pose, linear_speed, angular_speed, current_angles)
 
 
-def plan_straight_line(robot, start_pose, stop_pose, linear_speed=5.0, angular_speed=0.5, current_angles=None):
+def plan_straight_line(robot: AbstractRobotController, start_pose: Pose, stop_pose: Pose, linear_speed: float = 5.0,
+                       angular_speed: float = 0.5, current_angles: np.ndarray | None = None) -> PlannedMove:
     """
     Plan a straight line of the end effector from the start to the stop pose, the orientation is interpolated
     with a slerp. The poses have to be flipped the same way, otherwise the wrist would turn around halfway.
@@ -194,16 +204,17 @@ def plan_straight_line(robot, start_pose, stop_pose, linear_speed=5.0, angular_s
     curve_values = _get_curve_values(duration)
     positions = start_position + np.outer(curve_values, stop_position - start_position)
     orientations = slerp(curve_values).as_matrix()
-    poses = [Pose(*positions[i], flip=stop_pose.flip, euler_matrix=orientations[i]) for i in range(len(curve_values))]
+    poses = [Pose(*positions[i], flip=stop_pose.flip, euler_matrix=orientations[i])  # type: ignore[misc]  # positions[i] is x, y, z
+             for i in range(len(curve_values))]
 
-    description = 'move in a straight line from {} to {} ({:.1f}cm, {:.2f}rad rotation)'.format(
+    description = 'move in a straight line from {} to {} ({:.1f}cm, {:.2f}rad rotation)'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f
         np.round(start_position, 1), np.round(stop_position, 1), distance, rotation)
     move = PlannedMove(description, _angles_of_poses(robot, poses, 'the straight line'), duration)
     check_move(move, robot, current_angles)
     return move
 
 
-def _angles_of_poses(robot, poses, what):
+def _angles_of_poses(robot: AbstractRobotController, poses: Sequence[Pose], what: str) -> np.ndarray:
     """the inverse kinematics of every pose, checked to reach the position of the pose"""
     angles = np.zeros((len(poses), 7), dtype=np.float64)
     for i, pose in enumerate(poses):
@@ -218,7 +229,8 @@ def _angles_of_poses(robot, poses, what):
 # joint space
 
 
-def plan_move_to_angles(robot, current_angles, target_angles, angular_speed=0.5, duration=None):
+def plan_move_to_angles(robot: AbstractRobotController, current_angles: np.ndarray, target_angles: np.ndarray,
+                        angular_speed: float = 0.5, duration: float | None = None) -> PlannedMove:
     """
     Plan a movement in joint space from the current angles to the target angles: every joint follows a minimum
     jerk profile, so the joints start and stop together. The end effector doesn't move in a straight line, but
@@ -249,14 +261,15 @@ def plan_move_to_angles(robot, current_angles, target_angles, angular_speed=0.5,
     return move
 
 
-def _joint_steps(current, target, duration):
+def _joint_steps(current: np.ndarray, target: np.ndarray, duration: float) -> np.ndarray:
     """the angles of every step of a minimum jerk interpolation between the angle arrays, joint 0 stays"""
     delta = target - current
     delta[0] = 0.0
     return current + np.outer(_get_curve_values(duration), delta)
 
 
-def move_between_poses(robot, start_pose, stop_pose, duration=None):
+def move_between_poses(robot: AbstractRobotController, start_pose: Pose, stop_pose: Pose,
+                       duration: float | None = None) -> Pose:
     """
     move in joint space from the start pose to the stop pose and return the stop pose, the robot has to be at the
     start pose
@@ -271,7 +284,7 @@ def move_between_poses(robot, start_pose, stop_pose, duration=None):
     return stop_pose
 
 
-def move_from_current_angles(robot, pose, duration):
+def move_from_current_angles(robot: AbstractRobotController, pose: Pose, duration: float) -> None:
     """
     move in joint space from the current angles of the robot to the pose, nothing happens when the robot is
     already within ALREADY_THERE of it
@@ -289,7 +302,9 @@ def move_from_current_angles(robot, pose, duration):
 # splines through recorded poses
 
 
-def plan_spline(robot, poses, duration, center=None, s=None):
+def plan_spline(robot: AbstractRobotController, poses: Sequence[Pose], duration: float,
+                center: Sequence[float] | np.ndarray | None = None,
+                s: float | None = None) -> tuple[PlannedMove, Pose]:
     """
     Plan a smooth curve of the end effector through the poses: a B-spline, timed with a minimum jerk profile,
     shifted to start exactly at the first pose. The orientation follows a spline through the orientations of the
@@ -322,7 +337,8 @@ def plan_spline(robot, poses, duration, center=None, s=None):
 TURN_TOWARDS_CENTER = 0.5  # seconds, stretched when the wrist would turn too fast
 
 
-def _turn_towards_center(robot, start_pose, center):
+def _turn_towards_center(robot: AbstractRobotController, start_pose: Pose,
+                         center: Sequence[float] | np.ndarray) -> tuple[np.ndarray, float] | None:
     """
     a joint space turn of the start pose towards the center, None when it points at it already
     :return: (the angles of every step, the duration in seconds)
@@ -338,7 +354,8 @@ def _turn_towards_center(robot, start_pose, center):
                                TURN_TOWARDS_CENTER)
 
 
-def spline_poses(poses, time, center=None, s=None):
+def spline_poses(poses: Sequence[Pose], time: float, center: Sequence[float] | np.ndarray | None = None,
+                 s: float | None = None) -> tuple[list[Pose], Pose]:
     """
     The pose of every step along the B-spline through the poses, shifted so the curve starts at the first pose, and
     the pose the curve actually ends at.
@@ -374,7 +391,8 @@ def spline_poses(poses, time, center=None, s=None):
     return steps, actual_stop_pose
 
 
-def get_spline_step_arrays(poses, time, s=None):
+def get_spline_step_arrays(poses: Sequence[Pose], time: float, s: float | None = None
+                           ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, np.ndarray, np.ndarray, list[float]]:
     data_points = len(poses)
     if data_points < 2:
         raise ValueError("Not enough poses, need at least 2 for a b spline movement")
@@ -402,7 +420,8 @@ def get_spline_step_arrays(poses, time, s=None):
     return x_steps, y_steps, z_steps, total_steps, alpha_steps, gamma_steps, path_parameter
 
 
-def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_steps):
+def get_adjustments_and_stop_pose(start_pose: Pose, stop_pose: Pose, x_steps: np.ndarray, y_steps: np.ndarray,
+                                  z_steps: np.ndarray) -> tuple[float, float, float, Pose]:
     x_start, y_start, z_start = start_pose.x, start_pose.y, start_pose.z
 
     dx = x_steps[0] - x_start
@@ -417,7 +436,8 @@ def get_adjustments_and_stop_pose(start_pose, stop_pose, x_steps, y_steps, z_ste
     return dx, dy, dz, actual_stop_pose
 
 
-def get_angles_center(x, y, z, center):
+def get_angles_center(x: float, y: float, z: float,
+                      center: Sequence[float] | np.ndarray) -> tuple[float, float, float]:
     """the orientation (alpha, beta, gamma) that points the end effector at (x, y, z) towards the center"""
     dx = center[0] - x
     dy = center[1] - y
@@ -428,15 +448,15 @@ def get_angles_center(x, y, z, center):
     return alpha, 0, gamma
 
 
-def b_spline_plot(poses, s=None):
+def b_spline_plot(poses: Sequence[Pose], s: float | None = None) -> None:
     import matplotlib.pyplot as plt
 
     x_steps, y_steps, z_steps, _, _, _, _ = get_spline_step_arrays(poses, 1, s)
     fig2 = plt.figure(2)
     ax3d = fig2.add_subplot(111, projection='3d')
-    ax3d.set_xlim3d(-40, 40)
-    ax3d.set_ylim3d(0, 40)
-    ax3d.set_zlim3d(0, 40)
+    ax3d.set_xlim3d(-40, 40)  # type: ignore[attr-defined]  # matplotlib stubs miss the 3d axes
+    ax3d.set_ylim3d(0, 40)  # type: ignore[attr-defined]  # same
+    ax3d.set_zlim3d(0, 40)  # type: ignore[attr-defined]  # same
     ax3d.plot([pose.x for pose in poses], [pose.y for pose in poses], [pose.z for pose in poses], 'r*')
     ax3d.plot(x_steps, y_steps, z_steps, 'g')
     fig2.show()
@@ -446,7 +466,7 @@ def b_spline_plot(poses, s=None):
 # the recorded moves of the xbox controller
 
 
-def convert_center_to_float(center):
+def convert_center_to_float(center: Sequence[float] | np.ndarray | None) -> list[float] | None:
     if center is None:
         return None
     return [float(x) for x in center]
@@ -455,61 +475,62 @@ def convert_center_to_float(center):
 class Movement(ABC):
     """a recorded move through poses, planned and checked against the robot when it is executed"""
 
-    def __init__(self, poses, time, center=None) -> None:
+    def __init__(self, poses: Sequence[Pose], time: float, center: Sequence[float] | np.ndarray | None = None) -> None:
         if len(poses) < 2:
             raise ValueError("at least 2 poses should be given in order to make a movement")
         self.poses = poses
         self.time = float(time)
         self.center = convert_center_to_float(center)
 
-    def go_to_start_of_move(self, robot, time=None):
+    def go_to_start_of_move(self, robot: AbstractRobotController, time: float | None = None) -> None:
         if time is None:
             time = 4
         move_from_current_angles(robot, self.poses[0], time)
 
-    def move(self, robot):
+    def move(self, robot: AbstractRobotController) -> Pose:
         if not self.is_robot_at_start_pose(self.poses[0], robot):
             raise MovementException("robot is not at the start pose, not executing move")
         return self._move_internal(self.poses, robot)
 
-    def move_reversed(self, robot):
+    def move_reversed(self, robot: AbstractRobotController) -> Pose:
         if not self.is_robot_at_start_pose(self.poses[-1], robot):
             raise MovementException("robot is not at the start pose, not executing move")
         return self._move_internal(self.poses[::-1], robot)
 
     @abstractmethod
-    def _move_internal(self, poses, robot):
+    def _move_internal(self, poses: Sequence[Pose], robot: AbstractRobotController) -> Pose:
         pass
 
     @abstractmethod
-    def is_possible(self, robot):
+    def is_possible(self, robot: AbstractRobotController) -> bool:
         """whether the robot can execute the move: it can be planned and passes the checks of check_move"""
         pass
 
-    def to_json(self):
-        json_poses = [pose.to_json() for pose in self.poses]
+    def to_json(self) -> str:
+        json_poses = [pose.to_json() for pose in self.poses]  # type: ignore[attr-defined]  # pose has no to_json
         dump_dict = {'poses': json_poses}
         return json.dumps(dump_dict)
 
     @staticmethod
-    def is_robot_at_start_pose(start_pose, robot):
+    def is_robot_at_start_pose(start_pose: Pose, robot: AbstractRobotController) -> bool:
         current_angles = robot.get_current_angles()
         start_pose_angles = robot.pose_to_angles(start_pose)
-        return np.allclose(current_angles, start_pose_angles, atol=0.4)
+        return np.allclose(current_angles, start_pose_angles, atol=0.4)  # type: ignore[arg-type]  # current angles can be none
 
 
 class SplineMovement(Movement):
 
-    def __init__(self, poses, time, center=None, s=None) -> None:
+    def __init__(self, poses: Sequence[Pose], time: float, center: Sequence[float] | np.ndarray | None = None,
+                 s: float | None = None) -> None:
         super().__init__(poses, time, center)
         self._s = s
 
-    def _move_internal(self, poses, robot):
+    def _move_internal(self, poses: Sequence[Pose], robot: AbstractRobotController) -> Pose:
         move, actual_stop_pose = plan_spline(robot, poses, self.time, self.center, self._s)
         execute_move(robot, move)
         return actual_stop_pose
 
-    def is_possible(self, robot):
+    def is_possible(self, robot: AbstractRobotController) -> bool:
         try:
             plan_spline(robot, self.poses, self.time, self.center, self._s)
         except MovementException:
@@ -519,16 +540,16 @@ class SplineMovement(Movement):
 
 class PoseToPoseMovement(Movement):
 
-    def __init__(self, poses, time, center=None) -> None:
+    def __init__(self, poses: Sequence[Pose], time: float, center: Sequence[float] | np.ndarray | None = None) -> None:
         super().__init__(poses, time, center)
         if len(self.poses) > 2:
             logger.warning("more than 2 poses provided for a pose to pose movement, "
                            "using the first and the last pose given")
 
-    def _move_internal(self, poses, robot):
+    def _move_internal(self, poses: Sequence[Pose], robot: AbstractRobotController) -> Pose:
         return move_between_poses(robot, poses[0], poses[-1], duration=self.time)
 
-    def is_possible(self, robot):
+    def is_possible(self, robot: AbstractRobotController) -> bool:
         try:
             plan_move_to_angles(robot, robot.pose_to_angles(self.poses[0]), robot.pose_to_angles(self.poses[-1]),
                                 duration=self.time)

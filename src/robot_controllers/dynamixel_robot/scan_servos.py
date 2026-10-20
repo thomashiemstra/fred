@@ -17,7 +17,7 @@ MODEL_NAMES = {
 }
 
 
-def main(max_servo_id=20):
+def main(max_servo_id: int = 20) -> None:
     adapters = list_dynamixel_adapters()
     if not adapters:
         print("no dynamixel usb adapter found")

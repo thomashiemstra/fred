@@ -5,12 +5,14 @@ import numpy as np
 import pybullet as p
 
 from src import global_constants
+from src.kinematics.kinematics_utils import RobotConfig
 from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
 from numpy import pi
 
 
-def start_simulated_robot(use_gui=False, robot_config=global_constants.simulated_robot_config):
-    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+def start_simulated_robot(use_gui: bool = False,
+                          robot_config: RobotConfig = global_constants.simulated_robot_config) -> SimulatedRobotController:
+    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe is optional in typeshed
 
     if use_gui:
         physics_client = p.connect(p.GUI, options="--width=1920 --height=1080")

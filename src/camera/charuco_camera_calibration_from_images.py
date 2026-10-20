@@ -1,5 +1,6 @@
 import glob
 import sys
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -9,7 +10,8 @@ import json
 from src.camera.util import get_default_charuco_board, charuco_board_dictionary
 
 
-def calibrate_camera(allCorners,allIds,imsize):
+def calibrate_camera(allCorners: list[np.ndarray], allIds: list[np.ndarray], imsize: tuple[int, ...]
+                     ) -> tuple[float, np.ndarray, np.ndarray, Sequence[np.ndarray], Sequence[np.ndarray]]:
     """
     Calibrates the camera using the dected corners.
     """
@@ -25,7 +27,7 @@ def calibrate_camera(allCorners,allIds,imsize):
     (ret, camera_matrix, distortion_coefficients0,
      rotation_vectors, translation_vectors,
      stdDeviationsIntrinsics, stdDeviationsExtrinsics,
-     perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(
+     perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(  # type: ignore[attr-defined]  # removed in opencv 4.7
                       charucoCorners=allCorners,
                       charucoIds=allIds,
                       board=board,
@@ -58,8 +60,8 @@ for fname in images:
     imsize = gray.shape
     last_frame = gray
 
-    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray, charuco_board_dictionary)
-    cv2.aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)
+    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray, charuco_board_dictionary)  # type: ignore[attr-defined]  # removed in opencv 4.7
+    cv2.aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)  # type: ignore[attr-defined]  # removed in opencv 4.7
     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
     if len(corners) > 7:
@@ -69,7 +71,7 @@ for fname in images:
                              winSize=(3, 3),
                              zeroZone=(-1, -1),
                              criteria=criteria)
-        charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,
+        charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,  # type: ignore[attr-defined]  # removed in opencv 4.7
                                                                                         board)
         if charucoCorners is not None and charucoIds is not None and len(
                 charucoCorners) > 3 and 7 < len(ids) <= 9:
@@ -86,6 +88,7 @@ if img_counter < 10:
     print("not enough images, need at least 10, but got {} instead. exiting.".format(img_counter))
     sys.exit()
 
+assert imsize is not None
 ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera(allCorners, allIds, imsize)
 
 print("Camera matrix : \n")

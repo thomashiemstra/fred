@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import threading
 from copy import copy
 from functools import lru_cache
 from time import sleep
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -11,15 +14,20 @@ from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement import move_from_current_angles, move_between_poses
 
+if TYPE_CHECKING:
+    from src.camera.image_handlers import BoardToBoardImageHandler
+    from src.robot_controllers.abstract_robot_controller import AbstractRobotController
+
 
 @lru_cache(maxsize=1)
-def get_board_to_board_controller(image_hanlder):
+def get_board_to_board_controller(image_hanlder: BoardToBoardImageHandler) -> BoardToBoardRobotController:
     robot = get_robot()
     controller = BoardToBoardRobotController(robot, image_hanlder)
     return controller
 
 
-def apply_workspace_limits(old_x, old_y, old_z, new_x, new_y, new_z):
+def apply_workspace_limits(old_x: float, old_y: float, old_z: float, new_x: float, new_y: float,
+                           new_z: float) -> tuple[float, float, float]:
     limits = global_constants.WorkSpaceLimits
 
     x, y, z = new_x, new_y, new_z
@@ -39,28 +47,29 @@ def apply_workspace_limits(old_x, old_y, old_z, new_x, new_y, new_z):
 
 class BoardToBoardRobotController:
 
-    def __init__(self, robot, board_to_board_image_handler):
+    def __init__(self, robot: AbstractRobotController, board_to_board_image_handler: BoardToBoardImageHandler) -> None:
         self.robot = robot
         self.board_to_board_image_handler = board_to_board_image_handler
         self.lock = threading.RLock()
         self.should_filter_lock = threading.RLock()
-        self.should_filter = True
-        self.thread = None
+        self.should_filter = True  # type: ignore[method-assign, assignment]  # should_filter is also a method, the attribute shadows it
+        self.thread: threading.Thread | None = None
         self.startup_pose = Pose(21, 21.0, 4)
         self.neutral_pose = Pose(0, 30, 10)
-        self.current_pose = None
+        self.current_pose: Pose | None = None
         self.done = False
         self.dt = 1.0 / 100
         self.kg = 0.04
 
     @synchronized_with_lock("lock")
-    def stop(self):
+    def stop(self) -> None:
         self.set_done(True)
+        assert self.thread is not None
         self.thread.join()
         self.thread = None
 
     @synchronized_with_lock("lock")
-    def start(self):
+    def start(self) -> bool:
         self.current_pose = copy(self.startup_pose)
         if self.thread is None:
             self.thread = threading.Thread(target=self.__start_internal, args=())
@@ -69,30 +78,30 @@ class BoardToBoardRobotController:
         else:
             return False
 
-    def stop_robot(self):
+    def stop_robot(self) -> None:
         move_from_current_angles(self.robot, self.startup_pose, 4)
         self.robot.disable_servos()
 
     @synchronized_with_lock("lock")
-    def set_done(self, val):
+    def set_done(self, val: bool) -> None:
         self.done = val
 
     @synchronized_with_lock("lock")
-    def is_done(self):
+    def is_done(self) -> bool:
         return self.done
 
     @synchronized_with_lock("should_filter_lock")
-    def should_filter(self):
-        return self.should_filter
+    def should_filter(self) -> bool:
+        return self.should_filter  # type: ignore[return-value]  # should_filter is also a method, the attribute shadows it
 
     @synchronized_with_lock("should_filter_lock")
-    def set_should_filter(self, val):
-        self.should_filter = val
+    def set_should_filter(self, val: bool) -> None:
+        self.should_filter = val  # type: ignore[method-assign, assignment]  # should_filter is also a method, the attribute shadows it
 
-    def get_new_filtered_pose(self):
+    def get_new_filtered_pose(self) -> Pose:
         relative_matrix, translation_vector = self.board_to_board_image_handler.get_revlative_vecs()
         if relative_matrix is None or translation_vector is None:
-            return self.current_pose
+            return self.current_pose  # type: ignore[return-value]  # current_pose is none until start() sets it
 
         # Measured values
         x_m = translation_vector[0]
@@ -101,12 +110,13 @@ class BoardToBoardRobotController:
         m_orientation = self.get_target_matrix(relative_matrix)
 
         # current values
+        assert self.current_pose is not None
         old_orientation = self.current_pose.get_euler_matrix()
         old_x = self.current_pose.x
         old_y = self.current_pose.y
         old_z = self.current_pose.z
 
-        if self.should_filter:
+        if self.should_filter:  # type: ignore[truthy-function]  # should_filter is also a method, the attribute shadows it
             new_x = old_x + self.kg * (x_m - old_x)
             new_y = old_y + self.kg * (y_m - old_y)
             new_z = old_z + self.kg * (z_m - old_z)
@@ -125,15 +135,16 @@ class BoardToBoardRobotController:
         return new_pose
 
     @staticmethod
-    def get_target_matrix(m):
+    def get_target_matrix(m: np.ndarray) -> np.ndarray:
         t = np.zeros((3, 3))
         t[0][0] = m[0][2]; t[0][1] = m[0][0]; t[0][2] = m[0][1]
         t[1][0] = m[1][2]; t[1][1] = m[1][0]; t[1][2] = m[1][1]
         t[2][0] = m[2][2]; t[2][1] = m[2][0]; t[2][2] = m[2][1]
         return t
 
-    def __start_internal(self):
+    def __start_internal(self) -> None:
         # The robot could be anywhere, first move it from it's current position to the target pose
+        assert self.current_pose is not None
         move_from_current_angles(self.robot, self.current_pose, 1)
 
         self.current_pose = copy(self.neutral_pose)

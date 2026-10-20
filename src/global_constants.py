@@ -23,7 +23,7 @@ CURRENT_BASED_POSITION_CONTROL_MODE = 5
 steps_per_second = 100
 recommended_max_servo_speed = 4  # rads/sec
 use_simulation = False
-root_dir = None
+root_dir: str | None = None
 
 sac_network_weights = os.path.expanduser(os.path.dirname(get_project_root()) +
                                          '/src/reinforcementlearning/softActorCritic/'

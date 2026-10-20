@@ -1,5 +1,6 @@
 import json
 import sys
+from collections.abc import Sequence
 
 import numpy as np
 import cv2, PIL, os
@@ -17,7 +18,8 @@ SPACE_KEY = 32
 board = get_default_charuco_board(square_length=4.0, marker_length=3.2)
 
 
-def calibrate_camera(allCorners,allIds,imsize):
+def calibrate_camera(allCorners: list[np.ndarray], allIds: list[np.ndarray], imsize: tuple[int, ...]
+                     ) -> tuple[float, np.ndarray, np.ndarray, Sequence[np.ndarray], Sequence[np.ndarray]]:
     """
     Calibrates the camera using the dected corners.
     """
@@ -33,7 +35,7 @@ def calibrate_camera(allCorners,allIds,imsize):
     (ret, camera_matrix, distortion_coefficients0,
      rotation_vectors, translation_vectors,
      stdDeviationsIntrinsics, stdDeviationsExtrinsics,
-     perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(
+     perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(  # type: ignore[attr-defined]  # removed in opencv 4.7
                       charucoCorners=allCorners,
                       charucoIds=allIds,
                       board=board,
@@ -47,7 +49,7 @@ def calibrate_camera(allCorners,allIds,imsize):
 
 
 @timer
-def open_cap():
+def open_cap() -> cv2.VideoCapture:
     return cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
 
@@ -55,7 +57,7 @@ cap = open_cap()
 
 
 @timer
-def set_cap_properties(cap):
+def set_cap_properties(cap: cv2.VideoCapture) -> None:
     cap.set(cv2.CAP_PROP_FPS, 30.0)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('m', 'j', 'p', 'g'))
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M', 'J', 'P', 'G'))
@@ -95,8 +97,8 @@ while cap.isOpened():
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
     imsize = gray.shape
-    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray, charuco_board_dictionary)
-    cv2.aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)
+    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray, charuco_board_dictionary)  # type: ignore[attr-defined]  # removed in opencv 4.7
+    cv2.aruco.refineDetectedMarkers(gray, board, corners, ids, rejectedImgPoints)  # type: ignore[attr-defined]  # removed in opencv 4.7
     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
     key_pressed = cv2.waitKey(1)
@@ -117,7 +119,7 @@ while cap.isOpened():
                                      winSize=(3, 3),
                                      zeroZone=(-1, -1),
                                      criteria=criteria)
-                charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,
+                charucoretval, charucoCorners, charucoIds = cv2.aruco.interpolateCornersCharuco(corners, ids, gray,  # type: ignore[attr-defined]  # removed in opencv 4.7
                                                                                                 board)
                 if charucoCorners is not None and charucoIds is not None and len(
                         charucoCorners) > 3 and decimator % 1 == 0 and 7 < len(ids) <= 9:
@@ -139,7 +141,7 @@ cap.release()
 cv2.destroyAllWindows()
 
 
-ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera(allCorners, allIds, imsize)
+ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera(allCorners, allIds, imsize)  # type: ignore[assignment, arg-type]  # ret was the frame flag before, imsize is none when no frame was read
 
 print("Camera matrix : \n")
 print(camera_matrix)

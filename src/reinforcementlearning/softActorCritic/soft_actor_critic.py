@@ -7,6 +7,7 @@ import inspect
 import multiprocessing as mp
 import os
 import time
+from typing import Any
 
 import gin
 import tensorflow as tf
@@ -49,35 +50,35 @@ FLAGS = flags.FLAGS
 NUM_PARALLEL = 1
 
 
-def train_eval(checkpoint_dir,
-               checkpoint_dir_behavioral_cloning=None,
-               total_train_steps=1000000,
+def train_eval(checkpoint_dir: str,
+               checkpoint_dir_behavioral_cloning: str | None = None,
+               total_train_steps: int = 1000000,
                # Params for collect,
-               initial_collect_steps=10000,
-               initial_bc_collect_steps=100000,
-               collect_steps_per_iteration=NUM_PARALLEL,
-               replay_buffer_capacity=1000000,
+               initial_collect_steps: int = 10000,
+               initial_bc_collect_steps: int = 100000,
+               collect_steps_per_iteration: int = NUM_PARALLEL,
+               replay_buffer_capacity: int = 1000000,
                # Params for target update,
                # Params for train,
-               train_steps_per_iteration=NUM_PARALLEL,
-               batch_size=256,
-               use_tf_functions=True,
+               train_steps_per_iteration: int = NUM_PARALLEL,
+               batch_size: int = 256,
+               use_tf_functions: bool = True,
                # Params for eval,
-               num_eval_episodes=len(sensible_scenarios),
-               eval_interval=2000,
+               num_eval_episodes: int = len(sensible_scenarios),
+               eval_interval: int = 2000,
                # Params for summaries and logging,
-               train_checkpoint_interval=10000,
-               policy_checkpoint_interval=10000,
-               rb_checkpoint_interval=10000,
-               log_interval=5000,
-               summary_interval=1000,
-               summaries_flush_secs=10,
-               robot_env_no_obstacles=False,
-               num_parallel_environments=NUM_PARALLEL,
-               reward_scaling=0.1,
-               entropy=None,
-               difficulty=None):
-    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+               train_checkpoint_interval: int = 10000,
+               policy_checkpoint_interval: int = 10000,
+               rb_checkpoint_interval: int = 10000,
+               log_interval: int = 5000,
+               summary_interval: int = 1000,
+               summaries_flush_secs: int = 10,
+               robot_env_no_obstacles: bool = False,
+               num_parallel_environments: int = NUM_PARALLEL,
+               reward_scaling: float = 0.1,
+               entropy: float | None = None,
+               difficulty: str | None = None) -> None:
+    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe never returns none on cpython
 
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train')
@@ -160,7 +161,8 @@ def train_eval(checkpoint_dir,
         restore_from_behavioral_cloning = checkpoint_dir_behavioral_cloning is not None and global_step.numpy() == 0
         if restore_from_behavioral_cloning:
             logging.info("restoring agent from the behavioral cloning run")
-            restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step)
+            restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent,  # type: ignore[arg-type]  # not none when restoring
+                                                  global_step)
             logging.info('Initializing replay buffer by collecting experience for %d steps with '
                          'the behavioral cloning policy.', initial_bc_collect_steps)
             for _ in range(int(initial_bc_collect_steps / collect_steps_per_iteration)):
@@ -187,14 +189,14 @@ def train_eval(checkpoint_dir,
         policy_state = collect_policy.get_initial_state(tf_env.batch_size)
 
         timed_at_step = global_step.numpy()
-        time_acc = 0
+        time_acc: float = 0
 
         dataset = replay_buffer.as_dataset(
             sample_batch_size=batch_size,
             num_steps=2).unbatch().batch(batch_size).prefetch(5)
         iterator = iter(dataset)
 
-        def train_step():
+        def train_step() -> Any:
             experience, _ = next(iterator)
             return tf_agent.train(experience=experience)
 
@@ -269,13 +271,14 @@ def train_eval(checkpoint_dir,
         print(time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
 
 
-def restore_agent_from_behavioral_cloning(current_dir, checkpoint_dir_behavioral_cloning, tf_agent, global_step):
+def restore_agent_from_behavioral_cloning(current_dir: str, checkpoint_dir_behavioral_cloning: str, tf_agent: Any,
+                                          global_step: Any) -> None:
     root_dir_behavioral_cloning = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir_behavioral_cloning)
     train_dir_behavioral_cloning = os.path.join(root_dir_behavioral_cloning, 'train')
     initialize_and_restore_train_checkpointer(train_dir_behavioral_cloning, tf_agent, global_step)
 
 
-def main(_):
+def main(_: Any) -> None:
     tf.compat.v1.enable_v2_behavior()
     logging.set_verbosity(logging.DEBUG)
     gin.parse_config_files_and_bindings(FLAGS.gin_file, FLAGS.gin_param)

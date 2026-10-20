@@ -1,8 +1,11 @@
+from __future__ import annotations
 from __future__ import division
 
 import threading
+from typing import TYPE_CHECKING
 
 from flask import Blueprint
+from flask import Response
 from flask import jsonify
 
 import src.global_objects as global_objects
@@ -10,6 +13,10 @@ from src.camera.image_handlers import get_default_aurco_image_handler, \
     get_default_board_to_board_image_handler
 from src.camera_control.board_to_board_robot_controller import get_board_to_board_controller
 from src.utils.decorators import synchronized_with_lock
+
+if TYPE_CHECKING:
+    from src.camera.image_handlers import ArucoImageHandler, BoardToBoardImageHandler
+    from src.camera_control.obstacle_avoidance import ObstacleAvoidance
 
 camera_api = Blueprint('camera_api', __name__)
 
@@ -19,34 +26,34 @@ started = False
 
 class Handlers:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.lock = threading.RLock()
-        self._obstacle_avoidance = None
-        self._aruco_image_handler = None
-        self._board_to_board_handler = None
+        self._obstacle_avoidance: ObstacleAvoidance | None = None
+        self._aruco_image_handler: ArucoImageHandler | None = None
+        self._board_to_board_handler: BoardToBoardImageHandler | None = None
 
     @synchronized_with_lock("lock")
-    def set_board_to_board_handler(self, val):
+    def set_board_to_board_handler(self, val: BoardToBoardImageHandler) -> None:
         self._board_to_board_handler = val
 
     @synchronized_with_lock("lock")
-    def get_board_to_board_handler(self):
+    def get_board_to_board_handler(self) -> BoardToBoardImageHandler | None:
         return self._board_to_board_handler
 
     @synchronized_with_lock("lock")
-    def set_aruco_image_handler(self, val):
+    def set_aruco_image_handler(self, val: ArucoImageHandler) -> None:
         self._aruco_image_handler = val
 
     @synchronized_with_lock("lock")
-    def get_aruco_image_handler(self):
+    def get_aruco_image_handler(self) -> ArucoImageHandler | None:
         return self._aruco_image_handler
 
     @synchronized_with_lock("lock")
-    def set_obstacle_avoidance(self, val):
+    def set_obstacle_avoidance(self, val: ObstacleAvoidance) -> None:
         self._obstacle_avoidance = val
 
     @synchronized_with_lock("lock")
-    def get_obstacle_avoidance(self):
+    def get_obstacle_avoidance(self) -> ObstacleAvoidance | None:
         return self._obstacle_avoidance
 
 
@@ -54,7 +61,7 @@ object_handler = Handlers()
 
 
 @camera_api.route('/start', methods=['POST'])
-def start():
+def start() -> Response | str:
     global started
     with api_lock:
         if started:
@@ -69,7 +76,7 @@ def start():
 
 
 @camera_api.route('/stop', methods=['POST'])
-def stop():
+def stop() -> Response | str:
     global started
     with api_lock:
         if started:
@@ -85,7 +92,7 @@ def stop():
 
 
 @camera_api.route('/start_aruco', methods=['POST'])
-def start_aruco():
+def start_aruco() -> Response:
     global object_handler, started
 
     with api_lock:
@@ -109,7 +116,7 @@ def start_aruco():
 
 
 @camera_api.route('/disable_aruco_draw', methods=['POST'])
-def disable_aruco_draw():
+def disable_aruco_draw() -> Response:
     global object_handler, started
 
     with api_lock:
@@ -120,12 +127,12 @@ def disable_aruco_draw():
             print("aruco image handler not started")
             return jsonify(success=False)
 
-    object_handler.get_aruco_image_handler().disable_draw()
+    object_handler.get_aruco_image_handler().disable_draw()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 
 @camera_api.route('/enable_aruco_draw', methods=['POST'])
-def enable_aruco_draw():
+def enable_aruco_draw() -> Response:
     global object_handler, started
 
     with api_lock:
@@ -136,12 +143,12 @@ def enable_aruco_draw():
             print("aruco image handler not started")
             return jsonify(success=False)
 
-    object_handler.get_aruco_image_handler().enable_draw()
+    object_handler.get_aruco_image_handler().enable_draw()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 
 @camera_api.route('/start_board_to_board', methods=['POST'])
-def start_board_to_board():
+def start_board_to_board() -> Response:
     global started, object_handler
 
     with api_lock:
@@ -166,7 +173,7 @@ def start_board_to_board():
 
 
 @camera_api.route('/start_board_to_board_controller', methods=['POST'])
-def start_board_to_board_controller():
+def start_board_to_board_controller() -> Response:
     global object_handler, started
     with api_lock:
         if not started:
@@ -183,7 +190,7 @@ def start_board_to_board_controller():
 
 
 @camera_api.route('/stop_board_to_board_controller', methods=['POST'])
-def stop_board_to_board_controller():
+def stop_board_to_board_controller() -> Response:
     global object_handler
     board_to_board_handler = object_handler.get_board_to_board_handler()
     if board_to_board_handler is None:
@@ -196,7 +203,7 @@ def stop_board_to_board_controller():
 
 
 @camera_api.route('/enable_filter_board_to_board_controller', methods=['POST'])
-def enable_filter_board_to_board_controller():
+def enable_filter_board_to_board_controller() -> Response:
     global object_handler
     board_to_board_handler = object_handler.get_board_to_board_handler()
     if board_to_board_handler is None:
@@ -209,7 +216,7 @@ def enable_filter_board_to_board_controller():
 
 
 @camera_api.route('/disable_filter_board_to_board_controller', methods=['POST'])
-def disable_filter_board_to_board_controller():
+def disable_filter_board_to_board_controller() -> Response:
     global object_handler
     board_to_board_handler = object_handler.get_board_to_board_handler()
     if board_to_board_handler is None:
@@ -222,21 +229,21 @@ def disable_filter_board_to_board_controller():
 
 
 @camera_api.route('/enable_servos', methods=['POST'])
-def enable_servos():
+def enable_servos() -> Response:
     robot = global_objects.get_robot()
     robot.enable_servos()
     return jsonify(success=True)
 
 
 @camera_api.route('/disable_servos', methods=['POST'])
-def disable_servos():
+def disable_servos() -> Response:
     robot = global_objects.get_robot()
     robot.disable_servos()
     return jsonify(success=True)
 
 
 @camera_api.route('/start_obstacle_avoidance', methods=['POST'])
-def start_obstacle_avoidance():
+def start_obstacle_avoidance() -> Response:
     global object_handler
     with api_lock:
         if object_handler.get_aruco_image_handler() is None:
@@ -250,7 +257,7 @@ def start_obstacle_avoidance():
     aruco_image_handler = object_handler.get_aruco_image_handler()
 
     from src.camera_control.obstacle_avoidance import ObstacleAvoidance
-    obstacle_avoidance = ObstacleAvoidance(aruco_image_handler, robot)
+    obstacle_avoidance = ObstacleAvoidance(aruco_image_handler, robot)  # type: ignore[arg-type]  # checked for none above, mypy can't narrow a getter
     object_handler.set_obstacle_avoidance(obstacle_avoidance)
 
     print("obstacle avoidance started")
@@ -258,62 +265,62 @@ def start_obstacle_avoidance():
 
 
 @camera_api.route('/create_and_set_scenario', methods=['POST'])
-def create_and_set_scenario():
+def create_and_set_scenario() -> Response:
     global object_handler
     with api_lock:
         if object_handler.get_obstacle_avoidance() is None:
             print("no obstacle avoidance running!")
             return jsonify(success=False)
 
-    object_handler.get_obstacle_avoidance().create_and_set_scenario()
+    object_handler.get_obstacle_avoidance().create_and_set_scenario()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 
 @camera_api.route('/change_flip', methods=['POST'])
-def change_flip():
+def change_flip() -> Response:
     global object_handler
     with api_lock:
         if object_handler.get_obstacle_avoidance() is None:
             print("no obstacle avoidance running!")
             return jsonify(success=False)
 
-    object_handler.get_obstacle_avoidance().change_flip()
+    object_handler.get_obstacle_avoidance().change_flip()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 
 @camera_api.route('/obstacle_avoidance_gradient_descent', methods=['POST'])
-def obstacle_avoidance_gradient_descent():
+def obstacle_avoidance_gradient_descent() -> Response:
     global object_handler
     with api_lock:
         if object_handler.get_obstacle_avoidance() is None:
             print("no obstacle avoidance running!")
             return jsonify(success=False)
 
-    object_handler.get_obstacle_avoidance().obstacle_avoidance_gradient_descent()
+    object_handler.get_obstacle_avoidance().obstacle_avoidance_gradient_descent()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 
 @camera_api.route('/obstacle_avoidance_sac', methods=['POST'])
-def obstacle_avoidance_sac():
+def obstacle_avoidance_sac() -> Response:
     global object_handler
     with api_lock:
         if object_handler.get_obstacle_avoidance() is None:
             print("no obstacle avoidance running!")
             return jsonify(success=False)
 
-    object_handler.get_obstacle_avoidance().obstacle_avoidance_sac()
+    object_handler.get_obstacle_avoidance().obstacle_avoidance_sac()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 
 @camera_api.route('/stop_obstacle_avoidance', methods=['POST'])
-def stop_obstacle_avoidance():
+def stop_obstacle_avoidance() -> Response:
     global object_handler
     with api_lock:
         if object_handler.get_obstacle_avoidance() is None:
             print('not obstacle avoidance running, nothing to stop')
             return jsonify(success=True)
 
-    object_handler.get_obstacle_avoidance().stop()
+    object_handler.get_obstacle_avoidance().stop()  # type: ignore[union-attr]  # checked for none above, mypy can't narrow a getter
     return jsonify(success=True)
 
 

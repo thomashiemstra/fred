@@ -1,5 +1,7 @@
 """Loads the servo configuration of the robot from a yaml file, see servo_config.yaml for the format."""
 import os
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import yaml
@@ -33,7 +35,9 @@ class ServoConfigError(ValueError):
 class ServoConfig:
     """the servos of the robot and the settings that apply to all of them"""
 
-    def __init__(self, servos, names, buses, temperature_warning, temperature_limit, models=None, spring=None):
+    def __init__(self, servos: dict[int, Servo], names: dict[int, str], buses: tuple[tuple[int, ...], ...],
+                 temperature_warning: float, temperature_limit: float, models: dict[int, str] | None = None,
+                 spring: SpringGeometry | None = None) -> None:
         self.servos = servos  # mapping of servo id to Servo, ordered by servo id
         self.names = names  # mapping of servo id to name
         self.models = models if models is not None else {}  # mapping of servo id to model name, if given
@@ -43,7 +47,7 @@ class ServoConfig:
         self.spring = spring  # SpringGeometry of the spring between the servo 2 and 3 housings, or None
 
 
-def load_servo_config(path=DEFAULT_SERVO_CONFIG_PATH, a2=None):
+def load_servo_config(path: str = DEFAULT_SERVO_CONFIG_PATH, a2: float | None = None) -> ServoConfig:
     """
     read the servo configuration, every call returns new Servo objects
     :param a2: the length of the lower arm in cm for the spring geometry, by default from robot_config.yaml
@@ -57,7 +61,7 @@ def load_servo_config(path=DEFAULT_SERVO_CONFIG_PATH, a2=None):
     return parse_servo_config(data, path, a2)
 
 
-def parse_servo_config(data, source='servo configuration', a2=None):
+def parse_servo_config(data: Any, source: str = 'servo configuration', a2: float | None = None) -> ServoConfig:
     """
     create the servo configuration from the parsed yaml data
     :param a2: the length of the lower arm in cm for the spring geometry, by default from robot_config.yaml
@@ -77,6 +81,7 @@ def parse_servo_config(data, source='servo configuration', a2=None):
     if not isinstance(data['servos'], dict) or not data['servos']:
         raise ServoConfigError('{}: servos should be a mapping of servo id to servo'.format(source))
 
+    buses: dict[str, list[int]]
     servos, names, models, buses = {}, {}, {}, {}
     for servo_id in sorted(data['servos'], key=lambda key: (not isinstance(key, int), str(key))):
         if not isinstance(servo_id, int) or isinstance(servo_id, bool) or not 0 <= servo_id <= 252:
@@ -93,7 +98,7 @@ def parse_servo_config(data, source='servo configuration', a2=None):
                        temperature_warning, temperature_limit, models, spring)
 
 
-def _parse_servo(data, source, servo_id, spring):
+def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry | None) -> Servo:
     _check_fields(data, _REQUIRED_SERVO_FIELDS, _OPTIONAL_SERVO_FIELDS, source)
 
     if data['mode'] not in OPERATING_MODES:
@@ -140,13 +145,13 @@ def _parse_servo(data, source, servo_id, spring):
                  compensation=compensation)
 
 
-def _parse_spring(data, source, a2):
+def _parse_spring(data: Any, source: str, a2: float) -> SpringGeometry:
     _check_fields(data, {'base_anchor', 'arm_anchor'}, set(), source)
     return SpringGeometry(_pair(data['base_anchor'], 'base_anchor', source),
                           _pair(data['arm_anchor'], 'arm_anchor', source), a2)
 
 
-def _parse_compensation(data, source, servo_id, spring):
+def _parse_compensation(data: Any, source: str, servo_id: int, spring: SpringGeometry | None) -> StaticCompensation:
     _check_fields(data, _REQUIRED_COMPENSATION_FIELDS, _OPTIONAL_COMPENSATION_FIELDS, source)
     try:
         names = term_names(servo_id)
@@ -166,7 +171,7 @@ def _parse_compensation(data, source, servo_id, spring):
     return StaticCompensation(servo_id, terms['terms'], max_positions, terms.get(UP), terms.get(DOWN), spring)
 
 
-def _terms(data, source, names, spring):
+def _terms(data: Any, source: str, names: Sequence[str], spring: SpringGeometry | None) -> dict[str, float]:
     if not isinstance(data, dict):
         raise ServoConfigError('{}: should be a mapping of term to coefficient in positions'.format(source))
     unknown = set(data) - set(names)
@@ -178,7 +183,7 @@ def _terms(data, source, names, spring):
     return {name: float(_number(value, name, source)) for name, value in data.items()}
 
 
-def _check_fields(data, required, optional, source):
+def _check_fields(data: Any, required: set[str], optional: set[str], source: str) -> None:
     if not isinstance(data, dict):
         raise ServoConfigError('{}: should be a mapping with {}'.format(source, ', '.join(sorted(required))))
     missing = required - set(data)
@@ -189,20 +194,20 @@ def _check_fields(data, required, optional, source):
         raise ServoConfigError('{}: unknown {}'.format(source, ', '.join(sorted(str(key) for key in unknown))))
 
 
-def _pair(value, name, source, integer=False):
+def _pair(value: Any, name: str, source: str, integer: bool = False) -> tuple[Any, Any]:
     if not isinstance(value, list) or len(value) != 2:
         raise ServoConfigError('{}: {} should be [first, last]'.format(source, name))
     convert = _integer if integer else _number
     return convert(value[0], name, source), convert(value[1], name, source)
 
 
-def _number(value, name, source):
+def _number(value: Any, name: str, source: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ServoConfigError('{}: {} should be a number, not {!r}'.format(source, name, value))
     return value
 
 
-def _integer(value, name, source):
+def _integer(value: Any, name: str, source: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ServoConfigError('{}: {} should be a whole number, not {!r}'.format(source, name, value))
     return value

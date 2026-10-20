@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import numpy as np
 from numba import jit
 from numpy import sin, cos
 
 
 @jit(nopython=True)
-def calculate_euler_matrix_from_angles(alpha, beta, gamma):
+def calculate_euler_matrix_from_angles(alpha: float, beta: float, gamma: float) -> np.ndarray:
     orientation = np.eye(3, dtype=np.float64)
 
     ca = cos(alpha)
@@ -27,7 +29,7 @@ def calculate_euler_matrix_from_angles(alpha, beta, gamma):
     return orientation
 
 
-def calculate_angles_from_euler_matrix(orientation):
+def calculate_angles_from_euler_matrix(orientation: np.ndarray) -> tuple[float, float, float]:
     """the inverse of calculate_euler_matrix_from_angles, returns (alpha, beta, gamma)"""
     beta = np.arctan2(-orientation[2, 1], np.hypot(orientation[0, 1], orientation[1, 1]))
     if np.isclose(np.cos(beta), 0.0):
@@ -42,7 +44,8 @@ def calculate_angles_from_euler_matrix(orientation):
 
 class Pose:
 
-    def __init__(self, x, y, z, flip=False, alpha=0.0, beta=0.0, gamma=0.0, time=2.0, euler_matrix=None):
+    def __init__(self, x: float, y: float, z: float, flip: bool = False, alpha: float = 0.0, beta: float = 0.0,
+                 gamma: float = 0.0, time: float = 2.0, euler_matrix: np.ndarray | None = None) -> None:
         self.x = float(x)
         self.y = float(y)
         self.z = float(z)
@@ -53,28 +56,28 @@ class Pose:
         self.beta = float(beta)
         self.gamma = float(gamma)
 
-    def get_euler_matrix(self):
+    def get_euler_matrix(self) -> np.ndarray:
         if self.euler_matrix is not None:
             return self.euler_matrix
         else:
             return self._get_euler_matrix_from_angles()
 
-    def _get_euler_matrix_from_angles(self):
+    def _get_euler_matrix_from_angles(self) -> np.ndarray:
         """alpha is a turn around the world z-axis"""
         """beta is a turn around the world y-axis"""
         """gamma is a turn around the world x-axis"""
         return calculate_euler_matrix_from_angles(self.alpha, self.beta, self.gamma)
 
-    def reset_orientation(self):
+    def reset_orientation(self) -> None:
         self.alpha = 0
         self.gamma = 0
         self.beta = 0
 
-    def __copy__(self):
+    def __copy__(self) -> Pose:
         res = Pose(self.x, self.y, self.z, self.flip, self.alpha, self.beta, self.gamma, self.time)
         return res
 
-    def __str__(self):
+    def __str__(self) -> str:
         return 'POSE: x={} y={} z={}, a={} b={} g={} ,time={} filp={}'\
             .format(self.x, self.y, self.z, self.alpha, self.beta, self.gamma, self.time, self.flip)
 
@@ -85,24 +88,24 @@ class Pose:
 
 class RobotConfig:
 
-    def __init__(self, d1=9.1, a2=15.8, d4=22.0, d6=2.0):
+    def __init__(self, d1: float = 9.1, a2: float = 15.8, d4: float = 22.0, d6: float = 2.0) -> None:
         self.initial_d1 = self.d1 = d1  # ground to joint 2
         self.initial_a2 = self.a2 = a2  # joint 2 to join 3
         self.initial_d4 = self.d4 = d4  # joint 3 to wrist centre
         self.initial_d6 = self.d6 = d6  # wrist centre to tip of the end effector
 
     @property
-    def d6(self):
+    def d6(self) -> float:
         return self._d6
 
     @d6.setter
-    def d6(self, length):
+    def d6(self, length: float) -> None:
         if length < self.initial_d6:
             self._d6 = self.initial_d6
         else:
             self._d6 = length
 
-    def restore_initial_values(self):
+    def restore_initial_values(self) -> None:
         self.d1 = self.initial_d1
         self.a2 = self.initial_a2
         self.d4 = self.initial_d4

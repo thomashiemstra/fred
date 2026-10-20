@@ -15,8 +15,9 @@ RECONNECT_INTERVAL = 1.0  # seconds
 
 
 class Buttons:
-    def __init__(self, start=False, x=False, y=False, a=False, b=False, rb=False, lb=False,
-                 pad_up=False, pad_down=False, pad_left=False, pad_right=False):
+    def __init__(self, start: bool = False, x: bool = False, y: bool = False, a: bool = False, b: bool = False,
+                 rb: bool = False, lb: bool = False, pad_up: bool = False, pad_down: bool = False,
+                 pad_left: bool = False, pad_right: bool = False) -> None:
         self.rb = rb
         self.lb = lb
         self.b = b
@@ -29,7 +30,7 @@ class Buttons:
         self.pad_left = pad_left
         self.pad_right = pad_right
 
-    def __str__(self):
+    def __str__(self) -> str:
         return 'Buttons: start={} x={} y={} a={}, b={}, rb={}, lb={}, ' \
                'pad_up={}. pad_down={}. pad_left={}, pad_right={}'\
             .format(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb,
@@ -41,9 +42,9 @@ class XboxController(object):
     MAX_JOY_VAL = math.pow(2, 15)
 
     def __init__(self,
-                 dead_zone=30,
-                 scale=1,
-                 invert_yaxis=False):
+                 dead_zone: float = 30,
+                 scale: float = 1,
+                 invert_yaxis: bool = False) -> None:
         self.lower_dead_zone = dead_zone * -1
         self.upper_dead_zone = dead_zone
 
@@ -51,11 +52,11 @@ class XboxController(object):
         self.invert_yaxis_val = -1 if invert_yaxis else 1
         self.lock = threading.RLock()
 
-        self.l_thumb_x = 0
-        self.l_thumb_y = 0
-        self.r_thumb_x = 0
-        self.r_thumb_y = 0
-        self.lr_trigger = 0
+        self.l_thumb_x: float = 0
+        self.l_thumb_y: float = 0
+        self.r_thumb_x: float = 0
+        self.r_thumb_y: float = 0
+        self.lr_trigger: float = 0
 
         self.start = False
         self.x = False
@@ -75,14 +76,14 @@ class XboxController(object):
         self._monitor_thread.start()
 
     @synchronized_with_lock("lock")
-    def stop(self):
+    def stop(self) -> None:
         pass
 
     @synchronized_with_lock("lock")
-    def is_connected(self):
+    def is_connected(self) -> bool:
         return self.connected
 
-    def wait_until_connected(self, timeout=2.0):
+    def wait_until_connected(self, timeout: float = 2.0) -> bool:
         """returns True if a gamepad is connected within the timeout"""
         waited = 0.0
         while not self.is_connected() and waited < timeout:
@@ -91,7 +92,7 @@ class XboxController(object):
         return self.is_connected()
 
     @synchronized_with_lock("lock")
-    def _set_connected(self, connected):
+    def _set_connected(self, connected: bool) -> None:
         if connected == self.connected:
             return
         self.connected = connected
@@ -105,25 +106,25 @@ class XboxController(object):
             self.reset_button()
 
     @synchronized_with_lock("lock")
-    def get_left_thumb(self):
+    def get_left_thumb(self) -> tuple[float, float]:
         return self.l_thumb_x, self.l_thumb_y
 
     @synchronized_with_lock("lock")
-    def get_right_thumb(self):
+    def get_right_thumb(self) -> tuple[float, float]:
         return self.r_thumb_x, self.r_thumb_y
 
     @synchronized_with_lock("lock")
-    def get_lr_trigger(self):
+    def get_lr_trigger(self) -> float:
         return self.lr_trigger
 
     @synchronized_with_lock("lock")
-    def get_buttons(self):
+    def get_buttons(self) -> Buttons:
         buttons = Buttons(self.start, self.x, self.y, self.a, self.b, self.rb, self.lb,
                           self.pad_up, self.pad_down, self.pad_left, self.pad_right)
         self.reset_button()
         return buttons
 
-    def reset_button(self):
+    def reset_button(self) -> None:
         self.start = False
         self.x = False
         self.y = False
@@ -134,7 +135,7 @@ class XboxController(object):
         self.pad_left = False
         self.pad_right = False
 
-    def _monitor_controller(self):
+    def _monitor_controller(self) -> None:
         while True:
             try:
                 events = get_gamepad()
@@ -186,55 +187,55 @@ class XboxController(object):
                     self._pad_up_down(event.state)
 
     @synchronized_with_lock("lock")
-    def __left_thumb_x(self, x_value):
+    def __left_thumb_x(self, x_value: float) -> None:
         self.l_thumb_x = self._handle_x_axis_value(x_value)
 
     @synchronized_with_lock("lock")
-    def __left_thumb_y(self, y_value):
+    def __left_thumb_y(self, y_value: float) -> None:
         self.l_thumb_y = self._handle_y_axis_value(y_value)
 
     @synchronized_with_lock("lock")
-    def __right_thumb_x(self, x_value):
+    def __right_thumb_x(self, x_value: float) -> None:
         self.r_thumb_x = self._handle_x_axis_value(x_value)
 
     @synchronized_with_lock("lock")
-    def __right_thumb_y(self, y_value):
+    def __right_thumb_y(self, y_value: float) -> None:
         self.r_thumb_y = self._handle_y_axis_value(y_value)
 
     @synchronized_with_lock("lock")
-    def __x(self, value):
+    def __x(self, value: int) -> None:
         self.x = True if value == 1 else False
 
     @synchronized_with_lock("lock")
-    def __y(self, value):
+    def __y(self, value: int) -> None:
         self.y = True if value == 1 else False
 
     @synchronized_with_lock("lock")
-    def __a(self, value):
+    def __a(self, value: int) -> None:
         self.a = True if value == 1 else False
 
     @synchronized_with_lock("lock")
-    def __b(self, value):
+    def __b(self, value: int) -> None:
         self.b = True if value == 1 else False
 
     @synchronized_with_lock("lock")
-    def __right_bumper(self, value):
+    def __right_bumper(self, value: int) -> None:
         self.rb = True if value == 1 else False
 
     @synchronized_with_lock("lock")
-    def ___left_bumper(self, value):
+    def ___left_bumper(self, value: int) -> None:
         self.lb = True if value == 1 else False
 
     @synchronized_with_lock("lock")
-    def _left_trigger(self, left_trigger_value):
+    def _left_trigger(self, left_trigger_value: float) -> None:
         self.lr_trigger = -(left_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
 
     @synchronized_with_lock("lock")
-    def _right_trigger(self, right_trigger_value):
+    def _right_trigger(self, right_trigger_value: float) -> None:
         self.lr_trigger = (right_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
 
     @synchronized_with_lock("lock")
-    def _pad_left_right(self, value):
+    def _pad_left_right(self, value: int) -> None:
         if value == -1:
             self.pad_left = True
         elif value == 1:
@@ -243,7 +244,7 @@ class XboxController(object):
             self.pad_right, self.pad_left = False, False
 
     @synchronized_with_lock("lock")
-    def _pad_up_down(self, value):
+    def _pad_up_down(self, value: int) -> None:
         if value == -1:
             self.pad_up = True
         elif value == 1:
@@ -252,17 +253,17 @@ class XboxController(object):
             self.pad_down, self.pad_up = False, False
 
     @synchronized_with_lock("lock")
-    def _start(self, value):
-        self.start = True if value == 1 else 0
+    def _start(self, value: int) -> None:
+        self.start = True if value == 1 else 0  # type: ignore[assignment]  # 0 instead of False, harmless
 
-    def _handle_x_axis_value(self, value):
+    def _handle_x_axis_value(self, value: float) -> float:
         value = (value / XboxController.MAX_JOY_VAL) * self.scale
 
         if self.upper_dead_zone > value > self.lower_dead_zone:
             value = 0
         return value
 
-    def _handle_y_axis_value(self, value):
+    def _handle_y_axis_value(self, value: float) -> float:
         value = (value / XboxController.MAX_JOY_VAL) * self.scale * self.invert_yaxis_val
 
         if self.upper_dead_zone > value > self.lower_dead_zone:
@@ -270,7 +271,7 @@ class XboxController(object):
         return value
 
 
-def _find_gamepads():
+def _find_gamepads() -> None:
     """the inputs library only looks for gamepads when it is imported, look again for gamepads connected later"""
     devices = inputs.devices
     if devices.gamepads or not hasattr(devices, '_detect_gamepads') or devices.xinput is None:

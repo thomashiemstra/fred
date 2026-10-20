@@ -12,7 +12,7 @@ from src.utils.obstacle import BoxObstacle
 control_point_1_position = 11.2
 
 
-def reset_to_scenario(env, scenario):
+def reset_to_scenario(env: RobotEnv, scenario: Scenario) -> None:
     env.set_scenario(scenario)
     env.reset()
 
@@ -58,7 +58,7 @@ while True:
 
     robot_controller = env.robot_controller
 
-    joint_forces = jacobian_transpose_on_f(forces, current_angles,
+    joint_forces = jacobian_transpose_on_f(forces, current_angles,  # type: ignore[arg-type]  # angles are set by reset
                                            robot_controller.robot_config, control_point_1_position)
 
     absolute_force = np.linalg.norm(joint_forces)

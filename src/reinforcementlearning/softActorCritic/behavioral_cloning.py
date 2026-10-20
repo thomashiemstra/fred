@@ -2,6 +2,8 @@ import functools
 import inspect
 import os
 from multiprocessing import Pool
+from multiprocessing.pool import Pool as PoolType
+from typing import Any
 
 import numpy as np
 import tensorflow as tf
@@ -19,7 +21,7 @@ from src.reinforcementlearning.softActorCritic.sac_utils import create_agent, cr
 from src.utils.decorators import timer
 
 
-def get_forces(raw_observation):
+def get_forces(raw_observation: np.ndarray | tuple[np.ndarray, ...]) -> np.ndarray:
     if isinstance(raw_observation, tuple):
         observation = raw_observation[0]
     else:
@@ -39,7 +41,7 @@ def get_forces(raw_observation):
     return attractive_forces + repulsive_forces
 
 
-def handle_observation(raw_observation):
+def handle_observation(raw_observation: np.ndarray) -> np.ndarray:
     forces = get_forces(raw_observation)
 
     current_angles = robot_env_utils.get_de_normalized_current_angles(raw_observation[12:17])
@@ -54,7 +56,7 @@ def handle_observation(raw_observation):
     return action_[1:6]
 
 
-def gradient_descent_action(raw_observations, pool, robot_env_no_obstacles):
+def gradient_descent_action(raw_observations: Any, pool: PoolType, robot_env_no_obstacles: bool) -> Any:
     if robot_env_no_obstacles:
         observations = raw_observations
     else:
@@ -66,11 +68,11 @@ def gradient_descent_action(raw_observations, pool, robot_env_no_obstacles):
 
 
 @timer
-def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay_buffer, robot_env_no_obstacles,
-                                             rb_checkpointer):
+def fill_replay_buffer_with_gradient_descent(tf_env: Any, total_collect_steps: int, replay_buffer: Any,
+                                             robot_env_no_obstacles: bool, rb_checkpointer: Any) -> list[Any]:
     current_time_step = tf_env.reset()
 
-    traj_array = []
+    traj_array: list[Any] = []
 
     replay_buffer_interval_manager = IntervalManager(1000)
 
@@ -92,7 +94,8 @@ def fill_replay_buffer_with_gradient_descent(tf_env, total_collect_steps, replay
     return traj_array
 
 
-def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, robot_env_no_obstacles, total_collect_steps=10000):
+def fill_and_get_replay_buffer(train_dir: str, collect_data_spec: Any, tf_env: Any, robot_env_no_obstacles: bool,
+                               total_collect_steps: int = 10000) -> Any:
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         data_spec=collect_data_spec,
         batch_size=tf_env.batch_size,
@@ -120,13 +123,14 @@ def fill_and_get_replay_buffer(train_dir, collect_data_spec, tf_env, robot_env_n
     return replay_buffer
 
 
-def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpointer, global_step):
+def train_agent(tf_agent: Any, replay_buffer: Any, train_steps: int, batch_size: int, train_checkpointer: Any,
+                global_step: Any) -> None:
     dataset = replay_buffer.as_dataset(
         sample_batch_size=batch_size,
         num_steps=2).unbatch().batch(batch_size).prefetch(5)
     iterator = iter(dataset)
 
-    def train_step():
+    def train_step() -> Any:
         experience, _ = next(iterator)
         return tf_agent.train_behavioral_cloning(experience=experience)
 
@@ -142,10 +146,10 @@ def train_agent(tf_agent, replay_buffer, train_steps, batch_size, train_checkpoi
     print("done training")
 
 
-def main(_):
+def main(_: Any) -> None:
     # tf.config.experimental_run_functions_eagerly(True)
     checkpoint_dir = 'behavioral_cloning_obstacles_sparse/'
-    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))  # type: ignore[arg-type]  # currentframe never returns none on cpython
     root_dir = os.path.expanduser(current_dir + '/checkpoints/' + checkpoint_dir)
     train_dir = os.path.join(root_dir, 'train/')
     total_collect_steps = 100000
