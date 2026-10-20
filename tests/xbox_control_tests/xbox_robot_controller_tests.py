@@ -8,7 +8,7 @@ from numpy import pi
 
 from src.kinematics.kinematics import inverse_kinematics, forward_kinematics
 from src.kinematics.kinematics_utils import Pose, RobotConfig
-from src.utils import cartesian_movement
+from src.utils import movement, workspace
 from src.utils.movement import SplineMovement, PoseToPoseMovement
 from src.utils.movement_exception import MovementException
 from src.xbox_control import xbox_robot_controller
@@ -42,56 +42,56 @@ class UtilsTests(unittest.TestCase):
         self.assertIsNotNone(time, "should have gotten a time")
         self.assertTrue(time > 0, "should have gotten a positive time")
 
-    def test_create_move_spline(self):
-        pose1 = Pose(0, 0, 0)
-        pose2 = Pose(1, 0, 0)
-        pose3 = Pose(1, 1, 0)
-        poses = [pose1, pose2, pose3]
+    class MockWorkSpaceLimits:
+        radius_min = 15
+        radius_max = 40
+        y_min = 16
+        z_min = 5
 
-        move = create_move(None, poses, 1, None, workspace_limits=None)
+    def robot_with_limits(self, limits):
+        robot = FakeRobot()
+        robot.workspace_limits = limits
+        return robot
+
+    def test_create_move_spline(self):
+        poses = [Pose(-20, 20, 5), Pose(0, 30, 10), Pose(20, 20, 5)]
+        move = create_move(self.robot_with_limits(None), poses, 1, None)
         self.assertIsInstance(move, SplineMovement)
 
     def test_not_in_workspace_limits(self):
-        class MockWorkSpaceLimits:
-            radius_min = 2
-            radius_max = 4
-            y_min = 2
-            z_min = 2
-
-        pose1 = Pose(0, 0, 0)
-        pose2 = Pose(1, 0, 0)
-        pose3 = Pose(1, 1, 0)
-        poses = [pose1, pose2, pose3]
-
-        move = create_move(None, poses, 1, None, workspace_limits=MockWorkSpaceLimits)
+        # the curve bulges out to more than 40cm from the base
+        poses = [Pose(-20, 20, 5), Pose(0, 45, 10), Pose(20, 20, 5)]
+        move = create_move(self.robot_with_limits(self.MockWorkSpaceLimits), poses, 1, None)
         self.assertIsNone(move)
 
     def test_in_workspace_limits(self):
-        class MockWorkSpaceLimits:
-            radius_min = 0
-            radius_max = 10
-            y_min = 0
-            z_min = 0
-
-        pose1 = Pose(1, 1, 1)
-        pose2 = Pose(2, 1, 1)
-        pose3 = Pose(2, 2, 1)
-        poses = [pose1, pose2, pose3]
-
-        move = create_move(None, poses, 1, None, workspace_limits=MockWorkSpaceLimits)
+        poses = [Pose(-20, 20, 5), Pose(0, 30, 10), Pose(20, 20, 5)]
+        move = create_move(self.robot_with_limits(self.MockWorkSpaceLimits), poses, 1, None)
         self.assertIsInstance(move, SplineMovement)
 
     def test_create_move_pose_to_pose(self):
-        pose1 = Pose(0, 0, 0)
-        pose2 = Pose(0, 0, 0)
-        poses = [pose1, pose2]
-
-        move = create_move(None, poses, 1, None, None)
+        poses = [Pose(-20, 20, 5), Pose(0, 30, 10)]
+        move = create_move(self.robot_with_limits(self.MockWorkSpaceLimits), poses, 1, None)
         self.assertIsInstance(move, PoseToPoseMovement)
+
+    def test_pose_to_pose_outside_the_workspace_is_refused(self):
+        poses = [Pose(-20, 20, 5), Pose(0, 45, 10)]
+        self.assertIsNone(create_move(self.robot_with_limits(self.MockWorkSpaceLimits), poses, 1, None))
+
+
+class TestWorkspaceLimits:
+    """the limits of these tests: the resting angles above put the wrist of the test config below the table"""
+    radius_min = 10
+    radius_max = 57
+    y_min = 12.1
+    z_min = -5
+    wrist_z_min = -5
 
 
 class FakeRobot:
     """a robot with real kinematics that records what it is asked to do"""
+
+    workspace_limits = TestWorkspaceLimits
 
     def __init__(self, angles=resting_angles):
         self.robot_config = test_config
@@ -113,6 +113,15 @@ class FakeRobot:
 
     def get_angle_limits(self):
         return angle_limits
+
+    def pose_to_angles(self, pose):
+        return inverse_kinematics(pose, self.robot_config)
+
+    def workspace_violation(self, angles):
+        return workspace.workspace_violation(angles, self.robot_config, self.workspace_limits)
+
+    def check_workspace(self, angles):
+        workspace.check_workspace(angles, self.robot_config, self.workspace_limits)
 
     def enable_servos(self):
         self.calls.append('enable_servos')
@@ -172,7 +181,7 @@ class StartTests(unittest.TestCase):
 
     def setUp(self):
         # don't wait between the steps of the straight line movements
-        patcher = mock.patch.object(cartesian_movement, 'sleep')
+        patcher = mock.patch.object(movement, 'sleep')
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -259,7 +268,7 @@ class StartTests(unittest.TestCase):
 class CommandTests(unittest.TestCase):
 
     def setUp(self):
-        patcher = mock.patch.object(cartesian_movement, 'sleep')
+        patcher = mock.patch.object(movement, 'sleep')
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -410,7 +419,7 @@ class HardwareErrorTests(unittest.TestCase):
         robot = FakeRobot()
         controller = make_controller(robot)
 
-        with mock.patch.object(cartesian_movement, 'sleep'), \
+        with mock.patch.object(movement, 'sleep'), \
                 mock.patch.object(xbox_robot_controller, 'HARDWARE_CHECK_INTERVAL', 0.0):
             self.assertTrue(controller.start())
             wait_for(lambda: robot.gripper_calls)
@@ -451,7 +460,7 @@ def assert_at_start_pose(robot):
 class ConcurrencyTests(unittest.TestCase):
 
     def setUp(self):
-        patcher = mock.patch.object(cartesian_movement, 'sleep')
+        patcher = mock.patch.object(movement, 'sleep')
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -576,7 +585,7 @@ class ConcurrencyTests(unittest.TestCase):
 class MoreButtonTests(unittest.TestCase):
 
     def setUp(self):
-        patcher = mock.patch.object(cartesian_movement, 'sleep')
+        patcher = mock.patch.object(movement, 'sleep')
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -733,7 +742,7 @@ class MoreGripperTests(unittest.TestCase):
 class MorePlaybackTests(unittest.TestCase):
 
     def setUp(self):
-        patcher = mock.patch.object(cartesian_movement, 'sleep')
+        patcher = mock.patch.object(movement, 'sleep')
         patcher.start()
         self.addCleanup(patcher.stop)
 

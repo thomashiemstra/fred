@@ -11,7 +11,7 @@ from src.robot_controllers.dynamixel_robot.dynamixel_utils import setup_dynamixe
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
-from src.utils.movement_utils import from_current_angles_to_pose
+from src.utils.movement import move_from_current_angles
 from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
 
 logger = logging.getLogger(__name__)
@@ -339,7 +339,7 @@ class DynamixelRobotController(AbstractRobotController):
         return self.servo_handler.read_current_pos_single_servo(servo_id)
 
     def reset_to_pose(self, pose):
-        from_current_angles_to_pose(pose, self, 4)
+        move_from_current_angles(self, pose, 4)
 
     def _check_servo_id(self, servo_id):
         if servo_id not in self.servo_handler.servo_map:

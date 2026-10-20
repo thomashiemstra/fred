@@ -10,7 +10,7 @@ from src import global_constants
 from src.global_objects import get_robot
 from src.kinematics.kinematics_utils import Pose
 from src.utils.decorators import synchronized_with_lock
-from src.utils.movement_utils import from_current_angles_to_pose, pose_to_pose
+from src.utils.movement import move_from_current_angles, move_between_poses
 
 
 @lru_cache(maxsize=1)
@@ -71,7 +71,7 @@ class BoardToBoardRobotController:
             return False
 
     def stop_robot(self):
-        from_current_angles_to_pose(self.startup_pose, self.robot, 4)
+        move_from_current_angles(self.robot, self.startup_pose, 4)
         self.robot.disable_servos()
 
     @synchronized_with_lock("lock")
@@ -135,20 +135,23 @@ class BoardToBoardRobotController:
 
     def __start_internal(self):
         # The robot could be anywhere, first move it from it's current position to the target pose
-        from_current_angles_to_pose(self.current_pose, self.robot, 1)
+        move_from_current_angles(self.robot, self.current_pose, 1)
 
         self.current_pose = copy(self.neutral_pose)
-        from_current_angles_to_pose(self.current_pose, self.robot, 2)
+        move_from_current_angles(self.robot, self.current_pose, 2)
 
         new_pose = self.get_new_filtered_pose()
-        pose_to_pose(self.current_pose, new_pose, self.robot, time=2)
+        move_between_poses(self.robot, self.current_pose, new_pose, duration=2)
         self.current_pose = new_pose
 
         while True:
             if self.is_done():
                 break
 
-            self.current_pose = self.get_new_filtered_pose()
+            new_pose = self.get_new_filtered_pose()
+            # the robot holds its pose when the board asks for one outside the workspace limits
+            if self.robot.workspace_violation(self.robot.pose_to_angles(new_pose)) is None:
+                self.current_pose = new_pose
             recommended_time, time_taken = self.robot.move_to_pose(self.current_pose)
             time_to_sleep = np.maximum(np.maximum(recommended_time, self.dt) - time_taken, 0)
             sleep(time_to_sleep)

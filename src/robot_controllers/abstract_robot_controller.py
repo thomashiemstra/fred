@@ -1,7 +1,24 @@
 from abc import ABC, abstractmethod
 
+from src.global_constants import WorkSpaceLimits
+from src.utils import workspace
+
 
 class AbstractRobotController(ABC):
+    # where the arm may go, see global_constants.WorkSpaceLimits; a robot can be given other limits by assigning
+    # this attribute. Whoever moves the robot checks against them with check_workspace before executing a move,
+    # move_servos doesn't check anything
+    workspace_limits = WorkSpaceLimits
+
+    def workspace_violation(self, angles):
+        """returns why the pose of the angles is outside the workspace limits of this robot, or None"""
+        return workspace.workspace_violation(angles, self.robot_config, self.workspace_limits)
+
+    def check_workspace(self, angles):
+        """
+        :raises MovementException: when the pose of the angles is outside the workspace limits of this robot
+        """
+        workspace.check_workspace(angles, self.robot_config, self.workspace_limits)
 
     @abstractmethod
     def enable_servos(self):

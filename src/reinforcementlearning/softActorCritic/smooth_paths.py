@@ -13,7 +13,7 @@ from tf_agents.environments import tf_py_environment
 
 from src.simulation.simulation_utils import start_simulated_robot
 from src.utils.movement import SplineMovement
-from src.utils.movement_utils import b_spline_plot
+from src.utils.movement import b_spline_plot
 import numpy as np
 
 

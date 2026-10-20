@@ -10,15 +10,13 @@ import jsonpickle
 import numpy as np
 from src.reinforcementlearning.environment.scenario import medium_scenarios
 
-from src.global_constants import WorkSpaceLimits
 from src.kinematics.kinematics import forward_kinematics
 from src.kinematics.kinematics_utils import Pose
-from src.utils.cartesian_movement import plan_move_to_pose, execute_move, check_move
+from src.utils.movement import plan_move_to_pose, execute_move, check_move, move_between_poses
 from src.utils.decorators import synchronized_with_lock
 from src.utils.linalg_utils import get_center
 from src.utils.movement import PoseToPoseMovement, SplineMovement
 from src.utils.movement_exception import MovementException
-from src.utils.movement_utils import pose_to_pose
 from time import sleep, perf_counter
 
 logger = logging.getLogger(__name__)
@@ -60,6 +58,7 @@ class XboxRobotController:
         self._commands = queue.Queue()
         self._crashed = False
         self._start_move = None
+        self._outside_workspace = False  # the gamepad asks for a pose outside the workspace, the robot holds
         self.recorded_positions = []
         self.current_pose = None
         self.thread = None
@@ -125,7 +124,7 @@ class XboxRobotController:
             try:
                 if current_angles is None:
                     raise MovementException('failed to read the current angles')
-                check_move(start_move, self.robot.robot_config, current_angles=current_angles)
+                check_move(start_move, self.robot, current_angles=current_angles)
             except MovementException as e:
                 logger.error('not starting the robot: %s', e)
                 self.robot.disable_servos()
@@ -175,7 +174,7 @@ class XboxRobotController:
             self.recorded_positions = []
             self.center = None
             self.find_center_mode = True
-        self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config, self.robot)
+        self._reset_orientation()
 
     @synchronized_with_lock("lock")
     def clear_center(self):
@@ -212,8 +211,9 @@ class XboxRobotController:
 
             self.__handle_commands()
 
-            self.current_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose,
-                                                                                   self.find_center_mode, self.center)
+            new_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose, self.find_center_mode,
+                                                                          self.center)
+            self._update_pose_within_the_workspace(new_pose)
             recommended_time, time_taken = self.robot.move_to_pose(self.current_pose)
             self.handle_buttons()
 
@@ -221,6 +221,17 @@ class XboxRobotController:
             sleep(time_to_sleep)
 
         self.stop_robot()
+
+    def _update_pose_within_the_workspace(self, new_pose):
+        """the pose the gamepad asks for becomes the current pose when it is inside the workspace limits of the
+        robot, otherwise the robot holds the current pose (logged once)"""
+        violation = self.robot.workspace_violation(self.robot.pose_to_angles(new_pose))
+        if violation is None:
+            self.current_pose = new_pose
+            self._outside_workspace = False
+        elif not self._outside_workspace:
+            logger.warning('holding the pose, the gamepad asks for one outside the workspace: %s', violation)
+            self._outside_workspace = True
 
     def __handle_commands(self):
         while True:
@@ -263,7 +274,7 @@ class XboxRobotController:
             logger.error('failed to read the current angles of the robot')
             return None
         try:
-            return plan_move_to_pose(angles, pose, self.robot.robot_config, angle_limits=self.robot.get_angle_limits())
+            return plan_move_to_pose(self.robot, angles, pose)
         except MovementException as e:
             logger.error('can not move to %s: %s', pose, e)
             return None
@@ -320,7 +331,11 @@ class XboxRobotController:
         self.__move_gripper(GRIPPER_STEP)
 
     def _reset_orientation(self):
-        self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config, self.robot)
+        """turn the end effector to the neutral orientation, in place; the pose stays when the turn is not possible"""
+        try:
+            self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config, self.robot)
+        except MovementException as e:
+            logger.warning('can not reset the orientation: %s', e)
 
     def _toggle_flip(self):
         self.current_pose.flip = not self.current_pose.flip
@@ -336,7 +351,7 @@ class XboxRobotController:
         if not self.has_enough_recorded_positions():
             print("not enough positions for a movement")
             return
-        move = create_move(self.robot, self.recorded_positions, self.move_speed, self.center, WorkSpaceLimits)
+        move = create_move(self.robot, self.recorded_positions, self.move_speed, self.center)
         self.store_move_or_go_back(move)
 
     def _increase_maximum_speed(self):
@@ -434,15 +449,16 @@ class XboxRobotController:
         return recorded_moves[-1].poses[-1]
 
 
-def create_move(servo_controller, poses, speed, center, workspace_limits):
+def create_move(servo_controller, poses, speed, center):
+    """a movement through the poses at the speed, or None when it leaves the workspace limits of the robot"""
     time = determine_time(poses, speed)
 
-    if len(poses) == 2:  # and np.allclose([poses[0].x, poses[0].y, poses[0].z], [poses[1].x, poses[1].y, poses[1].z]):
-        return PoseToPoseMovement(poses, time, center, workspace_limits)  # orientation adjustment
-
-    move = SplineMovement(poses, time, center, workspace_limits)
+    if len(poses) == 2:
+        move = PoseToPoseMovement(poses, time, center)  # orientation adjustment
+    else:
+        move = SplineMovement(poses, time, center)
     try:
-        is_ok = move.check_workspace_limits(servo_controller, workspace_limits)
+        is_ok = move.is_possible(servo_controller)
     except MovementException:
         print("invalid move")
         return None
@@ -475,5 +491,5 @@ def reset_orientation(current_pose, dynamixel_robot_config, dynamixel_servo_cont
     dynamixel_robot_config.restore_initial_values()
     new_orientation = copy(current_pose)
     new_orientation.reset_orientation()
-    return pose_to_pose(current_pose, new_orientation, dynamixel_servo_controller, time=1)
+    return move_between_poses(dynamixel_servo_controller, current_pose, new_orientation, duration=1)
 

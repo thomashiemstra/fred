@@ -54,7 +54,7 @@ class InverseKinematicsTests(unittest.TestCase):
         self.assert_angles(angles, expected)
 
     def test_unreachable_pose_stretches_the_arm_towards_it(self):
-        # the inverse kinematics never fails, callers have to check the reached position (see cartesian_movement)
+        # the inverse kinematics never fails, callers have to check the reached position (see movement._angles_of_poses)
         far_away = Pose(0, 80, robot_config.d1)
         angles = inverse_kinematics(far_away, robot_config)
 

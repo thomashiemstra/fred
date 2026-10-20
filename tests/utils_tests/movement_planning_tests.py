@@ -7,9 +7,9 @@ from numpy import pi
 from src import global_constants
 from src.kinematics.kinematics import inverse_kinematics, forward_kinematics, forward_position_kinematics
 from src.kinematics.kinematics_utils import Pose, RobotConfig
-from src.utils import cartesian_movement
-from src.utils.cartesian_movement import plan_move_to_pose, plan_straight_line, check_move, execute_move, \
-    PlannedMove
+from src.utils import movement, workspace
+from src.utils.movement import plan_move_to_pose, plan_straight_line, check_move, execute_move, \
+    PlannedMove, plan_move_to_angles
 from src.utils.movement_exception import MovementException
 
 test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
@@ -24,6 +24,28 @@ class TestWorkspaceLimits:
     radius_max = 57
     y_min = 12.1
     z_min = -5
+    wrist_z_min = -5
+
+
+class TestRobot:
+    """the parts of a robot the planner needs: the link lengths, the workspace limits and the ranges of the servos"""
+
+    def __init__(self, workspace_limits=TestWorkspaceLimits, angle_limits=angle_limits):
+        self.robot_config = test_config
+        self.workspace_limits = workspace_limits
+        self.angle_limits = angle_limits
+
+    def get_angle_limits(self):
+        return self.angle_limits
+
+    def check_workspace(self, angles):
+        workspace.check_workspace(angles, self.robot_config, self.workspace_limits)
+
+
+robot = TestRobot()
+robot_without_angle_limits = TestRobot(angle_limits=None)
+robot_with_angle_limits_only = TestRobot(workspace_limits=None)
+unchecked_robot = TestRobot(workspace_limits=None, angle_limits=None)
 
 
 def end_effector_positions(move):
@@ -42,13 +64,13 @@ def standing_still(angles, steps=2):
 class PlanMoveToPoseTests(unittest.TestCase):
 
     def test_starts_at_the_current_angles_and_ends_at_the_target_pose(self):
-        move = plan_move_to_pose(resting_angles, start_pose, test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, resting_angles, start_pose)
 
         np.testing.assert_allclose(resting_angles, move.angles[0], atol=1e-9)
         np.testing.assert_allclose(inverse_kinematics(start_pose, test_config), move.angles[-1], atol=1e-9)
 
     def test_end_effector_moves_in_a_straight_line(self):
-        move = plan_move_to_pose(resting_angles, start_pose, test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, resting_angles, start_pose)
 
         positions = end_effector_positions(move)
         direction = positions[-1] - positions[0]
@@ -58,7 +80,7 @@ class PlanMoveToPoseTests(unittest.TestCase):
 
     def test_orientation_turns_smoothly_to_the_target_orientation(self):
         target = Pose(25, 25, 10, alpha=0.3, gamma=-0.2)
-        move = plan_move_to_pose(resting_angles, target, test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, resting_angles, target)
 
         reached = forward_kinematics(move.angles[-1], test_config)
         np.testing.assert_allclose(target.get_euler_matrix(), reached.get_euler_matrix(), atol=1e-9)
@@ -68,34 +90,32 @@ class PlanMoveToPoseTests(unittest.TestCase):
         current_pose.flip = True
         flipped_angles = inverse_kinematics(current_pose, test_config)
 
-        move = plan_move_to_pose(flipped_angles, start_pose, test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, flipped_angles, start_pose)
 
         reached = forward_kinematics(move.angles[-1], test_config)
         self.assertTrue(reached.flip)
         np.testing.assert_allclose([30, 22, 4], [reached.x, reached.y, reached.z], atol=1e-9)
 
     def test_flip_of_the_target_is_ignored(self):
-        move = plan_move_to_pose(resting_angles, Pose(30, 22, 4, flip=True), test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, resting_angles, Pose(30, 22, 4, flip=True))
 
         self.assertTrue(np.all(move.angles[:, 5] > 0), 'the wrist should not flip')
         np.testing.assert_allclose(inverse_kinematics(start_pose, test_config), move.angles[-1], atol=1e-9)
 
     def test_target_pose_is_not_changed(self):
         target = Pose(30, 22, 4, flip=True)
-        plan_move_to_pose(resting_angles, target, test_config, angle_limits=angle_limits)
+        plan_move_to_pose(robot, resting_angles, target)
         self.assertTrue(target.flip)
 
     def test_duration_depends_on_the_distance_and_rotation(self):
-        move = plan_move_to_pose(resting_angles, start_pose, test_config, angle_limits=angle_limits,
-                                 linear_speed=1.0, angular_speed=10.0)
+        move = plan_move_to_pose(robot, resting_angles, start_pose, linear_speed=1.0, angular_speed=10.0)
         distance = np.linalg.norm(end_effector_positions(move)[-1] - end_effector_positions(move)[0])
         self.assertAlmostEqual(distance, move.duration)
 
     def test_duration_of_a_rotation_depends_on_the_angular_speed(self):
         current_angles = inverse_kinematics(Pose(25, 25, 10), test_config)
         # turning alpha turns the end effector around the z-axis
-        move = plan_move_to_pose(current_angles, Pose(25, 25, 10, alpha=0.4), test_config, angle_limits=angle_limits,
-                                 angular_speed=0.1)
+        move = plan_move_to_pose(robot, current_angles, Pose(25, 25, 10, alpha=0.4), angular_speed=0.1)
 
         self.assertAlmostEqual(0.4 / 0.1, move.duration)
         self.assertEqual(4 * global_constants.steps_per_second + 1, len(move.angles))
@@ -104,14 +124,14 @@ class PlanMoveToPoseTests(unittest.TestCase):
 
     def test_move_to_the_current_pose_stands_still_for_the_minimum_duration(self):
         current_angles = inverse_kinematics(Pose(25, 25, 10), test_config)
-        move = plan_move_to_pose(current_angles, Pose(25, 25, 10), test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, current_angles, Pose(25, 25, 10))
 
         self.assertEqual(1.0, move.duration)
         self.assertEqual(global_constants.steps_per_second + 1, len(move.angles))
         np.testing.assert_allclose(np.tile(current_angles, (len(move.angles), 1)), move.angles, atol=1e-9)
 
     def test_end_effector_starts_and_stops_smoothly(self):
-        move = plan_move_to_pose(resting_angles, start_pose, test_config, angle_limits=angle_limits)
+        move = plan_move_to_pose(robot, resting_angles, start_pose)
 
         positions = end_effector_positions(move)
         step_lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1)
@@ -124,26 +144,26 @@ class PlanMoveToPoseTests(unittest.TestCase):
 
     def test_unreachable_target_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'can not be reached'):
-            plan_move_to_pose(resting_angles, Pose(60, 22, 4), test_config, angle_limits=angle_limits)
+            plan_move_to_pose(robot, resting_angles, Pose(60, 22, 4))
 
     def test_target_outside_the_angle_limits_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'below its range'):
-            plan_move_to_pose(resting_angles, Pose(30, 22, -10), test_config, angle_limits=angle_limits)
+            plan_move_to_pose(robot, resting_angles, Pose(30, 22, -10))
 
     def test_joint_at_the_limit_of_its_range_is_allowed(self):
         # servo 2 reads below its calibrated range, so its angle is clamped to exactly 0
         angles_at_limit = np.radians([0, 50.3, 0.0, 43.0, -86.3, 96.8, 0.7])
         for _ in range(20):
             angles_at_limit[1] += 0.01
-            plan_move_to_pose(angles_at_limit, Pose(30, 22, 10), test_config, angle_limits=angle_limits)
+            plan_move_to_pose(robot, angles_at_limit, Pose(30, 22, 10))
 
     def test_target_below_the_workspace_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'below the minimum height'):
-            plan_move_to_pose(resting_angles, Pose(30, 22, -10), test_config)
+            plan_move_to_pose(robot_without_angle_limits, resting_angles, Pose(30, 22, -10))
 
     def test_target_too_close_to_the_base_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'closer than y='):
-            plan_move_to_pose(resting_angles, Pose(30, 8, 4), test_config)
+            plan_move_to_pose(robot_without_angle_limits, resting_angles, Pose(30, 8, 4))
 
     def test_moving_through_the_straight_wrist_is_refused(self):
         # angle 5 changes sign halfway, keeping the flip the inverse kinematics turns angle 4 and 6 around in one step
@@ -155,82 +175,87 @@ class PlanMoveToPoseTests(unittest.TestCase):
         target = forward_kinematics(through_the_straight_wrist, test_config)
 
         with self.assertRaisesRegex(MovementException, 'joint 4 would move at'):
-            plan_move_to_pose(current_angles, target, test_config, angle_limits=angle_limits)
+            plan_move_to_pose(robot, current_angles, target)
 
     def test_current_angles_on_another_inverse_kinematics_branch_are_refused(self):
         # the elbow is bent the other way than the inverse kinematics would, so the first step would jump
         elbow_bent_backwards = np.array([0, pi / 2, 0.3, 1.9, 0.0, 0.5, 0.0])
         with self.assertRaisesRegex(MovementException, 'away from the current angles'):
-            plan_move_to_pose(elbow_bent_backwards, Pose(0, 30, 10), test_config)
+            plan_move_to_pose(robot_without_angle_limits, elbow_bent_backwards, Pose(0, 30, 10))
 
 
 class CheckMoveTests(unittest.TestCase):
 
     def test_move_that_does_not_start_at_the_current_angles_is_refused(self):
-        move = plan_move_to_pose(resting_angles, start_pose, test_config)
+        move = plan_move_to_pose(robot_without_angle_limits, resting_angles, start_pose)
         moved_by_hand = resting_angles.copy()
         moved_by_hand[1] += 0.2
         with self.assertRaisesRegex(MovementException, 'away from the current angles'):
-            check_move(move, test_config, current_angles=moved_by_hand)
+            check_move(move, robot_without_angle_limits, current_angles=moved_by_hand)
 
     def test_small_difference_with_the_current_angles_is_allowed(self):
         current_angles = resting_angles.copy()
-        current_angles[1] += 0.8 * cartesian_movement.MAX_START_ANGLE_ERROR
+        current_angles[1] += 0.8 * movement.MAX_START_ANGLE_ERROR
         # index 0 is not a joint
         current_angles[0] = 100
-        check_move(standing_still(resting_angles), test_config, current_angles=current_angles)
+        check_move(standing_still(resting_angles), unchecked_robot, current_angles=current_angles)
 
     def test_joints_that_move_too_fast_are_refused(self):
         angles = np.zeros((2, 7))
         angles[1, 4] = 2 * global_constants.recommended_max_servo_speed / global_constants.steps_per_second
         with self.assertRaisesRegex(MovementException, 'joint 4 would move at'):
-            check_move(PlannedMove('too fast', angles, 0.01), test_config)
+            check_move(PlannedMove('too fast', angles, 0.01), unchecked_robot)
 
     def test_joints_just_below_the_maximum_speed_are_allowed(self):
         max_step = global_constants.recommended_max_servo_speed / global_constants.steps_per_second
         angles = np.zeros((3, 7))
         angles[1, 6] = 0.99 * max_step
         angles[2, 6] = angles[1, 6] - 0.99 * max_step
-        check_move(PlannedMove('fast', angles, 0.02), test_config)
+        check_move(PlannedMove('fast', angles, 0.02), unchecked_robot)
 
         angles[2, 6] = angles[1, 6] - 1.01 * max_step
         with self.assertRaisesRegex(MovementException, 'joint 6 would move at .* at step 1,'):
-            check_move(PlannedMove('too fast', angles, 0.02), test_config)
+            check_move(PlannedMove('too fast', angles, 0.02), unchecked_robot)
 
     def test_angle_just_past_the_limit_is_allowed_within_the_tolerance(self):
-        tolerance = cartesian_movement.ANGLE_LIMIT_TOLERANCE
+        tolerance = movement.ANGLE_LIMIT_TOLERANCE
         for joint, (min_angle, max_angle) in angle_limits.items():
             for angle in (min_angle - 0.5 * tolerance, max_angle + 0.5 * tolerance):
                 angles = resting_angles.copy()
                 angles[joint] = angle
-                check_move(standing_still(angles), test_config, angle_limits=angle_limits)
+                check_move(standing_still(angles), robot_with_angle_limits_only)
 
     def test_angle_past_the_tolerance_is_refused(self):
-        tolerance = cartesian_movement.ANGLE_LIMIT_TOLERANCE
+        tolerance = movement.ANGLE_LIMIT_TOLERANCE
         for joint, (min_angle, max_angle) in angle_limits.items():
             for angle, direction in ((min_angle - 10 * tolerance, 'below'), (max_angle + 10 * tolerance, 'above')):
                 angles = resting_angles.copy()
                 angles[joint] = angle
                 with self.assertRaisesRegex(MovementException, 'joint {} would move .* {} its range'
                                             .format(joint, direction)):
-                    check_move(standing_still(angles), test_config, angle_limits=angle_limits)
+                    check_move(standing_still(angles), robot_with_angle_limits_only)
 
     def test_any_step_past_the_angle_limits_is_refused(self):
         angles = np.tile(resting_angles, (5, 1))
         angles[:, 3] = pi / 2 - 0.01
         angles[2, 3] = pi / 2 + 0.01
         with self.assertRaisesRegex(MovementException, 'joint 3 would move .* above its range'):
-            check_move(PlannedMove('one step too far', angles, 0.05), test_config, angle_limits=angle_limits)
+            check_move(PlannedMove('one step too far', angles, 0.05), robot_with_angle_limits_only)
 
     def test_only_joints_with_limits_are_checked(self):
         angles = resting_angles.copy()
         angles[1] = -1.0
-        check_move(standing_still(angles), test_config, angle_limits={2: angle_limits[2]})
+        check_move(standing_still(angles), TestRobot(workspace_limits=None, angle_limits={2: angle_limits[2]}))
+
+    def test_a_robot_without_angle_limits_has_no_range_check(self):
+        angles = resting_angles.copy()
+        angles[1] = -1.0
+        check_move(standing_still(angles), unchecked_robot)
 
     def test_end_effector_too_far_from_the_base_is_refused(self):
         # reachable, but 58.3cm from the base
         with self.assertRaisesRegex(MovementException, 'the end effector .* from the base, outside of'):
-            check_move(single_step_move(Pose(0, 50, 30)), test_config, TestWorkspaceLimits)
+            check_move(single_step_move(Pose(0, 50, 30)), robot_without_angle_limits)
 
     def test_end_effector_too_close_to_the_base_is_refused(self):
         class LargeMinimumRadius(TestWorkspaceLimits):
@@ -238,32 +263,61 @@ class CheckMoveTests(unittest.TestCase):
 
         # 37.4cm from the base
         with self.assertRaisesRegex(MovementException, 'the end effector .* from the base, outside of'):
-            check_move(single_step_move(start_pose), test_config, LargeMinimumRadius)
+            check_move(single_step_move(start_pose), TestRobot(LargeMinimumRadius, None))
 
     def test_end_effector_below_the_workspace_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'the end effector would move .* below the minimum height'):
-            check_move(single_step_move(Pose(30, 22, -6)), test_config, TestWorkspaceLimits)
+            check_move(single_step_move(Pose(30, 22, -6)), robot_without_angle_limits)
 
     def test_end_effector_closer_than_y_min_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'the end effector would move .* closer than y='):
-            check_move(single_step_move(Pose(30, 12, 4)), test_config, TestWorkspaceLimits)
+            check_move(single_step_move(Pose(30, 12, 4)), robot_without_angle_limits)
 
     def test_wrist_below_the_workspace_is_refused(self):
         # the end effector points up, so the wrist is d6 = 12cm below it
         with self.assertRaisesRegex(MovementException, 'the wrist would move to .* below the minimum height'):
-            check_move(single_step_move(Pose(0, 30, 2, gamma=pi / 2)), test_config, TestWorkspaceLimits)
+            check_move(single_step_move(Pose(0, 30, 2, gamma=pi / 2)), robot_without_angle_limits)
+
+    def test_wrist_has_its_own_minimum_height(self):
+        class HighWrist(TestWorkspaceLimits):
+            wrist_z_min = 5
+
+        # the end effector points up at z=16, the wrist is at z=4: fine for the tip, too low for the wrist
+        check_move(single_step_move(Pose(0, 30, 16, gamma=pi / 2)), robot_without_angle_limits)
+        with self.assertRaisesRegex(MovementException, 'the wrist would move to .* below the minimum height of 5'):
+            check_move(single_step_move(Pose(0, 30, 16, gamma=pi / 2)), TestRobot(HighWrist, None))
+        check_move(single_step_move(Pose(0, 30, 18, gamma=pi / 2)), TestRobot(HighWrist, None))
+
+    def test_limits_without_a_wrist_height_use_the_end_effector_height_for_the_wrist(self):
+        class OldStyleLimits:
+            radius_min = 10
+            radius_max = 57
+            y_min = 12.1
+            z_min = 5
+
+        with self.assertRaisesRegex(MovementException, 'the wrist would move to .* below the minimum height of 5'):
+            check_move(single_step_move(Pose(0, 30, 16, gamma=pi / 2)), TestRobot(OldStyleLimits, None))
 
     def test_pose_within_the_workspace_is_allowed(self):
-        check_move(single_step_move(start_pose), test_config, TestWorkspaceLimits)
+        check_move(single_step_move(start_pose), robot_without_angle_limits)
         # the wrist at z=-4
-        check_move(single_step_move(Pose(0, 30, 8, gamma=pi / 2)), test_config, TestWorkspaceLimits)
+        check_move(single_step_move(Pose(0, 30, 8, gamma=pi / 2)), robot_without_angle_limits)
 
     def test_workspace_is_not_checked_without_limits(self):
-        check_move(single_step_move(Pose(30, 22, -10)), test_config, workspace_limits=None)
+        check_move(single_step_move(Pose(30, 22, -10)), unchecked_robot)
+
+    def test_the_check_is_the_robots(self):
+        """whatever the robot says about the workspace is what the planner uses"""
+        class RefusingRobot(TestRobot):
+            def check_workspace(self, angles):
+                raise MovementException('not here')
+
+        with self.assertRaisesRegex(MovementException, 'not here'):
+            check_move(single_step_move(start_pose), RefusingRobot())
 
     def test_straight_line_between_differently_flipped_poses_is_refused(self):
         with self.assertRaisesRegex(MovementException, 'flipped differently'):
-            plan_straight_line(Pose(30, 22, 4), Pose(30, 22, 10, flip=True), test_config)
+            plan_straight_line(robot, Pose(30, 22, 4), Pose(30, 22, 10, flip=True))
 
 
 class FakeClock:
@@ -285,36 +339,36 @@ class FakeClock:
 class ExecuteMoveTests(unittest.TestCase):
 
     def test_every_step_is_sent_to_the_robot(self):
-        move = plan_move_to_pose(resting_angles, start_pose, test_config)
-        robot = mock.Mock()
-        with mock.patch.object(cartesian_movement, 'sleep'):
-            execute_move(robot, move)
+        move = plan_move_to_pose(robot_without_angle_limits, resting_angles, start_pose)
+        fake = mock.Mock()
+        with mock.patch.object(movement, 'sleep'):
+            execute_move(fake, move)
 
-        self.assertEqual(len(move.angles), robot.move_servos.call_count)
-        for expected, sent in zip(move.angles, robot.move_servos.call_args_list):
+        self.assertEqual(len(move.angles), fake.move_servos.call_count)
+        for expected, sent in zip(move.angles, fake.move_servos.call_args_list):
             np.testing.assert_allclose(expected, sent[0][0])
 
     def test_returns_true_when_the_whole_move_is_executed(self):
         should_stop = mock.Mock(return_value=False)
-        with mock.patch.object(cartesian_movement, 'sleep'):
+        with mock.patch.object(movement, 'sleep'):
             self.assertTrue(execute_move(mock.Mock(), standing_still(resting_angles, 5), should_stop=should_stop))
         self.assertEqual(5, should_stop.call_count)
 
     def test_stops_when_should_stop_returns_true(self):
-        robot = mock.Mock()
+        fake = mock.Mock()
         # checked before every step, this stops before the 4th step
         should_stop = mock.Mock(side_effect=[False, False, False, True])
-        with mock.patch.object(cartesian_movement, 'sleep'):
-            self.assertFalse(execute_move(robot, standing_still(resting_angles, 10), should_stop=should_stop))
-        self.assertEqual(3, robot.move_servos.call_count)
+        with mock.patch.object(movement, 'sleep'):
+            self.assertFalse(execute_move(fake, standing_still(resting_angles, 10), should_stop=should_stop))
+        self.assertEqual(3, fake.move_servos.call_count)
 
     def run_with_fake_clock(self, move, time_to_send_a_step):
         clock = FakeClock()
-        robot = mock.Mock()
-        robot.move_servos.side_effect = lambda _: clock.sleep(time_to_send_a_step)
-        with mock.patch.object(cartesian_movement, 'perf_counter', clock.perf_counter), \
-                mock.patch.object(cartesian_movement, 'sleep', clock.sleep):
-            execute_move(robot, move)
+        fake = mock.Mock()
+        fake.move_servos.side_effect = lambda _: clock.sleep(time_to_send_a_step)
+        with mock.patch.object(movement, 'perf_counter', clock.perf_counter), \
+                mock.patch.object(movement, 'sleep', clock.sleep):
+            execute_move(fake, move)
         return clock
 
     def test_steps_are_sent_at_steps_per_second(self):
@@ -328,6 +382,49 @@ class ExecuteMoveTests(unittest.TestCase):
         dt = 1.0 / global_constants.steps_per_second
         clock = self.run_with_fake_clock(standing_still(resting_angles, steps), time_to_send_a_step=1.5 * dt)
         self.assertAlmostEqual(steps * 1.5 * dt, clock.time)
+
+
+class PlanMoveToAnglesTests(unittest.TestCase):
+    """joint space moves get the same checks as the straight lines"""
+
+    start = np.array([0, pi / 2, 0.8, 0.0, 0.0, 0.3, 0.0])
+    target = np.array([0, pi / 2, 1.0, -0.5, 0.2, -0.3, 0.1])
+
+    def test_joints_follow_a_minimum_jerk_profile_from_the_current_to_the_target_angles(self):
+        move = plan_move_to_angles(robot, self.start, self.target)
+        np.testing.assert_allclose(self.start, move.angles[0])
+        np.testing.assert_allclose(self.target, move.angles[-1])
+        # the largest change is 0.6rad at 0.5rad/s: 1.2s, 121 steps including both ends
+        self.assertAlmostEqual(1.2, move.duration)
+        self.assertEqual(121, len(move.angles))
+        progress = (move.angles[:, 3] - self.start[3]) / (self.target[3] - self.start[3])
+        np.testing.assert_allclose(progress, [movement.get_curve_val(i / 120) for i in range(121)], atol=1e-9)
+        self.assertTrue(np.all(np.diff(progress) >= 0))
+        self.assertIn('degrees', move.description)
+
+    def test_a_short_move_still_takes_a_second(self):
+        move = plan_move_to_angles(robot, self.start, self.start + 1e-3)
+        self.assertEqual(1.0, move.duration)
+
+    def test_refused_outside_the_joint_range(self):
+        target = self.start.copy()
+        target[6] = pi + 0.2  # the gripper roll, no effect on the position
+        with self.assertRaisesRegex(MovementException, 'joint 6'):
+            plan_move_to_angles(robot, self.start, target)
+        # without angle limits the range is not checked, the workspace still is
+        plan_move_to_angles(robot_without_angle_limits, self.start, target)
+
+    def test_refused_when_the_arm_would_hit_the_table(self):
+        target = np.array([0, pi / 2, -0.3, -1.2, 0.0, 0.0, 0.0])  # the upper arm straight down
+        with self.assertRaises(MovementException):
+            plan_move_to_angles(robot, self.start, target)
+
+    def test_refused_when_too_fast(self):
+        target = self.start.copy()
+        target[6] += 2.5  # a minimum jerk profile peaks at 1.875 times the average speed: 4.7rad/s in 1s
+        with self.assertRaisesRegex(MovementException, 'rad/s'):
+            plan_move_to_angles(robot, self.start, target, angular_speed=10.0)
+        plan_move_to_angles(robot, self.start, target, angular_speed=0.5)
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ from src import global_constants
 from src.kinematics.kinematics import forward_kinematics
 from src.kinematics.kinematics_utils import Pose
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import DynamixelRobotController
-from src.utils.cartesian_movement import plan_move_to_pose, execute_move, check_move
+from src.utils.movement import plan_move_to_pose, execute_move, check_move
 from src.utils.movement_exception import MovementException
 
 # all the way to the right, the same start pose as the xbox controller
@@ -94,8 +94,7 @@ def main():
     print_pose('target pose', START_POSE)
 
     try:
-        move = plan_move_to_pose(current_angles, START_POSE, robot.robot_config,
-                                 angle_limits=robot.get_angle_limits(), linear_speed=5.0)
+        move = plan_move_to_pose(robot, current_angles, START_POSE, linear_speed=5.0)
     except MovementException as e:
         print('can not move to the start pose: {}'.format(e))
         return 1
@@ -114,7 +113,7 @@ def main():
         angles_after_enabling = robot.get_current_angles()
         if angles_after_enabling is None:
             raise MovementException('failed to read the angles after enabling the servos')
-        check_move(move, robot.robot_config, current_angles=angles_after_enabling)
+        check_move(move, robot, current_angles=angles_after_enabling)
         execute_move(robot, move)
         sleep(0.5)  # let the servos settle
         compare_to_target(robot, START_POSE)

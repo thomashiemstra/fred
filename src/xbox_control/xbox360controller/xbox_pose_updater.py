@@ -12,7 +12,7 @@ from src.global_constants import WorkSpaceLimits
 # class used to update a pose using the inputs from the xbox360 controller
 # i.e. move the pose (and thus robot) with the xbox360 controller
 from src.utils.decorators import synchronized_with_lock, timer
-from src.utils.movement_utils import get_angles_center
+from src.utils.movement import get_angles_center
 from src.utils.os_utils import is_linux
 
 
