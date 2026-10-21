@@ -245,7 +245,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   the stick asks for in `ramp_up_time` = 0.1 s, easing off and releasing ramp the same way, and a step covers the
   time that really passed since the previous one (capped at `MAX_STEP_TIME` = 0.1 s), so the speeds hold at any
   loop pace. The updater does no workspace clipping of its own, the loop's `workspace_violation` check is the only
-  one; the platform sign of the right stick lives in `XboxController`.
+  one; the platform sign of the right stick lives in `Xbox360Controller`.
 - Buttons are a table, `_button_actions`; every button pressed in a read is handled, in table order, until a stop is
   requested. `get_buttons()` resets the momentary buttons when read, the bumpers are the only buttons it doesn't
   reset.
@@ -272,7 +272,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   a center the orientation is computed from the position every step (`get_angles_center`), the right stick does
   nothing until `/xbox/clearcenter`; moves created meanwhile keep the center.
 - Threads: the control loop thread (`__start_internal`), the daemon gamepad monitor thread started in
-  `XboxController.__init__`, and the Flask request threads (`app.run` is threaded). Everything that moves the arm
+  `Xbox360Controller.__init__`, and the Flask request threads (`app.run` is threaded). Everything that moves the arm
   (`_move_to`, `playback_recorded_moves`, `reset_orientation`, `handle_buttons`, `__move_gripper`) runs in the loop
   thread only; other threads use `_commands.put`. `lock` (RLock) guards the API methods (`clear_center`,
   `set_center`, save/restore/clear moves, `set_maximum_speed`, `set_scenario`, `set_profile_velocity_percentage`);
@@ -280,7 +280,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   `_start_stop_lock` serialises `start`/`stop`. `_stop_requested` is checked before each step of the start move, each
   loop iteration and between playback moves, nowhere else. Bus writes from a request thread (`/xbox/speed`) are
   serialised by `servo_handler.bus_lock`.
-- `XboxController` survives a missing or unplugged gamepad: the monitor thread retries every `RECONNECT_INTERVAL` =
+- `Xbox360Controller` survives a missing or unplugged gamepad: the monitor thread retries every `RECONNECT_INTERVAL` =
   1 s, `start()` refuses without a gamepad, unplugging during a run zeroes the sticks and the triggers and releases
   every button, so the arm ramps down and holds with the servos enabled, and resumes when the gamepad is back. On
   Windows a gamepad plugged in for the first time later is found too (through the private
@@ -288,6 +288,10 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   `inputs.get_gamepad()` only returns after the gamepad state changes, so `connected` is False until a button or
   stick is touched after the controller was created; `wait_until_connected()` gives up after 2 s and `start()` logs
   `no gamepad connected`. Touch the gamepad before `/xbox/start`.
+- `XboxOneController` (`src/xbox_control/xboxonecontroller/`, 21 October) is the wireless xbox one controller, not
+  used anywhere yet. It is an `Xbox360Controller`: on Windows it is read the same way (xinput), on Linux over
+  Bluetooth with evdev (not installed), its codes and ranges turned into those of the wired controller. Never tried
+  on a real controller, `python -m src.xbox_control.xboxonecontroller.XboxOneController` prints what it reads.
 - REST: `server.py` mounts `xbox_control_resource.py` at `/xbox`. All return `{"success": bool}` unless noted:
   `/start` -> `start()` (`already started` as text when running); `/stop` -> `stop()` (`already stopped`), blocks
   until the arm is back; `/findcenter` -> `request_find_center_mode()` (queued, False when not running);

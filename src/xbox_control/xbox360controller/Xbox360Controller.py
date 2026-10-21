@@ -38,7 +38,7 @@ class Buttons:
                     self.pad_up, self.pad_down, self.pad_left, self.pad_right)
 
 
-class XboxController(object):
+class Xbox360Controller(object):
     MAX_TRIG_VAL = math.pow(2, 8)
     MAX_JOY_VAL = math.pow(2, 15)
 
@@ -156,44 +156,47 @@ class XboxController(object):
             self._set_connected(True)
 
             for event in events:
-                if event.ev_type == 'Sync':
-                    continue
-                if event.code == 'ABS_Y':
-                    self.__left_thumb_y(event.state)
-                elif event.code == 'ABS_X':
-                    self.__left_thumb_x(event.state)
-                elif event.code == 'ABS_RY':
-                    self.__right_thumb_y(event.state)
-                elif event.code == 'ABS_RX':
-                    self.__right_thumb_x(event.state)
-                elif event.code == 'ABS_Z':
-                    self._left_trigger(event.state)
-                elif event.code == 'ABS_RZ':
-                    self._right_trigger(event.state)
-                elif event.code == 'BTN_TL':
-                    self.___left_bumper(event.state)
-                elif event.code == 'BTN_TR':
-                    self.__right_bumper(event.state)
-                elif event.code == 'BTN_SOUTH':
-                    self.__a(event.state)
-                elif event.code == 'BTN_NORTH':
-                    self.__y(event.state)
-                elif event.code == 'BTN_WEST':
-                    self.__x(event.state)
-                elif event.code == 'BTN_EAST':
-                    self.__b(event.state)
-                # elif event.code == 'BTN_THUMBL':
-                #     self.LeftThumb = event.state
-                # elif event.code == 'BTN_THUMBR':
-                #     self.RightThumb = event.state
-                # elif event.code == 'BTN_SELECT':
-                #     self.Back = event.state
-                elif event.code == 'BTN_START':
-                    self._start(event.state)
-                elif event.code == 'ABS_HAT0X':
-                    self._pad_left_right(event.state)
-                elif event.code == 'ABS_HAT0Y':
-                    self._pad_up_down(event.state)
+                if event.ev_type != 'Sync':
+                    self._handle_event(event.code, event.state)
+
+    def _handle_event(self, code: str, state: int) -> None:
+        """an input of the gamepad, by the name and with the value the inputs library gives it"""
+        if code == 'ABS_Y':
+            self.__left_thumb_y(state)
+        elif code == 'ABS_X':
+            self.__left_thumb_x(state)
+        elif code == 'ABS_RY':
+            self.__right_thumb_y(state)
+        elif code == 'ABS_RX':
+            self.__right_thumb_x(state)
+        elif code == 'ABS_Z':
+            self._left_trigger(state)
+        elif code == 'ABS_RZ':
+            self._right_trigger(state)
+        elif code == 'BTN_TL':
+            self.___left_bumper(state)
+        elif code == 'BTN_TR':
+            self.__right_bumper(state)
+        elif code == 'BTN_SOUTH':
+            self.__a(state)
+        elif code == 'BTN_NORTH':
+            self.__y(state)
+        elif code == 'BTN_WEST':
+            self.__x(state)
+        elif code == 'BTN_EAST':
+            self.__b(state)
+        # elif code == 'BTN_THUMBL':
+        #     self.LeftThumb = state
+        # elif code == 'BTN_THUMBR':
+        #     self.RightThumb = state
+        # elif code == 'BTN_SELECT':
+        #     self.Back = state
+        elif code == 'BTN_START':
+            self._start(state)
+        elif code == 'ABS_HAT0X':
+            self._pad_left_right(state)
+        elif code == 'ABS_HAT0Y':
+            self._pad_up_down(state)
 
     @synchronized_with_lock("lock")
     def __left_thumb_x(self, x_value: float) -> None:
@@ -237,12 +240,12 @@ class XboxController(object):
 
     @synchronized_with_lock("lock")
     def _left_trigger(self, left_trigger_value: float) -> None:
-        self.l_trigger = (left_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
+        self.l_trigger = (left_trigger_value / Xbox360Controller.MAX_TRIG_VAL) * self.scale
         self.lr_trigger = self.r_trigger - self.l_trigger
 
     @synchronized_with_lock("lock")
     def _right_trigger(self, right_trigger_value: float) -> None:
-        self.r_trigger = (right_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
+        self.r_trigger = (right_trigger_value / Xbox360Controller.MAX_TRIG_VAL) * self.scale
         self.lr_trigger = self.r_trigger - self.l_trigger
 
     @synchronized_with_lock("lock")
@@ -268,14 +271,14 @@ class XboxController(object):
         self.start = value == 1
 
     def _handle_x_axis_value(self, value: float) -> float:
-        value = (value / XboxController.MAX_JOY_VAL) * self.scale
+        value = (value / Xbox360Controller.MAX_JOY_VAL) * self.scale
 
         if self.upper_dead_zone > value > self.lower_dead_zone:
             value = 0
         return value
 
     def _handle_y_axis_value(self, value: float) -> float:
-        value = (value / XboxController.MAX_JOY_VAL) * self.scale * self.invert_yaxis_val
+        value = (value / Xbox360Controller.MAX_JOY_VAL) * self.scale * self.invert_yaxis_val
 
         if self.upper_dead_zone > value > self.lower_dead_zone:
             value = 0
@@ -297,6 +300,6 @@ def _find_gamepads() -> None:
 
 
 if __name__ == '__main__':
-    joy = XboxController(scale=100)
+    joy = Xbox360Controller(scale=100)
     while True:
         print(joy.get_buttons())

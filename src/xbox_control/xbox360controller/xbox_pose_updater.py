@@ -27,9 +27,9 @@ from src.kinematics.kinematics_utils import Pose
 from src.utils.movement import get_angles_center
 
 if TYPE_CHECKING:
-    from src.xbox_control.xbox360controller.XboxController import XboxController
+    from src.xbox_control.xbox360controller.Xbox360Controller import Xbox360Controller
 
-# the sticks and the triggers deliver -STICK_RANGE..STICK_RANGE (XboxController(scale=100))
+# the sticks and the triggers deliver -STICK_RANGE..STICK_RANGE (Xbox360Controller(scale=100))
 STICK_RANGE = 100.0
 # a step never covers more than this, however long the control loop was busy in between
 MAX_STEP_TIME = 0.1
@@ -37,7 +37,7 @@ MAX_STEP_TIME = 0.1
 
 class XboxPoseUpdater:
 
-    def __init__(self, controller: XboxController, maximum_speed: float = 5.0, ramp_up_time: float = 0.1,
+    def __init__(self, controller: Xbox360Controller, maximum_speed: float = 5.0, ramp_up_time: float = 0.1,
                  maximum_angular_speed: float = 0.5) -> None:
         """
         :param maximum_speed: cm/s of the end effector at full stick deflection

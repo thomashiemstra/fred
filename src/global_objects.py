@@ -65,12 +65,12 @@ def get_robot() -> SimulatedRobotController | CombinedRobot:
 
 @lru_cache(maxsize=1)
 def get_xbox_robot_controller() -> XboxRobotController:
-    from src.xbox_control.xbox360controller.XboxController import XboxController
+    from src.xbox_control.xbox360controller.Xbox360Controller import Xbox360Controller
     from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
     from src.xbox_control.xbox_robot_controller import XboxRobotController
 
     robot = get_robot()
-    controller = XboxController(dead_zone=30, scale=100)
+    controller = Xbox360Controller(dead_zone=30, scale=100)
     pose_updater = XboxPoseUpdater(controller)
 
     return XboxRobotController(global_constants.dynamixel_robot_config, robot, pose_updater)

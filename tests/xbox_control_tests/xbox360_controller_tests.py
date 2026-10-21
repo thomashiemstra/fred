@@ -6,8 +6,8 @@ from src.utils.os_utils import is_linux
 
 from inputs import UnpluggedError
 
-from src.xbox_control.xbox360controller import XboxController as xbox_controller_module
-from src.xbox_control.xbox360controller.XboxController import XboxController
+from src.xbox_control.xbox360controller import Xbox360Controller as xbox360_controller_module
+from src.xbox_control.xbox360controller.Xbox360Controller import Xbox360Controller
 
 
 class Event:
@@ -35,14 +35,14 @@ class FakeGamepad:
         return result
 
 
-class XboxControllerTests(unittest.TestCase):
+class Xbox360ControllerTests(unittest.TestCase):
 
     def run_controller(self, results, dead_zone=0, scale=1, invert_yaxis=False):
         gamepad = FakeGamepad(results)
-        with mock.patch.object(xbox_controller_module, 'get_gamepad', gamepad.get_gamepad), \
-                mock.patch.object(xbox_controller_module, 'sleep'), \
-                mock.patch.object(xbox_controller_module, '_find_gamepads') as find_gamepads:
-            controller = XboxController(dead_zone=dead_zone, scale=scale, invert_yaxis=invert_yaxis)
+        with mock.patch.object(xbox360_controller_module, 'get_gamepad', gamepad.get_gamepad), \
+                mock.patch.object(xbox360_controller_module, 'sleep'), \
+                mock.patch.object(xbox360_controller_module, '_find_gamepads') as find_gamepads:
+            controller = Xbox360Controller(dead_zone=dead_zone, scale=scale, invert_yaxis=invert_yaxis)
             self.assertTrue(gamepad.done.wait(timeout=5))
         return controller, find_gamepads
 
@@ -149,7 +149,7 @@ class XboxControllerTests(unittest.TestCase):
 
     def test_wait_until_connected(self):
         controller, _ = self.run_controller([UnpluggedError()])
-        with mock.patch.object(xbox_controller_module, 'sleep'):
+        with mock.patch.object(xbox360_controller_module, 'sleep'):
             self.assertFalse(controller.wait_until_connected(timeout=1.0))
 
 

@@ -49,7 +49,7 @@ class XboxPoseUpdaterTests(unittest.TestCase):
         self.assertLess(updater(lr_trigger=-1).get_updated_pose_from_controller(Pose(0, 0, 0), False, None).z, 0)
 
     def test_the_right_stick_turns_alpha_and_gamma(self):
-        # the signs of the gamepad are sorted out in XboxController, here right and up are positive
+        # the signs of the gamepad are sorted out in Xbox360Controller, here right and up are positive
         self.assertGreater(updater(r_thumb_x=1).get_updated_pose_from_controller(Pose(0, 0, 0), False, None).alpha, 0)
         self.assertLess(updater(r_thumb_x=-1).get_updated_pose_from_controller(Pose(0, 0, 0), False, None).alpha, 0)
         self.assertGreater(updater(r_thumb_y=1).get_updated_pose_from_controller(Pose(0, 0, 0), False, None).gamma, 0)

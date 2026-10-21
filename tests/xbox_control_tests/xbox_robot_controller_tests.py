@@ -14,7 +14,7 @@ from src.utils import movement, workspace
 from src.utils.movement import SplineMovement, PoseToPoseMovement
 from src.utils.movement_exception import MovementException
 from src.xbox_control import xbox_robot_controller
-from src.xbox_control.xbox360controller.XboxController import Buttons
+from src.xbox_control.xbox360controller.Xbox360Controller import Buttons
 from src.xbox_control.xbox_robot_controller import determine_time, create_move, XboxRobotController
 
 test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
