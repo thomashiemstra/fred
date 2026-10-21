@@ -54,7 +54,7 @@ servos:
     mode: position
     positions: [1024, 3072]
     angles: [0, 180]
-    offset: -567  # measured in the jig at 0 degrees, raw 457
+    offset: -571  # measured in the jig at 0 degrees, raw 453
     profile: {velocity: 500, acceleration: 500}
     pid: {p: 1000, i: 0, d: 0}
   3:
@@ -73,7 +73,7 @@ servos:
     mode: position
     positions: [0, 4096]
     angles: [-180, 180]
-    offset: -12
+    offset: -10  # measured in the jig at 0 degrees, raw 2038
     profile: {velocity: 300, acceleration: 100}
     pid: {p: 1000, i: 0, d: 0}
   5:
@@ -83,7 +83,7 @@ servos:
     mode: position
     positions: [0, 4096]
     angles: [-180, 180]
-    offset: 59
+    offset: 60  # measured in the jig at 0 degrees, raw 2108
     profile: {velocity: 300, acceleration: 100}
     pid: {p: 2000, i: 0, d: 0}
   6:

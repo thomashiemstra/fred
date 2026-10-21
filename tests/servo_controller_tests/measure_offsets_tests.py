@@ -87,7 +87,7 @@ class ReplaceOffsetsTests(unittest.TestCase):
 
 class MainTests(unittest.TestCase):
 
-    REGISTERS = {1: (0, 0), 2: (0, 0), 4: (0, 0)}  # torque off, homing offset 0
+    REGISTERS = {1: (0, 0), 2: (0, 0), 4: (0, 0), 5: (0, 0)}  # torque off, homing offset 0
 
     def run_main(self, arguments, readings, registers=REGISTERS):
         """run main with the bus faked, returns (exit code, printed lines)"""
@@ -100,13 +100,15 @@ class MainTests(unittest.TestCase):
         self.read_positions = read_positions
         return result, [str(call.args[0]) for call in printed.call_args_list]
 
-    def test_default_jig_holds_servos_1_2_and_4(self):
-        self.assertEqual(measure_offsets.DEFAULT_JIG, {1: 90.0, 2: 0.0, 4: 0.0})
-        readings = {1: [2394] * 3, 2: [457] * 3, 4: [2036] * 3}
+    def test_default_jig_holds_servos_1_2_4_and_5(self):
+        self.assertEqual(measure_offsets.DEFAULT_JIG, {1: 90.0, 2: 0.0, 4: 0.0, 5: 0.0})
+        # servos 4 and 5 read 0 degrees with the offsets of the test config, -12 and 59
+        readings = {1: [2394] * 3, 2: [457] * 3, 4: [2036] * 3, 5: [2107] * 3}
         result, output = self.run_main(['--dry-run'], readings)
         self.assertEqual(result, 0)
-        self.assertEqual(self.read_positions.call_args.args[1], [1, 2, 4])
+        self.assertEqual(self.read_positions.call_args.args[1], [1, 2, 4, 5])
         self.assertTrue(any('servo 4' in line and 'offset -12 -> -12' in line for line in output), output)
+        self.assertTrue(any('servo 5' in line and 'offset 59 -> 59' in line for line in output), output)
 
     def test_refuses_when_the_torque_is_enabled(self):
         result, _ = self.run_main(['--yes'], {}, registers={1: (1, 0), 2: (0, 0), 4: (0, 0)})

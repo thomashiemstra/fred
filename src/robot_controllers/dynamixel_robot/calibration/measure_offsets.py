@@ -27,7 +27,7 @@ from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config, DEFAULT_SERVO_CONFIG_PATH
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 
-DEFAULT_JIG = {1: 90.0, 2: 0.0, 4: 0.0}  # servo id -> angle in degrees the jig holds it at
+DEFAULT_JIG = {1: 90.0, 2: 0.0, 4: 0.0, 5: 0.0}  # servo id -> angle in degrees the jig holds it at
 MAX_SPREAD = 2  # positions, the readings have to agree this well, otherwise the joint isn't seated in the jig
 
 
