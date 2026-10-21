@@ -67,6 +67,15 @@ class XboxControllerTests(unittest.TestCase):
         controller, _ = self.run_controller([[Event('ABS_RZ', 64)]])
         self.assertEqual(0.25, controller.get_lr_trigger())
 
+    def test_releasing_one_trigger_keeps_the_other(self):
+        # right held, left pressed and released: back to the right trigger alone, not to 0
+        controller, _ = self.run_controller([[Event('ABS_RZ', 64), Event('ABS_Z', 128), Event('ABS_Z', 0)]])
+        self.assertEqual(0.25, controller.get_lr_trigger())
+
+    def test_both_triggers_cancel_out(self):
+        controller, _ = self.run_controller([[Event('ABS_RZ', 128), Event('ABS_Z', 128)]])
+        self.assertEqual(0, controller.get_lr_trigger())
+
     def test_buttons_are_reset_after_reading_them_but_bumpers_are_held(self):
         controller, _ = self.run_controller([[Event('BTN_SOUTH', 1, 'Key'), Event('BTN_NORTH', 1, 'Key'),
                                               Event('BTN_WEST', 1, 'Key'), Event('BTN_EAST', 1, 'Key'),

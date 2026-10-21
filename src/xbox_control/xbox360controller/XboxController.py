@@ -61,6 +61,9 @@ class XboxController(object):
         self.l_thumb_y: float = 0
         self.r_thumb_x: float = 0
         self.r_thumb_y: float = 0
+        # each trigger keeps its own value, the z input is the right one minus the left one
+        self.l_trigger: float = 0
+        self.r_trigger: float = 0
         self.lr_trigger: float = 0
 
         self.start = False
@@ -106,7 +109,8 @@ class XboxController(object):
         else:
             # the last values of the sticks would keep the robot moving
             logger.warning('no gamepad connected')
-            self.l_thumb_x = self.l_thumb_y = self.r_thumb_x = self.r_thumb_y = self.lr_trigger = 0
+            self.l_thumb_x = self.l_thumb_y = self.r_thumb_x = self.r_thumb_y = 0
+            self.l_trigger = self.r_trigger = self.lr_trigger = 0
             self.lb = self.rb = False
             self.reset_button()
 
@@ -233,11 +237,13 @@ class XboxController(object):
 
     @synchronized_with_lock("lock")
     def _left_trigger(self, left_trigger_value: float) -> None:
-        self.lr_trigger = -(left_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
+        self.l_trigger = (left_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
+        self.lr_trigger = self.r_trigger - self.l_trigger
 
     @synchronized_with_lock("lock")
     def _right_trigger(self, right_trigger_value: float) -> None:
-        self.lr_trigger = (right_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
+        self.r_trigger = (right_trigger_value / XboxController.MAX_TRIG_VAL) * self.scale
+        self.lr_trigger = self.r_trigger - self.l_trigger
 
     @synchronized_with_lock("lock")
     def _pad_left_right(self, value: int) -> None:
