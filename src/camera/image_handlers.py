@@ -9,7 +9,8 @@ from cv2 import aruco
 from src.camera.util import CaptureConfig, get_default_charuco_board, get_calibrations, aruco_marker_dictionary, \
     charuco_board_dictionary, aruco_marker_length, charuco_base_board_square_length, charuco__baseboard_marker_length, \
     find_relative_vector_and_rotation, charuco_board_dictionary_2, \
-    detect_aruco_markers, interpolate_charuco_corners, estimate_pose_charuco_board, estimate_pose_single_markers
+    detect_aruco_markers, interpolate_charuco_corners, estimate_pose_charuco_board, estimate_pose_single_markers, \
+    get_default_calibration_path
 from src.utils.decorators import synchronized_with_lock
 
 
@@ -69,7 +70,7 @@ class DetectedMarker:
 def get_default_aurco_image_handler() -> 'ArucoImageHandler':
     board = get_default_charuco_board(square_length=charuco_base_board_square_length,
                                       marker_length=charuco__baseboard_marker_length)
-    cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data_charuco.json')
+    cameraMatrix, distCoeffs = get_calibrations(get_default_calibration_path())
     handler = ArucoImageHandler(board, cameraMatrix, distCoeffs, aruco_marker_dictionary,
                                 charuco_board_dictionary, aruco_marker_length, should_draw=True)
     return handler
@@ -222,7 +223,7 @@ def get_default_board_to_board_image_handler() -> 'BoardToBoardImageHandler':
                                       marker_length=charuco__baseboard_marker_length,
                                              dictionary=charuco_board_dictionary_2)
 
-    cameraMatrix, distCoeffs = get_calibrations('src/camera/calibration/calibration_data.json')
+    cameraMatrix, distCoeffs = get_calibrations(get_default_calibration_path())
     handler = BoardToBoardImageHandler(base_board, target_board, cameraMatrix, distCoeffs, charuco_board_dictionary,
                                        charuco_board_dictionary_2, should_draw=True)
     return handler

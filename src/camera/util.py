@@ -1,9 +1,14 @@
-import sys
+import os
 from collections.abc import Sequence
 
 import cv2
 import jsonpickle
 import numpy as np
+
+# the calibration files are written here by the calibration scripts, whatever the working directory is
+CALIBRATION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'calibration')
+CHARUCO_CALIBRATION_FILE = 'calibration_data_charuco.json'
+CHESSBOARD_CALIBRATION_FILE = 'calibration_data.json'
 
 
 class CaptureConfig:
@@ -35,13 +40,17 @@ def get_default_charuco_board(squares_x: int = 6,
     return cv2.aruco.CharucoBoard((squares_x, squares_y), square_length, marker_length, dictionary)
 
 
-def get_calibrations(path: str) -> tuple[np.ndarray, np.ndarray]:
+def get_calibrations(path: str | os.PathLike[str]) -> tuple[np.ndarray, np.ndarray]:
+    """
+    the camera matrix and distortion coefficients from a calibration file
+    :raises FileNotFoundError: if the file does not exist, the message says which script creates it
+    """
     try:
         with open(path, 'r') as calibartion_file:
             string = calibartion_file.read()
     except FileNotFoundError:
-        print("calibration file not found, exiting")
-        sys.exit()
+        raise FileNotFoundError("calibration file {} not found, create it by running {}".format(
+            path, _calibration_script(path))) from None
 
     calibrations = jsonpickle.decode(string)
 
@@ -49,6 +58,24 @@ def get_calibrations(path: str) -> tuple[np.ndarray, np.ndarray]:
     distCoeffs = np.array(calibrations['distCoeffs'])
 
     return cameraMatrix, distCoeffs
+
+
+def _calibration_script(path: str | os.PathLike[str]) -> str:
+    name = os.path.basename(path)
+    if name == CHARUCO_CALIBRATION_FILE:
+        return "src/camera/aruco_camera_calibration.py (camera) or " \
+               "src/camera/charuco_camera_calibration_from_images.py (images)"
+    if name == CHESSBOARD_CALIBRATION_FILE:
+        return "src/camera/camera_calibration.py (camera) or src/camera/camera_calibration_from_images.py (images)"
+    return "one of the calibration scripts in src/camera"
+
+
+def get_default_calibration_path() -> str:
+    """the charuco calibration if it was made, the chessboard calibration (tracked in the repository) otherwise"""
+    charuco_path = os.path.join(CALIBRATION_DIR, CHARUCO_CALIBRATION_FILE)
+    if os.path.isfile(charuco_path):
+        return charuco_path
+    return os.path.join(CALIBRATION_DIR, CHESSBOARD_CALIBRATION_FILE)
 
 
 def find_relative_vector_and_rotation(base_rotation_matrix: np.ndarray, base_tvec: np.ndarray,

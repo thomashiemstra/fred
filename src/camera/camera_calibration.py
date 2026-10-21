@@ -1,8 +1,12 @@
+import os
 import sys
 
 import cv2
 import numpy as np
 import json
+
+# next to the other calibration data, whatever the working directory is
+CALIBRATION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'calibration')
 
 cap = cv2.VideoCapture(0, cv2.CAP_MSMF)
 if not cap.isOpened():
@@ -102,7 +106,7 @@ print(tvecs)
 
 calibration_data = {'cameraMatrix': cameraMatrix.tolist(), 'distCoeffs': distCoeffs.tolist()}
 
-with open('calibration/calibration_data.txt', 'w') as outfile:
-    json.dump(calibration_data, outfile)
+with open(os.path.join(CALIBRATION_DIR, 'calibration_data.json'), 'w') as outfile:
+    json.dump(calibration_data, outfile, indent=4)
 
 # https://longervision.github.io/2017/03/13/ComputerVision/OpenCV/opencv-external-posture-estimation-ChArUco-board/

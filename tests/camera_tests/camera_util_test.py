@@ -143,8 +143,8 @@ class CalibrationAndBoardTest(unittest.TestCase):
         self.assertAlmostEqual(1430.49791192, camera_matrix[0][0])
         self.assertEqual(1.0, camera_matrix[2][2])
 
-    def test_get_calibrations_missing_file_exits(self):
-        with self.assertRaises(SystemExit):
+    def test_get_calibrations_missing_file_raises(self):
+        with self.assertRaises(FileNotFoundError):
             get_calibrations(os.path.join(RESOURCES, 'does_not_exist.json'))
 
     def test_default_charuco_board(self):

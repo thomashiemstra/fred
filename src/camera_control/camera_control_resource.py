@@ -107,7 +107,11 @@ def start_aruco() -> Response:
             return jsonify(success=True)
     camera = global_objects.get_camera()
 
-    aruco_image_handler = get_default_aurco_image_handler()
+    try:
+        aruco_image_handler = get_default_aurco_image_handler()
+    except FileNotFoundError as e:
+        print(e)
+        return jsonify(success=False, error=str(e))
     object_handler.set_aruco_image_handler(aruco_image_handler)
     camera.add_image_handler(aruco_image_handler)
     resp = jsonify(success=True)
@@ -164,7 +168,11 @@ def start_board_to_board() -> Response:
 
     camera = global_objects.get_camera()
 
-    board_to_board_handler = get_default_board_to_board_image_handler()
+    try:
+        board_to_board_handler = get_default_board_to_board_image_handler()
+    except FileNotFoundError as e:
+        print(e)
+        return jsonify(success=False, error=str(e))
     object_handler.set_board_to_board_handler(board_to_board_handler)
     camera.add_image_handler(board_to_board_handler)
     resp = jsonify(success=True)

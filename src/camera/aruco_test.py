@@ -1,14 +1,16 @@
+import os
 import sys
 
 import cv2
 from cv2 import aruco
 import jsonpickle
 import numpy as np
-from src.camera.util import charuco_board_dictionary, aruco_marker_dictionary, get_default_charuco_board, \
+from src.camera.util import CALIBRATION_DIR, CHARUCO_CALIBRATION_FILE, \
+    charuco_board_dictionary, aruco_marker_dictionary, get_default_charuco_board, \
     detect_aruco_markers, interpolate_charuco_corners, estimate_pose_charuco_board, estimate_pose_single_markers
 
 try:
-    with open('calibration/calibration_data_charuco.json', 'r') as calibartion_file:
+    with open(os.path.join(CALIBRATION_DIR, CHARUCO_CALIBRATION_FILE), 'r') as calibartion_file:
         string = calibartion_file.read()
 except FileNotFoundError:
     print("calibration file not found, exiting")

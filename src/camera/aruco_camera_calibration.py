@@ -9,7 +9,8 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-from src.camera.util import get_default_charuco_board, charuco_board_dictionary, detect_aruco_markers, \
+from src.camera.util import CALIBRATION_DIR, CHARUCO_CALIBRATION_FILE, \
+    get_default_charuco_board, charuco_board_dictionary, detect_aruco_markers, \
     interpolate_charuco_corners, calibrate_camera_charuco
 from src.utils.decorators import timer
 
@@ -35,7 +36,7 @@ def calibrate_camera(allCorners: list[np.ndarray], allIds: list[np.ndarray], ims
     #flags = (cv2.CALIB_RATIONAL_MODEL)
     ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors = calibrate_camera_charuco(
         board, allCorners, allIds, imsize, cameraMatrixInit, distCoeffsInit, flags,
-        (cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
+        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
 
     return ret, camera_matrix, distortion_coefficients0, rotation_vectors, translation_vectors
 
@@ -88,7 +89,7 @@ while cap.isOpened():
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_frame = gray
-    imsize = gray.shape
+    imsize = gray.shape[::-1]  # (width, height)
     corners, ids = detect_aruco_markers(gray, charuco_board_dictionary)
     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
@@ -148,5 +149,5 @@ print(translation_vectors)
 
 calibration_data = {'cameraMatrix': camera_matrix.tolist(), 'distCoeffs': distortion_coefficients0.tolist()}
 
-with open('calibration/calibration_data_charuco.json', 'w') as outfile:
+with open(os.path.join(CALIBRATION_DIR, CHARUCO_CALIBRATION_FILE), 'w') as outfile:
     json.dump(calibration_data, outfile, indent=4)
