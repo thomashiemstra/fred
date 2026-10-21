@@ -1,8 +1,7 @@
-# Handover: Dynamixel robot controller and xbox control rework
+# Dynamixel robot controller and xbox control
 
-What was changed in the robot software from 15 to 19 October 2026, what was measured on the physical robot, and what is
-still open. The work is in commits `e46f2af` up to `0fd1b93` on master, plus the uncommitted work of 19 October
-(the workspace check on the robot, the merged movement module, the gravity compensation).
+How the robot software works, what was measured on the physical robot, and what is still open. The rework of
+15-21 October 2026 that built it is in the git log.
 
 Environment: Windows 10 Pro (build 19045), Python 3.12.2 in `venv/` at the repo root (`venv\Scripts\python.exe`,
 gitignored), U2D2 on COM4. Every command below assumes that interpreter. The measurements were taken on this machine
@@ -333,80 +332,37 @@ the servo positions (fixed 20 October), nothing calls `set_recorder`.
 
 ## Open issues
 
-Found while writing the tests and in the code reviews of 15-18 October, not fixed then. All of them were fixed on 20
-and 21 October (listed below the table) except issue 10, which needs a rest pose measured on the arm, and the
-restored recordings of issue 4. Where = repo-relative `path:line` plus the symbol; the numbers
-1-17 are the original ones, 18-28 were added on 18 October; the rows are grouped by area.
+Two of the 28 issues found while writing the tests and in the code reviews of 15-18 October are left, the others were
+fixed on 20 and 21 October (see the git log). Issue 10 needs a rest pose measured on the arm. Where = repo-relative
+`path:line` plus the symbol.
 
 | # | Where | Issue | Impact |
 |---|---|---|---|
 | 4 | `src/kinematics/kinematics.py:75-82`, `src/xbox_control/xbox_robot_controller.py` (`restore_recorded_moves_from_file`) | with the wrist exactly straight (angle 5 = 0) angle 4 and angle 6 are arbitrary, and on either side of it they differ by pi when the flip is kept. Since 21 October the flip only changes with the `a` button, the stick control turns the wrist over at the joint speed limit when it has to, and a recording only accepts poses with the flip of its first pose. Still open: moves restored from a file aren't checked for mixed flips | low, a restored recording that mixes flips swings the tip around the wrist between them, within the workspace limits |
 | 10 | `src/xbox_control/xbox_robot_controller.py:279-282` (`stop_robot`, `start_pose` at `:47`) | stops at the start pose `Pose(30, 22.0, 4)` (4 cm above the table) and disables the torque, the arm drops; when the move back can't be planned the torque is disabled wherever the arm is; same in `src/camera_control/board_to_board_robot_controller.py:73-75` | high, every stop (api, overheating, stop during the start move or a playback) lets the arm fall unsupported; needs a rest pose on the table (`z_min = -5` allows it) |
 
-Fixed on 21 October, each with new tests, offline (a check on the robot is still worth it where noted):
+### Checks that need the robot or the camera
 
-- 1: `Pose.__copy__` keeps `euler_matrix`, `Pose.__eq__` compares the orientations when a side has a matrix, and
-  `reset_orientation` drops the matrix too.
-- 3: `jacobian_transpose_on_f` (and its copy in `custom_policy.py`) uses `c1`; a finite difference test covers all
-  three control points. Before, control points 1 and 2 were off by up to 47.
-- 4 (stick control and the `a` button) and 21: the flip only changes with `a`. Every stick step commands a pose and
-  sends angles that turn towards its angles at 95% of `recommended_max_servo_speed`, the gamepad waits until they
-  arrive. A straight wrist passed with the same flip turns joints 4 and 6 over by pi at that speed: with the fake
-  robot at full stick speed the arm gets through in 1.5-2.1 s, the tip within 0.03 cm of the path. `a` turns the
-  wrist over to the other solution of the same pose in about 0.8 s instead of jumping at full servo speed; the
-  swing is checked, and at the start pose, 4 cm above the table, it would take the tip below the floor of the
-  workspace, so the arm holds partway and `a` again turns it back. A step is skipped (the arm holds) when the
-  position can't be reached or `check_move` refuses it (workspace, servo ranges); while the arm holds on the way to
-  a pose it can't reach, the sticks wait too, only `a` (back) or a stop gets it out. A wrist joint at the end of
-  its range holds there instead of turning all the way round. On the robot: check how the wrist feels turning over,
-  and press `a` only where the gripper has room to swing through straight.
-- 4 (recorded moves): `y` only records a pose with the flip of the first pose of the recording (the first recorded
-  move, or the first pending position), and logs a warning otherwise; after `/xbox/clearAll` any flip can start a
-  new recording. The two poses of find center mode may have any flip, they never become a move.
-- 5: servo ids are sorted as numbers.
-- 6: `set_scenario` only accepts ids within the list and stores the id after the scenario is built.
-- 7: bad requests get a 400 with `{"success": false, "error": ...}`, a missing restore file a 404.
-- 8: the server listens on 127.0.0.1, CORS allows only the two UI origins, and posts that carry another `Origin`
-  are refused with a 403 (CORS alone doesn't stop a page from sending a simple post).
-- 9: save/restore take plain names in `recorded_moves/`, restore decodes with `safe=True` and checks the result.
-  `jsonpickle` still reconstructs objects, so only restore files the server wrote.
-- 11: `get_repulsive_forces_world` allocates one row per control point.
-- 12: a failed reboot command counts as a failed reboot.
-- 15: each trigger keeps its own value, z is the right trigger minus the left one.
-- 16: the `Servo2`/`Servo3` lookup takes the nearest table key.
-- 17: `to_bytes` raises when a value doesn't fit, `load_servo_config` checks every register value against its
-  size.
-- 18: the safety check refuses instead of waiting on `input()` and works in angles (see the controller above).
-- 22: `start()` resets the gripper target, so a restart opens the gripper.
-- 23: every pressed button of a read is handled, not only the first.
-- 24: `/xbox/setSpeed` only accepts 5-50.
-- 25: `/test2` is removed.
-- 26: `get_calibrations` raises `FileNotFoundError` instead of `sys.exit()` and the camera endpoints answer with
-  the error; the handlers use `calibration_data_charuco.json` when it exists, otherwise `calibration_data.json`.
-  All calibration scripts write to `src/camera/calibration/`, `camera_calibration.py` as `calibration_data.json`.
-- 28: `robot_move_test.py` moves to the xbox start pose.
+The fixes of 20 and 21 October were only tested offline:
 
-Fixed on 20 October, after the type check found most of them again (details in
-`Handover Bugs Found By Type Checking.md`):
-
-- 2: the camera code uses the aruco API of OpenCV 4.7+, checked against the legacy code on the recorded images
-  (`184ec82`); the 6 aruco tests run again.
-- 13: `get_current_gripper_position` returns `None` when the servos can't be read (`129511c`).
-- 14: `Movement.to_json` is removed (`a2cd1a1`).
-- 19: `ServoPositionRecorder.write` writes the numbers (`b5f7f5a`) and `record` takes servo 1 from index 0.
-- 20: `Movement.is_robot_at_start_pose` raises a `MovementException` when the angles can't be read (`129511c`).
-- 27: `requirements.txt` pins the packages of the venv; a fresh venv installed from it passes the type check and
-  the tests.
-
-Fixed in `6efdd99` (found by the code review of the xbox rework): `/xbox/speed` crashed because `CombinedRobot` had no
-`set_profile_velocity_percentage`, now at `src/robot_controllers/combined_robot/combined_robot.py:64`.
+- The stick control: the wrist turning over at the joint speed limit (a straight wrist passed with the same flip, or
+  the `a` button), and the sticks slowing down near a singularity instead of stopping. Press `a` only where the
+  gripper has room to swing through straight: at the start pose, 4 cm above the table, the swing would go below the
+  floor of the workspace, so the arm holds partway and `a` again turns it back.
+- The camera: the aruco code was ported to OpenCV 4.7+ and gives the poses of the legacy code on the recorded
+  images in `tests/camera_tests/resources`, except that the new detector puts a corner of the small markers 17 and
+  29 1-2 px differently, which moves the pose of marker 17. Check the poses of the boards and the markers at
+  measured positions. The calibration scripts are ported but have never run; recalibrate if the camera that made
+  `src/camera/calibration/calibration_data.json` is gone.
+- Failed reads: cut the servo power during a move, it should stop with a `MovementException` (or a
+  `DynamixelError` from `move_to_pose`) and the arm should hold.
+- The safety check of servos 1 and 2 refuses with a logged error instead of asking on the console: check the message
+  with the arm resting outside the range.
+- The Arduino angle sensor (COM5), if it is used again: `ArduinoAngleReader.stop()` was only tested on a loopback
+  port.
 
 ## Not done, worth considering
 
-- Hardware position limits in the servos (Min/Max Position Limit, eeprom; `# TODO` at
-  `dynamixel_robot_controller.py:89`). Write them once with DYNAMIXEL Wizard (torque off) or implement the TODO in
-  `initialize_servos`. Servo 3 is mounted reversed (`positions: [3072, 1024]`), so its min and max are swapped, and
-  every servo's `offset` has to be included, as `Servo.clamp_position` does.
 - Fast Sync Read (sdk 4.1 `fastSyncRead`); whether firmware 45/48/51 supports it is unchecked.
 - Lowering the return delay time of the servos.
 - Gravity/spring compensation: see `Handover Gravity and Spring Compensation.md`. The code is in place

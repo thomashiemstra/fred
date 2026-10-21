@@ -1,8 +1,7 @@
 # Handover: Gravity and spring compensation
 
-Oct 16, 2026 · @wew. Revised 18 October 2026 against the code, the servo manuals and the 2021 calibration data; the
-corrections to the first version are listed at the end. Code references are to the state after the controller rework
-(`Handover Robot Controller Rework.md`).
+Oct 16, 2026 · @wew. Revised 18 October 2026 against the code, the servo manuals and the 2021 calibration data. Code
+references are to the state after the controller rework (`Handover Robot Controller Rework.md`).
 
 ## Summary
 
@@ -15,10 +14,10 @@ path.
 - This was done once before, in 2021, with position error tables and fitted cosines for servos 2 and 3 (see "What
   already exists"). It was dropped in the 2024 rebuild. The data from then shows 1-2.6 degrees of sag on servo 3 and
   about 1.8 degrees of hysteresis between moving up and down, so friction, not stiffness, sets the floor.
-- Three things change the plan compared to the first version: joints 4-6 are XC430 servos without current sensing,
-  so the measured quantity has to be position error, not current; joints 1 and 2 have a 3:1 belt reduction but the
-  servo's encoder sits on the joint shaft, so positions are joint positions on every joint and a fit in positions
-  needs no gear ratio; the communication settings it asked for are already in place.
+- Three facts of the robot shape the plan: joints 4-6 are XC430 servos without current sensing, so the measured
+  quantity has to be position error, not current; joints 1 and 2 have a 3:1 belt reduction but the servo's encoder
+  sits on the joint shaft, so positions are joint positions on every joint and a fit in positions needs no gear
+  ratio; the communication settings (latency timer, sync read and write) are already in place.
 - Rigid-body gravity: each link is a first moment (mass times centre of mass) in the arm plane; the holding load of
   every joint is a linear combination of a handful of sin/cos terms of q2, q3, q4, q5. Fitted with linear least
   squares in positions, per joint.
@@ -94,7 +93,7 @@ path.
   `execute_move` and the xbox loop on a `perf_counter` schedule. There is no Present Current read in
   `servo_handler.py` yet; only `gripper_test.py` reads it, with `read2ByteTxRx`.
 - Safety: the robot warns at 45 C and stops at 50 C (PLA). The arm drops when the torque goes off.
-- Settings the first version asked for: latency timer 1 ms, sync read/write and a fixed period loop are done. 4 Mbps
+- Settings: latency timer 1 ms, sync read/write and a fixed period loop are done. 4 Mbps
   is not worth an eeprom change on every servo: a bus read is the latency timer plus the return delays plus about
   0.5 ms of bytes at 1 Mbps, so 4 Mbps saves ~0.35 ms per bus while a lower return delay saves 1.5-2 ms. `chrt` and
   `ttyUSB0` are Linux, the robot runs on Windows. Host-side current control or an OpenRB-150/Teensy are not needed
@@ -257,8 +256,7 @@ Where it plugs into the code (implemented on 19 October, see the work list at th
 - `Servo.set_target_position_from_angle(angle, all_angles)` (`servo.py`): after interpolating the angle to a position
   and adding `constant_offset`, the `compensation` of the servo (a `StaticCompensation`) gives the positions for
   `all_angles` and they are added; `compensation_positions` keeps what was added. `move_servos` passes the
-  commanded angles, so the model input is the target pose, not the measured one, which is what the first version
-  asked for.
+  commanded angles, so the model input is the target pose, not the measured one.
 - Parameters in the yaml: the optional `compensation` field of a servo (`max_positions`, `terms`, optional `up` and
   `down`) and the top level `spring` section (the two anchors), validated by `servo_config.py`; the basis is one
   module shared with the fit script.
@@ -321,21 +319,6 @@ and its remaining error is measured.
 
 Limit: this is for slow moves. Fast motion or heavy payloads need inverse dynamics with link inertias, which this plan
 does not identify.
-
-## Corrections to the first version
-
-| Topic | First version | Corrected |
-|---|---|---|
-| Servo models | six mostly XM430-W350-R | XM430 (joints 1, 3), XM540 (2), XC430 (4-6), XL330 (gripper) |
-| Measured quantity | log Present Current for all joints, fit joints 4-6 first from their currents | XC430 has no Present Current (address 126 is Present Load, 0.1 %) and no current-based position mode; use the position error on all joints, current only as a cross-check on 1-3 |
-| Positions per turn | 4096 per revolution | right for every joint: joints 1 and 2 have a 3:1 belt reduction, but the encoder was moved to the joint shaft, so the servo counts joint positions; the reduction only shows up as 3 times the torque per ampere on those joints |
-| P gain, K | default 640, K about 15 N.m/rad | manual defaults 800 (XM), 700 (XC), 400 (XL); configured 600-2000; K is measured per joint, not computed |
-| Integral term | the position loop has no integral term | the I gain register exists and is configured 0 |
-| Spring coupling | joint 2 only, then corrected to joints 2 and 3 | joints 2 and 3 is right: the spring runs from the servo 2 housing to the servo 3 housing, which is part of the upper arm (servo 3 is mounted reversed) |
-| Torque constant | 1.0-1.3, then 1.8 N.m/A | 1.78 XM430, 2.41 XM540, 0.35 XL330 from the stall specs; XC430 has no current reading |
-| Settings | set the latency timer, use sync read/write and a `perf_counter` loop, 4 Mbps, `chrt` | the first three were done in the rework; 4 Mbps saves ~0.35 ms per bus read, a lower return delay 1.5-2 ms; Windows, no `chrt` or `ttyUSB0` |
-| Tooling | Pinocchio regressor from the URDF | not installed, the URDF masses are placeholders; the closed form regressor above with numpy |
-| Prior work | none mentioned | the 2021 compensation, its data and its scripts (What already exists) |
 
 ## Open items
 
