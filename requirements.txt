@@ -1,8 +1,31 @@
+# the versions in the venv the tests and the pre-commit hook run in, python 3.12
 # dependencies of the dynamixel robot controller
 dynamixel-sdk==4.1.0
+pyserial==3.5
+PyYAML==6.0.1
 # builds the urdf of the simulated robot from fred.xacro (src/simulation/build_urdf.py)
 xacro==2.1.1
+# kinematics, movement planning and the simulation
+numpy==1.26.4
+scipy==1.13.1
+numba==0.59.1
+pybullet==3.2.6
+matplotlib==3.8.4
+# camera
+opencv-python==4.9.0.80
+# web server, xbox controller and saved moves
+Flask==3.0.3
+Flask-Cors==4.0.1
+Flask-CDN==1.5.3
+inputs==0.5
+jsonpickle==3.0.4
+# reinforcement learning; incomplete, it also needs tf-agents, tensorflow-probability and gin-config (see
+# Sacrequirements.txt for the docker image), which aren't installed, so that code doesn't run yet
+tensorflow==2.19.0
+absl-py==2.1.0
+hilbertcurve==1.0.3
 # the type check of the pre-commit hook (.githooks/pre-commit, mypy.ini)
 mypy==2.4.0
 types-PyYAML==6.0.12.20260906
 types-pyserial==3.5.0.20260712
+# not installed, only used by old scripts: keyboard (calibration/gravity_compensation.py), imageio, Arduino
