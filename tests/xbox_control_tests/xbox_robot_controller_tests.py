@@ -1,12 +1,14 @@
 import threading
 import time
 import unittest
+from copy import copy
 from unittest import mock
 
 import numpy as np
 from numpy import pi
 
-from src.kinematics.kinematics import inverse_kinematics, forward_kinematics
+from src import global_constants
+from src.kinematics.kinematics import inverse_kinematics, forward_kinematics, forward_position_kinematics
 from src.kinematics.kinematics_utils import Pose, RobotConfig
 from src.utils import movement, workspace
 from src.utils.movement import SplineMovement, PoseToPoseMovement
@@ -105,6 +107,10 @@ class FakeRobot:
         self.blocked_gripper_state = None
         self.moving_threads = set()
         self.calls = []
+        self.poses = []  # the poses of move_to_pose
+        self.sent_angles = []  # the angles of move_servos
+        self.angle_limits = angle_limits
+        self.physics_client = 3
         # optional function called before every step of a straight line movement
         self.on_move_servos = None
 
@@ -112,7 +118,7 @@ class FakeRobot:
         return None if self.angles is None else self.angles.copy()
 
     def get_angle_limits(self):
-        return angle_limits
+        return self.angle_limits
 
     def pose_to_angles(self, pose):
         return inverse_kinematics(pose, self.robot_config)
@@ -139,9 +145,11 @@ class FakeRobot:
         if self.on_move_servos is not None:
             self.on_move_servos()
         self.angles = np.array(angles, dtype=np.float64)
+        self.sent_angles.append(self.angles.copy())
 
     def move_to_pose(self, pose):
         self.moving_threads.add(threading.current_thread().name)
+        self.poses.append(copy(pose))
         return 0, 0
 
     def set_gripper(self, new_gripper_state):
@@ -349,14 +357,53 @@ class GripperTests(unittest.TestCase):
 
 class ButtonTests(unittest.TestCase):
 
-    def test_only_the_first_pressed_button_is_handled(self):
+    def test_every_pressed_button_is_handled(self):
         robot = FakeRobot()
-        controller = make_controller(robot, buttons=lambda: Buttons(rb=True, a=True))
+        controller = make_controller(robot, buttons=lambda: Buttons(rb=True, a=True, y=True))
         controller.current_pose = Pose(30, 22, 4)
+        controller.pose_updater.maximum_speed = 20
 
         controller.handle_buttons()
 
         self.assertEqual([1], robot.gripper_calls)
+        self.assertTrue(controller.current_pose.flip)
+        self.assertEqual(1, len(controller.recorded_positions))
+
+    def test_buttons_are_handled_in_the_order_of_the_actions(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(pad_down=True, a=True, rb=True, start=True))
+        order = []
+        for button in controller._button_actions:
+            controller._button_actions[button] = lambda button=button: order.append(button)
+
+        controller.handle_buttons()
+
+        self.assertEqual(['start', 'rb', 'a', 'pad_down'], order)
+
+    def test_presses_are_not_lost_while_a_bumper_is_held(self):
+        # like the gamepad: the bumper stays pressed, a momentary button is reported once
+        robot = FakeRobot()
+        pressed = [Buttons(rb=True), Buttons(rb=True, a=True), Buttons(rb=True), Buttons(rb=True, pad_up=True)]
+        controller = make_controller(robot, buttons=lambda: pressed.pop(0))
+        controller.current_pose = Pose(30, 22, 4)
+        controller.pose_updater.maximum_speed = 20
+
+        for _ in range(4):
+            controller.handle_buttons()
+
+        self.assertEqual([1, 2, 3, 4], robot.gripper_calls)  # the held bumper closes the gripper every read
+        self.assertTrue(controller.current_pose.flip)
+        self.assertEqual(25, controller.pose_updater.maximum_speed)
+
+    def test_buttons_are_not_handled_after_the_robot_is_stopped(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(start=True, b=True, a=True))
+        controller.current_pose = Pose(30, 22, 4)
+        controller.recorded_moves = [mock.Mock()]
+
+        with mock.patch.object(controller, 'playback_recorded_moves',
+                               side_effect=lambda moves: controller._stop_requested.set() or controller.current_pose),                 mock.patch.object(xbox_robot_controller, 'reset_orientation') as reset:
+            controller.handle_buttons()
+
+        reset.assert_not_called()
         self.assertFalse(controller.current_pose.flip)
 
     def test_a_toggles_the_flip(self):
@@ -610,6 +657,52 @@ class MoreButtonTests(unittest.TestCase):
         self.assertEqual([Pose(30, 22, 4)], controller.recorded_positions)
         self.assertIsNone(controller.center)
 
+    def test_a_pose_with_another_flip_than_the_first_is_not_recorded(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(y=True))
+        controller.current_pose = Pose(30, 22, 4)
+        controller.handle_buttons()
+
+        controller.current_pose = Pose(25, 20, 4, flip=True)
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller.handle_buttons()
+        self.assertEqual([Pose(30, 22, 4)], controller.recorded_positions)
+
+        controller.current_pose = Pose(25, 20, 4)
+        controller.handle_buttons()
+        self.assertEqual([Pose(30, 22, 4), Pose(25, 20, 4)], controller.recorded_positions)
+
+    def test_the_flip_of_the_first_recorded_move_holds_for_the_next_moves(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(y=True))
+        controller.recorded_moves = [PoseToPoseMovement([Pose(30, 22, 4, flip=True), Pose(25, 20, 4, flip=True)], 2)]
+
+        controller.current_pose = Pose(20, 20, 4)
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller.handle_buttons()
+        self.assertEqual([], controller.recorded_positions)
+
+        controller.current_pose = Pose(20, 20, 4, flip=True)
+        controller.handle_buttons()
+        self.assertEqual([Pose(20, 20, 4, flip=True)], controller.recorded_positions)
+
+    def test_after_clearing_the_recording_any_flip_can_start_a_new_one(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(y=True))
+        controller.current_pose = Pose(30, 22, 4)
+        controller.handle_buttons()
+        controller.clear_recorded_moves_and_positions()
+
+        controller.current_pose = Pose(25, 20, 4, flip=True)
+        controller.handle_buttons()
+        self.assertEqual([Pose(25, 20, 4, flip=True)], controller.recorded_positions)
+
+    def test_the_poses_of_find_center_mode_may_have_any_flip(self):
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(y=True))
+        controller.recorded_moves = [PoseToPoseMovement([Pose(30, 22, 4), Pose(25, 20, 4)], 2)]
+        controller.find_center_mode = True
+
+        controller.current_pose = Pose(-10, 20, 4, flip=True)
+        controller.handle_buttons()
+        self.assertEqual([Pose(-10, 20, 4, flip=True)], controller.recorded_positions)
+
     def test_y_twice_in_find_center_mode_sets_the_center(self):
         controller = make_controller(FakeRobot(), buttons=lambda: Buttons(y=True))
         controller.find_center_mode = True
@@ -791,3 +884,386 @@ class MorePlaybackTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'playback failed'):
             controller.playback_recorded_moves(moves)
+
+
+def pose_of_angles(angles, flip=None):
+    """the pose of the angles, with the flip the gamepad keeps (the one of the pose it started from)"""
+    pose = forward_kinematics(np.asarray(angles), test_config)
+    if flip is not None:
+        pose.flip = flip
+    return pose
+
+
+def angles_pointing(t, eps):
+    """the angles with the gripper pointing along (eps, t, 1) in the wrist, at eps 0 the path over t goes through the
+    straight wrist; joints 4 and 6 stay around +-pi/2, away from the ends of their ranges"""
+    direction = np.array([eps, t, 1.0]) / np.linalg.norm([eps, t, 1.0])
+    angles = wrist_angles(np.arccos(direction[2]))
+    angles[4] = np.arctan2(direction[1], direction[0])
+    angles[6] = -angles[4]
+    return angles
+
+
+def tip_of(angles):
+    return forward_position_kinematics(angles, test_config)[-1]
+
+
+def largest_change(angles, other_angles):
+    return np.abs(np.asarray(angles)[1:] - np.asarray(other_angles)[1:]).max()
+
+
+def wrist_angles(q5):
+    """angles with the wrist at q5 radians from straight, the rest of the arm is the same"""
+    angles = inverse_kinematics(Pose(25, 25, 10), test_config)
+    angles[5] = q5
+    return angles
+
+
+class StickStepTests(unittest.TestCase):
+    """every step of the sticks is checked before it is taken: wrist flip, reachability, ranges and joint speed"""
+
+    def controller_at(self, pose, robot=None):
+        robot = robot or FakeRobot()
+        controller = make_controller(robot)
+        controller.current_pose = pose
+        return controller
+
+    def test_a_safe_step_is_taken(self):
+        controller = self.controller_at(Pose(30, 22, 4))
+
+        controller._take_step(Pose(30.05, 22, 4), 0.01)
+
+        self.assertEqual(30.05, controller.current_pose.x)
+        self.assertFalse(controller.current_pose.flip)
+
+    def test_passing_a_straight_wrist_keeps_the_flip_and_turns_the_wrist_over_slowly(self):
+        controller = self.controller_at(pose_of_angles(wrist_angles(0.03)))
+        self.assertFalse(controller.current_pose.flip)
+        sent_angles = [controller._step_angles()]
+
+        # the sticks move the wrist from 0.03 to -0.03 rad, then hold there
+        targets = [pose_of_angles(wrist_angles(q5), flip=False) for q5 in (0.02, 0.01, 0.005, -0.005, -0.01, -0.02)]
+        targets += [pose_of_angles(wrist_angles(-0.03), flip=False)] * 150
+        for target in targets:
+            controller._take_step(copy(target), 0.01)
+            sent_angles.append(controller._step_angles())
+            self.assertFalse(controller.current_pose.flip, 'only the a button changes the flip')
+            self.assertFalse(controller._step_skipped)
+
+        for angles, next_angles in zip(sent_angles, sent_angles[1:]):
+            self.assertLessEqual(largest_change(angles, next_angles),
+                                 global_constants.recommended_max_servo_speed * 0.01)
+        # with the same flip the wrist turned over: joints 4 and 6 by pi, at the joint speed limit
+        expected = inverse_kinematics(pose_of_angles(wrist_angles(-0.03), flip=False), test_config)
+        np.testing.assert_allclose(expected, sent_angles[-1], atol=1e-6)
+        self.assertAlmostEqual(pi, abs(sent_angles[-1][4] - sent_angles[0][4]), places=2)
+
+    def test_keeping_the_flip_would_spin_joints_4_and_6(self):
+        # the situation of the test above: the same pose with the flip kept turns them by pi
+        before = wrist_angles(0.005)
+        after = inverse_kinematics(pose_of_angles(wrist_angles(-0.005), flip=False), test_config)
+        self.assertGreater(abs(after[4] - before[4]), 3)
+        self.assertGreater(abs(after[6] - before[6]), 3)
+
+    def test_the_a_button_turns_the_wrist_over_at_the_joint_speed_limit(self):
+        # high enough above the table for the gripper to swing through the straight wrist
+        controller = self.controller_at(Pose(30, 22, 15))
+        before = controller._step_angles()
+
+        controller._toggle_flip()
+        sent_angles = [before]
+        for _ in range(150):
+            # the sticks are released, the gamepad asks for the current pose
+            controller._take_step(copy(controller.current_pose), 0.01)
+            sent_angles.append(controller._step_angles())
+            self.assertTrue(controller.current_pose.flip)
+            self.assertFalse(controller._step_skipped)
+
+        for angles, next_angles in zip(sent_angles, sent_angles[1:]):
+            self.assertLessEqual(largest_change(angles, next_angles),
+                                 global_constants.recommended_max_servo_speed * 0.01)
+        # the wrist took many steps to turn over, and ended on the flipped solution of the same pose
+        self.assertGreater(sum(largest_change(a, b) > 1e-9 for a, b in zip(sent_angles, sent_angles[1:])), 50)
+        np.testing.assert_allclose(inverse_kinematics(Pose(30, 22, 15, flip=True), test_config), sent_angles[-1],
+                                   atol=1e-6)
+
+    def test_a_flip_that_would_swing_below_the_floor_holds_and_the_a_button_turns_it_back(self):
+        # 4cm above the table the gripper would swing through the floor of the workspace on the way
+        controller = self.controller_at(Pose(30, 22, 4))
+        before = controller._step_angles().copy()
+
+        controller._toggle_flip()
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            for _ in range(150):
+                controller._take_step(copy(controller.current_pose), 0.01)
+        self.assertTrue(controller._step_skipped)
+        self.assertIn('minimum height', logs.output[0])
+        self.assertGreater(largest_change(before, controller._step_angles()), 0.5)
+
+        controller._toggle_flip()
+        for _ in range(150):
+            controller._take_step(copy(controller.current_pose), 0.01)
+        self.assertFalse(controller._step_skipped)
+        np.testing.assert_allclose(before, controller._step_angles(), atol=1e-6)
+
+    def test_a_wrist_joint_at_the_end_of_its_range_holds_instead_of_turning_all_the_way_round(self):
+        # joint 6 just inside -pi, the sticks ask for a little further: the inverse kinematics gives almost +pi
+        angles = wrist_angles(0.3)
+        angles[6] = -pi + 0.01
+        controller = self.controller_at(pose_of_angles(angles))
+        further = angles.copy()
+        further[6] = -pi - 0.01
+
+        for _ in range(5):
+            with self.assertLogs(xbox_robot_controller.logger, 'DEBUG'):
+                controller._take_step(pose_of_angles(further, flip=False), 0.01)
+            self.assertTrue(controller._step_skipped)
+            np.testing.assert_allclose(angles, controller._step_angles(), atol=1e-9)
+
+    def test_the_orientation_of_the_new_pose_is_kept(self):
+        controller = self.controller_at(Pose(30, 22, 4, alpha=0.1, gamma=0.2))
+
+        controller._take_step(Pose(30.05, 22, 4, alpha=0.11, gamma=0.2), 0.01)
+
+        self.assertEqual(0.11, controller.current_pose.alpha)
+        self.assertEqual(0.2, controller.current_pose.gamma)
+
+    def test_an_unreachable_position_is_not_taken(self):
+        robot = FakeRobot()
+        # nothing else may refuse the step
+        robot.workspace_limits = None
+        robot.angle_limits = None
+        controller = self.controller_at(Pose(0, 52.9, 4), robot)
+        pose = controller.current_pose
+
+        # the inverse kinematics gives the stretched arm for this, which ends short of the target
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller._take_step(Pose(0, 54, 4), 0.1)
+
+        self.assertIs(pose, controller.current_pose)
+        self.assertIn('can not be reached', logs.output[0])
+
+        # a position that is reachable is taken
+        controller._take_step(Pose(0, 52.5, 4), 0.1)
+        self.assertEqual(52.5, controller.current_pose.y)
+
+    def test_a_step_outside_the_workspace_limits_is_not_taken(self):
+        robot = FakeRobot()
+        robot.workspace_limits = type('Limits', (), dict(radius_min=10, radius_max=37.45, y_min=12, z_min=-5,
+                                                         wrist_z_min=-5))
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        pose = controller.current_pose
+
+        # the limit is 37.45cm from the base, the new poses are 37.48 and 37.54cm away
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller._take_step(Pose(30.05, 22.05, 4), 0.01)
+            controller._take_step(Pose(30.1, 22.1, 4), 0.01)
+
+        self.assertIs(pose, controller.current_pose)
+        self.assertIn('base', logs.output[0])
+
+        # moving back inside is possible
+        controller._take_step(Pose(29.95, 21.95, 4), 0.01)
+        self.assertEqual(29.95, controller.current_pose.x)
+
+    def test_a_step_outside_the_range_of_a_servo_is_not_taken(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        new_pose = Pose(30, 22.1, 4)
+        old_q2 = robot.pose_to_angles(controller.current_pose)[2]
+        new_q2 = robot.pose_to_angles(new_pose)[2]
+        middle = (old_q2 + new_q2) / 2
+        robot.angle_limits = {**angle_limits, 2: (-1.0, middle) if new_q2 > old_q2 else (middle, 3.0)}
+        pose = controller.current_pose
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller._take_step(new_pose, 0.1)
+
+        self.assertIs(pose, controller.current_pose)
+        self.assertIn('joint 2', logs.output[0])
+
+        # the same step is fine when the range of the robot is not known
+        robot.angle_limits = None
+        controller._take_step(new_pose, 0.1)
+        self.assertEqual(22.1, controller.current_pose.y)
+
+    def test_a_too_fast_step_is_slowed_down_to_the_maximum_joint_speed(self):
+        controller = self.controller_at(Pose(30, 22, 4))
+        before = controller._step_angles()
+
+        # 4cm in a single step of 10ms is far too fast for the joints: the pose is commanded, the arm goes part of the
+        # way there
+        controller._take_step(Pose(34, 22, 4), 0.01)
+
+        self.assertFalse(controller._step_skipped)
+        self.assertEqual(34, controller.current_pose.x)
+        after = controller._step_angles()
+        self.assertLessEqual(largest_change(before, after), global_constants.recommended_max_servo_speed * 0.01)
+        self.assertGreater(tip_of(after)[0], 30)
+        self.assertLess(tip_of(after)[0], 34)
+
+    def test_the_gamepad_waits_until_the_arm_reached_the_commanded_pose(self):
+        controller = self.controller_at(Pose(30, 22, 4))
+        controller._take_step(Pose(34, 22, 4), 0.01)
+
+        # the gamepad asks for something else, the arm first goes on to 34
+        for _ in range(100):
+            controller._take_step(Pose(30, 25, 4), 0.01)
+            if np.allclose(tip_of(controller._step_angles()), [34, 22, 4], atol=1e-6):
+                break
+        self.assertEqual(34, controller.current_pose.x)
+        np.testing.assert_allclose([34, 22, 4], tip_of(controller._step_angles()), atol=1e-6)
+
+        # and then follows the gamepad again
+        controller._take_step(Pose(34.05, 22, 4), 0.01)
+        self.assertEqual(34.05, controller.current_pose.x)
+
+    def test_the_slow_down_uses_the_time_of_the_step(self):
+        quick = self.controller_at(Pose(30, 22, 4))
+        quick._take_step(Pose(31, 22, 4), 0.01)
+        self.assertGreater(tip_of(quick._step_angles())[0], 30)
+        self.assertLess(tip_of(quick._step_angles())[0], 31)
+
+        # the same step is slow enough when the loop took longer
+        longer = self.controller_at(Pose(30, 22, 4))
+        longer._take_step(Pose(31, 22, 4), 0.1)
+        np.testing.assert_allclose([31, 22, 4], tip_of(longer._step_angles()), atol=1e-6)
+
+    def test_the_arm_moves_slowly_through_the_singularity_instead_of_stopping(self):
+        # the gripper points along (eps, t, 1) in the wrist; the path passes eps from the straight wrist, where joints
+        # 4 and 6 have to turn by pi for a small turn of the gripper
+        for eps in (0.0, 0.02):
+            with self.subTest(eps=eps):
+                path = [pose_of_angles(angles_pointing(t, eps)) for t in np.linspace(-0.3, 0.3, 601)]
+                orientations = np.array([pose.get_euler_matrix().ravel() for pose in path])
+                controller = self.controller_at(path[0])
+
+                def nearest(pose):
+                    return np.linalg.norm(orientations - pose.get_euler_matrix().ravel(), axis=1).argmin()
+
+                for _ in range(500):
+                    if nearest(forward_kinematics(controller._step_angles(), test_config)) == len(path) - 1:
+                        break
+                    # like the gamepad at full speed, 0.5 rad/s: a step ahead of the commanded pose
+                    target = copy(path[min(nearest(controller.current_pose) + 5, len(path) - 1)])
+                    target.flip = controller.current_pose.flip
+                    before = controller._step_angles()
+                    controller._take_step(target, 0.01)
+                    self.assertFalse(controller._step_skipped)
+                    self.assertFalse(controller.current_pose.flip, 'only the a button changes the flip')
+                    self.assertLessEqual(largest_change(before, controller._step_angles()),
+                                         global_constants.recommended_max_servo_speed * 0.01)
+                arrived = nearest(forward_kinematics(controller._step_angles(), test_config))
+                self.assertEqual(len(path) - 1, arrived, 'the arm did not get through the singularity')
+
+    def test_a_skipped_step_warns_once_until_a_step_is_taken(self):
+        controller = self.controller_at(Pose(30, 22, 4))
+        unreachable = Pose(100, 22, 4)
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            for _ in range(5):
+                controller._take_step(unreachable, 0.01)
+        self.assertEqual(1, len(logs.records))
+
+        controller._take_step(Pose(30.05, 22, 4), 0.01)
+        self.assertFalse(controller._step_skipped)
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller._take_step(unreachable, 0.01)
+        self.assertEqual(1, len(logs.records))
+
+    def test_the_control_loop_only_sends_safe_poses(self):
+        robot = FakeRobot()
+        controller = make_controller(robot)
+        calls = []
+
+        def stick(pose, find_center_mode, center, dt=None):
+            calls.append(pose)
+            # every other call asks for a jump of 10cm, the rest for steps of 0.01cm
+            if len(calls) % 2 == 0:
+                return Pose(pose.x + 10, pose.y, pose.z, flip=pose.flip)
+            return Pose(pose.x + 0.01, pose.y, pose.z, flip=pose.flip)
+
+        controller.pose_updater.get_updated_pose_from_controller.side_effect = stick
+        with mock.patch.object(movement, 'sleep'), self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            self.assertTrue(controller.start())
+            wait_for(lambda: len(calls) > 20)
+            controller.stop()
+
+        # what the control loop sent from the start pose on
+        positions = [forward_position_kinematics(angles, test_config)[-1] for angles in robot.sent_angles]
+        start = next(i for i, position in enumerate(positions) if np.allclose(position, [30, 22, 4], atol=1e-3))
+        positions = positions[start:]
+        self.assertGreater(len(positions), 20)
+        self.assertLess(max(position[0] for position in positions), 31.5)
+        for position, next_position in zip(positions, positions[1:]):
+            self.assertLess(abs(next_position[0] - position[0]), 0.5)
+
+
+class ScenarioTests(unittest.TestCase):
+
+    def controller_with_scenarios(self, count=3):
+        controller = make_controller(FakeRobot())
+        controller.scenarios = [mock.Mock() for _ in range(count)]
+        return controller
+
+    def test_a_scenario_is_built_and_the_previous_one_destroyed(self):
+        controller = self.controller_with_scenarios()
+
+        self.assertTrue(controller.set_scenario(2))
+        controller.scenarios[2].build_scenario.assert_called_once_with(3)
+        self.assertEqual(2, controller.current_scenario_id)
+
+        self.assertTrue(controller.set_scenario(0))
+        controller.scenarios[2].destroy_scenario.assert_called_once_with(3)
+        controller.scenarios[0].build_scenario.assert_called_once_with(3)
+        self.assertEqual(0, controller.current_scenario_id)
+
+    def test_ids_outside_of_the_scenarios_are_rejected_and_change_nothing(self):
+        controller = self.controller_with_scenarios()
+        self.assertTrue(controller.set_scenario(1))
+
+        for scenario_id in (-1, 3, 4, 1000):
+            self.assertFalse(controller.set_scenario(scenario_id), scenario_id)
+
+        self.assertEqual(1, controller.current_scenario_id)
+        for scenario in controller.scenarios:
+            scenario.destroy_scenario.assert_not_called()
+        # a valid id still works afterwards
+        self.assertTrue(controller.set_scenario(2))
+
+    def test_the_real_scenarios_reject_their_count(self):
+        controller = make_controller(FakeRobot())
+        self.assertFalse(controller.set_scenario(len(controller.scenarios)))
+        self.assertIsNone(controller.current_scenario_id)
+
+    def test_a_scenario_that_fails_to_build_is_not_the_current_one(self):
+        controller = self.controller_with_scenarios()
+        controller.scenarios[1].build_scenario.side_effect = RuntimeError('pybullet')
+
+        with self.assertRaises(RuntimeError):
+            controller.set_scenario(1)
+
+        self.assertIsNone(controller.current_scenario_id)
+        # the next call does not try to destroy the scenario that was never built
+        self.assertTrue(controller.set_scenario(0))
+        controller.scenarios[1].destroy_scenario.assert_not_called()
+
+
+class RestartTests(unittest.TestCase):
+
+    def test_the_gripper_opens_again_after_a_restart(self):
+        robot = FakeRobot()
+        controller = make_controller(robot)
+        with mock.patch.object(movement, 'sleep'):
+            self.assertTrue(controller.start())
+            wait_for(lambda: robot.gripper_calls)
+            controller.gripper_state = 60  # closed during the run
+            self.assertTrue(controller.stop())
+
+            robot.gripper_calls.clear()
+            self.assertTrue(controller.start())
+            wait_for(lambda: robot.gripper_calls)
+            controller.stop()
+
+        self.assertEqual([0], robot.gripper_calls)
+        self.assertEqual(0, controller.gripper_state)

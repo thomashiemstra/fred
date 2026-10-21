@@ -16,6 +16,25 @@ except ImportError:
 
 xbox_api = Blueprint('xbox_api', __name__)
 
+# the range of the maximum speed of the end effector in cm/s, the one the d-pad changes it in
+MINIMUM_SPEED = 5
+MAXIMUM_SPEED = 50
+
+
+class InvalidRequest(Exception):
+    """the request is wrong, the answer is the message with status 400 (or the given status)"""
+
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+@xbox_api.errorhandler(InvalidRequest)
+def handle_invalid_request(error: InvalidRequest) -> tuple[Response, int]:
+    return jsonify(success=False, error=error.message), error.status
+
+
 
 @xbox_api.route('/test', methods=['GET'])
 def test() -> Response:
@@ -56,23 +75,25 @@ def clear_center() -> Response:
 
 @xbox_api.route('/saveToFile', methods=['POST'])
 def save_to_file() -> Response:
-    filename = get_filename()
-    if filename is None:
-        return jsonify(success=False)
-
+    name = get_filename()
     xbox_robot_controller = global_objects.get_xbox_robot_controller()
-    success = xbox_robot_controller.save_recorded_moves_to_file(filename)
+    try:
+        success = xbox_robot_controller.save_recorded_moves_to_file(name)
+    except ValueError as e:
+        raise InvalidRequest(str(e)) from e
     return jsonify(success=success)
 
 
 @xbox_api.route('/restoreFromFile', methods=['POST'])
 def play_from_file() -> Response:
-    filename = get_filename()
-    if filename is None:
-        return jsonify(success=False)
-
+    name = get_filename()
     xbox_robot_controller = global_objects.get_xbox_robot_controller()
-    xbox_robot_controller.restore_recorded_moves_from_file(filename)
+    try:
+        xbox_robot_controller.restore_recorded_moves_from_file(name)
+    except FileNotFoundError as e:
+        raise InvalidRequest('no recorded moves with this name', 404) from e
+    except ValueError as e:
+        raise InvalidRequest(str(e)) from e
     resp = jsonify(success=True)
     return resp
 
@@ -87,12 +108,9 @@ def clear_all() -> Response:
 
 @xbox_api.route('/setSpeed', methods=['POST'])
 def set_speed() -> Response:
-    raw_speed = get_parameter('speed')
-    if raw_speed is None:
-        return jsonify(success=False)
-    speed = int(raw_speed)
-    if speed < 0 or speed > 50:
-        return jsonify(success=False)
+    speed = get_int_parameter('speed')
+    if speed < MINIMUM_SPEED or speed > MAXIMUM_SPEED:
+        raise InvalidRequest('speed should be between {} and {}'.format(MINIMUM_SPEED, MAXIMUM_SPEED))
     xbox_robot_controller = global_objects.get_xbox_robot_controller()
     xbox_robot_controller.set_maximum_speed(speed)
     return jsonify(success=True)
@@ -100,22 +118,17 @@ def set_speed() -> Response:
 
 @xbox_api.route('/setScenarioId', methods=['POST'])
 def set_scenario() -> Response:
-    scenario_id = get_parameter('scenario_id')
-    if scenario_id is None:
-        return jsonify(success=False)
+    scenario_id = get_int_parameter('scenario_id')
     xbox_robot_controller = global_objects.get_xbox_robot_controller()
-    success = xbox_robot_controller.set_scenario(int(scenario_id))
+    success = xbox_robot_controller.set_scenario(scenario_id)
     return jsonify(success=success)
 
 
 @xbox_api.route('/speed', methods=['POST'])
 def speed() -> Response:
-    raw_percentage = get_parameter("percentage")
-    if raw_percentage is None:
-        return jsonify(success=False)
-    percentage = int(raw_percentage)
+    percentage = get_int_parameter('percentage')
     if not (0 < percentage <= 100):
-        return jsonify(success=False)
+        raise InvalidRequest('percentage should be between 1 and 100')
 
     xbox_robot_controller = global_objects.get_xbox_robot_controller()
     xbox_robot_controller.set_profile_velocity_percentage(percentage)
@@ -127,15 +140,30 @@ def speed() -> Response:
 #     return Response(get_image(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-def get_filename() -> str | None:
-    try:
-        return request.get_json()['filename'] + '.json'
-    except KeyError:
-        return None
+def get_filename() -> str:
+    """the name of the recorded moves, the controller decides whether it is allowed"""
+    name = get_parameter('filename')
+    if not isinstance(name, str):
+        raise InvalidRequest('filename should be a string')
+    return name
 
 
 def get_parameter(param_name: str) -> Any:
+    """:raises InvalidRequest: if the body is not a json object or doesn't have the parameter"""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise InvalidRequest('the body should be a json object')
+    if param_name not in body:
+        raise InvalidRequest('{} is missing'.format(param_name))
+    return body[param_name]
+
+
+def get_int_parameter(param_name: str) -> int:
+    """a whole number, or a string of one (the forms of the ui send strings)"""
+    value = get_parameter(param_name)
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise InvalidRequest('{} should be a whole number'.format(param_name))
     try:
-        return request.get_json()[param_name]
-    except KeyError:
-        return None
+        return int(value)
+    except ValueError as e:
+        raise InvalidRequest('{} should be a whole number'.format(param_name)) from e

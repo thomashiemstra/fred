@@ -2,22 +2,29 @@ from __future__ import division, annotations
 
 import json
 import logging
+import math
 import queue
+import re
 import threading
 from copy import copy
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import jsonpickle
 import numpy as np
 from src.reinforcementlearning.environment.scenario import medium_scenarios
 
-from src.kinematics.kinematics import forward_kinematics
+import src.global_constants
+from src.kinematics.kinematics import forward_kinematics, forward_position_kinematics
 from src.kinematics.kinematics_utils import Pose
-from src.utils.movement import plan_move_to_pose, execute_move, check_move, move_between_poses
+from src.utils.movement import plan_move_to_pose, execute_move, check_move, move_between_poses, PlannedMove
+from src.utils.movement import MAX_POSITION_ERROR, Movement
 from src.utils.decorators import synchronized_with_lock
 from src.utils.linalg_utils import get_center
 from src.utils.movement import PoseToPoseMovement, SplineMovement
 from src.utils.movement_exception import MovementException
+from src.utils.os_utils import get_project_root
+from src.xbox_control.xbox360controller.xbox_pose_updater import MAX_STEP_TIME
 from time import sleep, perf_counter
 
 if TYPE_CHECKING:
@@ -27,7 +34,6 @@ if TYPE_CHECKING:
     from src.robot_controllers.abstract_robot_controller import AbstractRobotController
     from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
     from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
-    from src.utils.movement import Movement, PlannedMove
     from src.xbox_control.xbox360controller.xbox_pose_updater import XboxPoseUpdater
 
 logger = logging.getLogger(__name__)
@@ -44,6 +50,11 @@ GRIPPER_STEP = 1
 # object, at most with the goal current of the servo. 25 states is 256 positions, which is about 500mA, so the goal
 # current of the gripper (400mA) limits the squeeze
 GRIPPER_MAX_LEAD = 25
+# a stick step that is too fast is slowed down to this fraction of recommended_max_servo_speed, below the speed check
+SLOW_DOWN_MARGIN = 0.95
+# recorded moves are saved to and restored from this directory, next to src, by a name of letters, digits, - and _
+RECORDED_MOVES_DIR = get_project_root().parent / 'recorded_moves'
+RECORDED_MOVES_NAME = re.compile(r'[A-Za-z0-9_-]{1,100}')
 
 
 class XboxRobotController:
@@ -70,7 +81,9 @@ class XboxRobotController:
         self._commands: queue.Queue[Callable[[], None]] = queue.Queue()
         self._crashed = False
         self._start_move: PlannedMove | None = None
-        self._outside_workspace = False  # the gamepad asks for a pose outside the workspace, the robot holds
+        self._step_skipped = False  # the gamepad asks for a step that fails a check, the robot holds
+        # the pose and the angles of the last step of the sticks, the angles the control loop sends
+        self._step: tuple[Pose, np.ndarray] | None = None
         self.recorded_positions: list[Pose] = []
         self.current_pose: Pose = None  # type: ignore[assignment]  # set by start before the control loop uses it
         self.thread: threading.Thread | None = None
@@ -84,7 +97,7 @@ class XboxRobotController:
         self.current_scenario_id: int | None = None
         # dependency inject?
         self.scenarios = medium_scenarios
-        # the action of each button, when multiple buttons are pressed only the first one in this order is handled
+        # the action of each button, the pressed buttons of a read are all handled, in this order
         self._button_actions = {
             'start': self._play_back,
             'lb': self._decrease_gripper_state,
@@ -144,6 +157,8 @@ class XboxRobotController:
 
             self._stop_requested.clear()
             self._crashed = False
+            # the gripper opens after the start move, whatever the target was when the previous run stopped
+            self.gripper_state = 0
             self._clear_commands()
             self._start_move = start_move
             # the wrist keeps its flip, so this is the start pose with the flip of the robot
@@ -226,11 +241,12 @@ class XboxRobotController:
 
             # the step covers the time that really passed, so the speeds of the sticks hold at any loop pace
             now = perf_counter()
+            step_time = now - previous_step_time
             new_pose = self.pose_updater.get_updated_pose_from_controller(self.current_pose, self.find_center_mode,
-                                                                          self.center, dt=now - previous_step_time)
+                                                                          self.center, dt=step_time)
             previous_step_time = now
-            self._update_pose_within_the_workspace(new_pose)
-            recommended_time, time_taken = self.robot.move_to_pose(self.current_pose)
+            self._take_step(new_pose, step_time)
+            recommended_time, time_taken = self._send_current_pose()
             self.handle_buttons()
 
             time_to_sleep = np.maximum(np.maximum(recommended_time, pose_update_sleep_time) - time_taken, 0)
@@ -238,16 +254,92 @@ class XboxRobotController:
 
         self.stop_robot()
 
-    def _update_pose_within_the_workspace(self, new_pose: Pose) -> None:
-        """the pose the gamepad asks for becomes the current pose when it is inside the workspace limits of the
-        robot, otherwise the robot holds the current pose (logged once)"""
-        violation = self.robot.workspace_violation(self.robot.pose_to_angles(new_pose))
-        if violation is None:
-            self.current_pose = new_pose
-            self._outside_workspace = False
-        elif not self._outside_workspace:
-            logger.warning('holding the pose, the gamepad asks for one outside the workspace: %s', violation)
-            self._outside_workspace = True
+    def _take_step(self, new_pose: Pose, step_time: float) -> None:
+        """
+        the pose the gamepad asks for becomes the current pose when the step to it is safe (see _choose_step),
+        otherwise the robot holds the current pose: logged as a warning when the holding starts, and at debug level
+        while it lasts
+        """
+        try:
+            self.current_pose, angles = self._choose_step(new_pose, step_time)
+        except MovementException as e:
+            if not self._step_skipped:
+                logger.warning('holding the pose, skipping the step the gamepad asks for: %s', e)
+            else:
+                logger.debug('holding the pose, skipping the step the gamepad asks for: %s', e)
+            self._step_skipped = True
+            return
+        self._step = (self.current_pose, angles)
+        self._step_skipped = False
+
+    def _step_angles(self) -> np.ndarray:
+        """the angles the current pose was sent with"""
+        if self._step is not None and self._step[0] is self.current_pose:
+            return self._step[1]
+        # a pose some other part set (a move, a reset) was sent through the inverse kinematics
+        return self.robot.pose_to_angles(self.current_pose)
+
+    def _send_current_pose(self) -> tuple[float, float]:
+        """
+        sends the angles of the last step, which can be between the two wrist solutions while the wrist turns over;
+        they are within the joint speed limit for the time of the step, so there is no extra time to wait for
+        :return: the recommended wait time and the time sending took, in seconds
+        """
+        if self._step is None or self._step[0] is not self.current_pose:
+            return self.robot.move_to_pose(self.current_pose)
+        time_taken = self.robot.move_servos(self._step[1])
+        return 0.0, time_taken or 0.0
+
+    def _choose_step(self, new_pose: Pose, step_time: float) -> tuple[Pose, np.ndarray]:
+        """
+        The pose to command and the angles to send. The pose keeps the flip of the current pose, only the a button
+        changes it. The angles turn towards the angles of the commanded pose at most at recommended_max_servo_speed:
+        while they haven't reached them, the gamepad waits and the pose stays, so the arm finishes the move to the
+        commanded pose first. That makes it slow down near a singularity instead of stopping, and when the wrist has to
+        turn over (a straight wrist passed with the same flip, or the a button) joints 4 and 6 turn by pi at that speed,
+        to the other solution of the same pose. The step is refused when the position can't be reached (the inverse
+        kinematics then gives the stretched arm), or the angles are outside the workspace limits or the ranges of the
+        servos (the checks of check_move).
+        :param step_time: the seconds the step takes
+        :raises MovementException: if the step is not safe
+        """
+        current_angles = self._step_angles()
+        commanded_angles = self._angles_towards(self.current_pose, current_angles)
+        if np.abs(commanded_angles[1:] - current_angles[1:]).max() > 1e-9:
+            # still on the way to the commanded pose, the gamepad waits
+            best_pose, best_angles = self.current_pose, commanded_angles
+        else:
+            best_pose = _with_flip(new_pose, self.current_pose.flip)
+            best_angles = self._angles_towards(best_pose, current_angles)
+
+        # a step that would turn a joint faster than recommended_max_servo_speed goes part of the way, at that speed
+        step_time = min(step_time, MAX_STEP_TIME)
+        max_change = SLOW_DOWN_MARGIN * src.global_constants.recommended_max_servo_speed * step_time
+        change = np.abs(best_angles[1:] - current_angles[1:]).max()
+        if change > max_change:
+            best_angles = current_angles + (max_change / change) * (best_angles - current_angles)
+
+        # check_move checks the joint speeds with the time of the steps of the planners, so the step is split in
+        # steps of that time
+        sub_steps = max(math.ceil(step_time * src.global_constants.steps_per_second), 1)
+        progress = np.linspace(0.0, 1.0, sub_steps + 1)[:, np.newaxis]
+        step_angles = current_angles + progress * (best_angles - current_angles)
+        check_move(PlannedMove('step of the gamepad', step_angles, step_time), self.robot)
+        return best_pose, best_angles
+
+    def _angles_towards(self, pose: Pose, current_angles: np.ndarray) -> np.ndarray:
+        """
+        the angles of the pose, with each angle on the side of the current one
+        :raises MovementException: if the pose can't be reached
+        """
+        ik_angles = self.robot.pose_to_angles(pose)
+        if not np.all(np.isfinite(ik_angles)):
+            raise MovementException('the inverse kinematics gave no angles')
+        unwrapped_angles = unwrap_towards(ik_angles, current_angles)
+        reached = forward_position_kinematics(unwrapped_angles, self.robot.robot_config)[-1]
+        if np.linalg.norm(reached - [pose.x, pose.y, pose.z]) > MAX_POSITION_ERROR:
+            raise MovementException('position {} can not be reached'.format(np.round([pose.x, pose.y, pose.z], 1)))
+        return unwrapped_angles
 
     def __handle_commands(self) -> None:
         while True:
@@ -328,12 +420,16 @@ class XboxRobotController:
             self.gripper_state = new_state
 
     def handle_buttons(self) -> None:
-        """perform the action of the first pressed button, in the order of _button_actions"""
+        """
+        perform the action of every pressed button, in the order of _button_actions. The momentary buttons are reset
+        when they are read, so a press is lost when it isn't handled in this read, like when a bumper is held.
+        """
         buttons = self.pose_updater.controller.get_buttons()
         for button, action in self._button_actions.items():
+            if self.is_done():
+                return
             if getattr(buttons, button):
                 action()
-                return
 
     def _play_back(self) -> None:
         if len(self.recorded_moves) < 1:
@@ -354,9 +450,26 @@ class XboxRobotController:
             logger.warning('can not reset the orientation: %s', e)
 
     def _toggle_flip(self) -> None:
+        # the next steps turn the wrist over at the joint speed limit, starting from the angles it was sent with
+        self._step = (self.current_pose, self._step_angles())
         self.current_pose.flip = not self.current_pose.flip
 
+    def _recording_flip(self) -> bool | None:
+        """the flip of the first pose of the recording, None when nothing is recorded"""
+        if self.recorded_moves:
+            return self.recorded_moves[0].poses[0].flip
+        if self.recorded_positions:
+            return self.recorded_positions[0].flip
+        return None
+
     def _record_position(self) -> None:
+        # a move between differently flipped poses turns joints 4 and 6 by pi, so every pose of a recording keeps the
+        # flip of its first pose; the poses of find center mode only define the center, they never become a move
+        flip = None if self.find_center_mode else self._recording_flip()
+        if flip is not None and self.current_pose.flip != flip:
+            logger.warning('not recording the pose: its flip is %s, the recording started with flip %s; press a to '
+                           'flip back', self.current_pose.flip, flip)
+            return
         self.recorded_positions.append(self.current_pose)
         if self.should_set_center():
             self.set_center()
@@ -412,19 +525,40 @@ class XboxRobotController:
         self.find_center_mode = False
 
     @synchronized_with_lock("lock")
-    def save_recorded_moves_to_file(self, filename: str) -> bool:
+    def save_recorded_moves_to_file(self, name: str) -> bool:
+        """
+        save the recorded moves as RECORDED_MOVES_DIR/name.json
+        :return: False if there is nothing to save
+        :raises ValueError: if the name is not allowed
+        """
+        path = recorded_moves_path(name)
         if len(self.recorded_moves) < 1:
             return False
         json_string = jsonpickle.encode(self.recorded_moves, make_refs=False)
-        with open(filename, 'w') as outfile:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w') as outfile:
             json.dump(json.loads(json_string), outfile, indent=4)
         return True
 
     @synchronized_with_lock("lock")
-    def restore_recorded_moves_from_file(self, filename: str) -> None:
-        with open(filename, 'r') as infile:
+    def restore_recorded_moves_from_file(self, name: str) -> None:
+        """
+        restore the recorded moves from RECORDED_MOVES_DIR/name.json
+        :raises ValueError: if the name is not allowed or the file doesn't hold a list of recorded moves
+        :raises FileNotFoundError: if there is no such file
+        """
+        with open(recorded_moves_path(name), 'r') as infile:
             string = infile.read()
-        moves = jsonpickle.decode(string)
+        try:
+            moves = jsonpickle.decode(string, safe=True)
+        except Exception as e:
+            raise ValueError('the file does not hold recorded moves: {}'.format(e)) from e
+        if not isinstance(moves, list) or not all(isinstance(move, Movement) for move in moves):
+            raise ValueError('the file does not hold a list of recorded moves')
+        for move in moves:
+            poses = getattr(move, 'poses', None)
+            if not isinstance(poses, (list, tuple)) or len(poses) < 2 or                     not all(isinstance(pose, Pose) for pose in poses):
+                raise ValueError('the file does not hold recorded moves of poses')
         self.recorded_moves = moves
 
     @synchronized_with_lock("lock")
@@ -438,17 +572,19 @@ class XboxRobotController:
         self.pose_updater.maximum_speed = new_maximum_speed
 
     @synchronized_with_lock("lock")
-    def set_scenario(self, scneario_id: int) -> bool:
-        if scneario_id < 0 or scneario_id > len(self.scenarios):
+    def set_scenario(self, scenario_id: int) -> bool:
+        if scenario_id < 0 or scenario_id >= len(self.scenarios):
             return False
 
         physics_client = self.robot.physics_client
 
         if self.current_scenario_id is not None:
             self.scenarios[self.current_scenario_id].destroy_scenario(physics_client)
+            self.current_scenario_id = None
 
-        self.current_scenario_id = scneario_id
-        self.scenarios[self.current_scenario_id].build_scenario(physics_client)
+        # only a built scenario is the current one
+        self.scenarios[scenario_id].build_scenario(physics_client)
+        self.current_scenario_id = scenario_id
 
         return True
 
@@ -468,6 +604,34 @@ class XboxRobotController:
             return reached_pose
 
         return recorded_moves[-1].poses[-1]
+
+
+def unwrap_towards(ik_angles: np.ndarray, current_angles: np.ndarray) -> np.ndarray:
+    """
+    The inverse kinematics gives angles from -pi to pi, so a turn of almost 2 pi is the same angle just past the end
+    of the range: this takes that one, the range check then holds the joint at its end instead of turning it all the
+    way round. A turn of about pi is the wrist turning over to the other solution, that one stays.
+    """
+    turn = ik_angles - current_angles
+    unwrapped: np.ndarray = np.where(np.abs(turn) > 1.5 * np.pi, ik_angles - np.sign(turn) * 2 * np.pi, ik_angles)
+    return unwrapped
+
+
+def _with_flip(pose: Pose, flip: bool) -> Pose:
+    """a copy of the pose with the given wrist solution"""
+    result = copy(pose)
+    result.flip = flip
+    return result
+
+
+def recorded_moves_path(name: str) -> Path:
+    """
+    the file of the recorded moves with this name, always in RECORDED_MOVES_DIR
+    :raises ValueError: if the name has anything but letters, digits, - and _
+    """
+    if not isinstance(name, str) or RECORDED_MOVES_NAME.fullmatch(name) is None:
+        raise ValueError('the name should be 1 to 100 letters, digits, - or _')
+    return RECORDED_MOVES_DIR / (name + '.json')
 
 
 def create_move(servo_controller: AbstractRobotController, poses: list[Pose], speed: float,
