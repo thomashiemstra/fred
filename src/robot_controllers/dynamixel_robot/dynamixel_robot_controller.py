@@ -94,7 +94,9 @@ class DynamixelRobotController(AbstractRobotController):
         success = success & self.set_velocity_profile()
         success = success & self.set_pid()
         success = success & self.set_goal_current()
-        # TODO set min and max pos in servo directly
+        # the calibrated range is enforced by clamping every target (Servo.clamp_target_position), not with the position
+        # limits in the eeprom of the servos: the static load compensation is added beyond the range (up to its
+        # max_positions), and a goal the servo rejects is silent in a sync write
         if self.perform_safety_checks and not success:
             raise DynamixelError("failed to setup the dynamixel robot")
 
@@ -135,7 +137,10 @@ class DynamixelRobotController(AbstractRobotController):
         positions = self.get_current_positions()
         if positions is None:
             return False
-        return servo_1_check(positions) and servo_2_check(positions)
+        # both checks run, so both servos are reported when both are out of range
+        servo_1_safe = servo_1_check(positions, self.servo1)
+        servo_2_safe = servo_2_check(positions, self.servo2)
+        return servo_1_safe and servo_2_safe
 
     def disable_servos(self) -> bool:
         """disable the torque of all servos, returns True on success"""

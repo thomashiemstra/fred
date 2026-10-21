@@ -24,9 +24,10 @@ from src.global_objects import get_robot
 from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.utils.movement import plan_move_to_pose, execute_move, check_move
 from src.utils.movement_exception import MovementException
+from src.xbox_control.xbox_robot_controller import XboxRobotController
 
-# all the way to the right, the same start pose as the xbox controller
-START_POSE = Pose(30, 25.0, 5)
+# the start pose of the xbox controller
+START_POSE = XboxRobotController.start_pose
 # the angle of a servo outside of its calibrated range is clamped, the first step would make it jump this far
 MAX_OUTSIDE_CALIBRATED_RANGE = 50  # positions, 4096 positions is a full turn
 

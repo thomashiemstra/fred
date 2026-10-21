@@ -434,6 +434,23 @@ class TestDynamixelRobotController(unittest.TestCase):
             self.assertFalse(self.robot.enable_servos())
         self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
 
+    def test_servos_are_not_enabled_when_servo_1_or_2_is_out_of_range(self):
+        # raw positions that are below the 0 degree line or past the upper limit for the offsets of the test config
+        for servo_id, position in ((1, 0), (1, 3000), (2, 0), (2, 3000)):
+            with self.subTest(servo=servo_id, position=position):
+                self.bus.set_position(servo_id, position)
+                writes = [p for p in self.bus.packets if p[0] == 'sync_write']
+                with mock.patch('builtins.input', side_effect=AssertionError('read from stdin')), \
+                        self.assertLogs('src.utils.robot_controller_utils', 'ERROR') as check_logs, \
+                        self.assertLogs(drc.logger, 'ERROR') as logs:
+                    self.assertFalse(self.robot.enable_servos())
+                self.assertIn('servo {} '.format(servo_id), check_logs.output[0])
+                self.assertIn('failed the safety check', logs.output[0])
+                self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+                # no goal position was written either
+                self.assertEqual(writes, [p for p in self.bus.packets if p[0] == 'sync_write'])
+                self.bus.set_position(servo_id, 2048)
+
     def test_servos_are_not_enabled_when_the_goal_position_can_not_be_set(self):
         with mock.patch.object(self.robot.servo_handler, 'hold_current_position', return_value=False):
             self.assertFalse(self.robot.enable_servos())
