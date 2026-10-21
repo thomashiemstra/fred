@@ -63,8 +63,15 @@ def check_result(packet_handler: Any, servo_id: int, comm_result: int, error: in
 
 
 def to_bytes(value: float, length: int) -> list[int]:
-    """convert a (possibly negative) value to the little endian byte list the servos expect"""
-    return list((int(value) & ((1 << (8 * length)) - 1)).to_bytes(length, 'little'))
+    """
+    convert a (possibly negative) value to the little endian byte list the servos expect
+    :raises ValueError: if the value fits neither as signed nor as unsigned number in this many bytes
+    """
+    bits = 8 * length
+    number = int(value)
+    if not -(1 << (bits - 1)) <= number < 1 << bits:
+        raise ValueError('{} does not fit in {} bytes'.format(value, length))
+    return list((number & ((1 << bits) - 1)).to_bytes(length, 'little'))
 
 
 def to_signed(value: int, length: int) -> int:

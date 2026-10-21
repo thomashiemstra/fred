@@ -278,6 +278,56 @@ class Servo3Test(unittest.TestCase):
         target = servo3.target_position
         self.assertEqual(48, target, "got a wrong target")
 
+
+class DynamicOffsetLookupTest(unittest.TestCase):
+    """the angles are looked up in tables with keys in units of pi, an angle between keys takes the nearest key"""
+
+    def servo2_target(self, offsets, angle2, angle3=0.0):
+        servo2 = Servo2(0, 100, -pi, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offsets)
+        servo2.set_target_position_from_angle(0.0, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+        return servo2.target_position
+
+    def servo3_target(self, offsets, angle2, angle3):
+        servo3 = Servo3(0, 100, -pi, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offsets)
+        servo3.set_target_position_from_angle(0.0, [0.0, 0.0, angle2, angle3, 0.0, 0.0, 0.0])
+        return servo3.target_position
+
+    def test_servo2_small_negative_angle_is_clamped_to_the_lowest_key(self):
+        offsets = {"0.0": {"0.0": -10}, "0.2": {"0.0": -20}}
+        # round(-0.01 / pi, 1) is -0.0, which is not the key "0.0"
+        self.assertEqual(50 + 10, self.servo2_target(offsets, -0.01))
+        self.assertEqual(50 + 10, self.servo2_target(offsets, -0.0))
+
+    def test_servo2_angle_between_keys_takes_the_nearest_key(self):
+        offsets = {"0.0": {"0.0": -10}, "0.4": {"0.0": -20}}
+        self.assertEqual(50 + 10, self.servo2_target(offsets, 0.1 * pi))
+        self.assertEqual(50 + 20, self.servo2_target(offsets, 0.3 * pi))
+        # the lowest key is taken in a tie
+        self.assertEqual(50 + 10, self.servo2_target(offsets, 0.2 * pi))
+
+    def test_servo2_angle3_small_negative_and_between_keys(self):
+        offsets = {"0.0": {"0.0": -10, "0.4": -30}}
+        self.assertEqual(50 + 10, self.servo2_target(offsets, 0.0, -0.01))
+        self.assertEqual(50 + 10, self.servo2_target(offsets, 0.0, 0.1 * pi))
+        self.assertEqual(50 + 30, self.servo2_target(offsets, 0.0, 0.3 * pi))
+
+    def test_servo2_angles_outside_the_table_take_its_ends(self):
+        offsets = {"0.0": {"0.0": -10}, "0.4": {"-0.2": -20, "0.2": -30}}
+        self.assertEqual(50 + 10, self.servo2_target(offsets, -0.9 * pi))
+        self.assertEqual(50 + 20, self.servo2_target(offsets, 0.9 * pi, -0.9 * pi))
+        self.assertEqual(50 + 30, self.servo2_target(offsets, 0.9 * pi, 0.9 * pi))
+
+    def test_servo3_small_negative_angle_is_clamped_to_the_lowest_key(self):
+        offsets = {"0.0": 10, "0.5": 20}
+        self.assertEqual(50 - 10, self.servo3_target(offsets, -0.01, 0.0))
+
+    def test_servo3_angle_between_keys_takes_the_nearest_key(self):
+        offsets = {"0.0": 10, "0.4": 20}
+        self.assertEqual(50 - 10, self.servo3_target(offsets, 0.0, 0.1 * pi))
+        self.assertEqual(50 - 20, self.servo3_target(offsets, 0.0, 0.3 * pi))
+        self.assertEqual(50 - 20, self.servo3_target(offsets, 0.0, 0.9 * pi))
+
+
 class ServoCompensationTest(unittest.TestCase):
     """a Servo with a static load compensation adds its positions to the target"""
 

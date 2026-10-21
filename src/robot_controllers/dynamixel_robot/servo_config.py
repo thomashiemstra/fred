@@ -7,6 +7,7 @@ import numpy as np
 import yaml
 
 from src.global_constants import POSITION_CONTROL_MODE, EXTENDED_POSITION_CONTROL, CURRENT_BASED_POSITION_CONTROL_MODE
+from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_config import load_robot_configs
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.static_compensation import SpringGeometry, StaticCompensation, \
@@ -26,6 +27,13 @@ _REQUIRED_FIELDS = {'temperature_warning', 'temperature_limit', 'servos'}
 _OPTIONAL_FIELDS = {'spring'}
 _REQUIRED_COMPENSATION_FIELDS = {'max_positions', 'terms'}
 _OPTIONAL_COMPENSATION_FIELDS = {UP, DOWN}
+
+# the register sizes in bytes of the values that are written to the servos, and whether they are signed
+_POSITION_REGISTER = (cfg.LEN_GOAL_POSITION, True)
+_PROFILE_ACCELERATION_REGISTER = (cfg.LEN_PROFILE_ACCELERATION, False)
+_PROFILE_VELOCITY_REGISTER = (cfg.LEN_PROFILE_VELOCITY, False)
+_PID_REGISTER = (cfg.LEN_PID, False)
+_GOAL_CURRENT_REGISTER = (cfg.LEN_GOAL_CURRENT, True)
 
 
 class ServoConfigError(ValueError):
@@ -83,7 +91,9 @@ def parse_servo_config(data: Any, source: str = 'servo configuration', a2: float
 
     buses: dict[str, list[int]]
     servos, names, models, buses = {}, {}, {}, {}
-    for servo_id in sorted(data['servos'], key=lambda key: (not isinstance(key, int), str(key))):
+    # whole numbers first in numeric order, anything else after them (it is rejected below)
+    for servo_id in sorted(data['servos'],
+                           key=lambda key: (not isinstance(key, int), key if isinstance(key, int) else 0, str(key))):
         if not isinstance(servo_id, int) or isinstance(servo_id, bool) or not 0 <= servo_id <= 252:
             raise ServoConfigError('{}: servo id {!r} should be a number from 0 to 252'.format(source, servo_id))
         servo_data = data['servos'][servo_id]
@@ -106,6 +116,8 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
             source, data['mode'], ', '.join(OPERATING_MODES)))
 
     first_position, last_position = _pair(data['positions'], 'positions', source, integer=True)
+    for position in (first_position, last_position):
+        _register(position, 'positions', source, *_POSITION_REGISTER)
     if first_position == last_position:
         raise ServoConfigError('{}: the positions of the ends of the range are the same'.format(source))
 
@@ -123,7 +135,7 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
 
     goal_current = data.get('goal_current')
     if goal_current is not None:
-        goal_current = _integer(goal_current, 'goal_current', source)
+        goal_current = _register(goal_current, 'goal_current', source, *_GOAL_CURRENT_REGISTER)
 
     compensation = None
     if 'compensation' in data:
@@ -137,11 +149,14 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
         first_position, last_position = last_position, first_position
 
     return Servo(first_position, last_position, first, last, OPERATING_MODES[data['mode']],
-                 profile_velocity=_integer(profile['velocity'], 'profile velocity', source),
-                 profile_acceleration=_integer(profile['acceleration'], 'profile acceleration', source),
-                 p=_integer(pid['p'], 'p', source), i=_integer(pid['i'], 'i', source),
-                 d=_integer(pid['d'], 'd', source),
-                 offset=_integer(data.get('offset', 0), 'offset', source), goal_current=goal_current,
+                 profile_velocity=_register(profile['velocity'], 'profile velocity', source,
+                                            *_PROFILE_VELOCITY_REGISTER),
+                 profile_acceleration=_register(profile['acceleration'], 'profile acceleration', source,
+                                                *_PROFILE_ACCELERATION_REGISTER),
+                 p=_register(pid['p'], 'p', source, *_PID_REGISTER), i=_register(pid['i'], 'i', source, *_PID_REGISTER),
+                 d=_register(pid['d'], 'd', source, *_PID_REGISTER),
+                 offset=_register(data.get('offset', 0), 'offset', source, *_POSITION_REGISTER),
+                 goal_current=goal_current,
                  compensation=compensation)
 
 
@@ -210,4 +225,14 @@ def _number(value: Any, name: str, source: str) -> float:
 def _integer(value: Any, name: str, source: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ServoConfigError('{}: {} should be a whole number, not {!r}'.format(source, name, value))
+    return value
+
+
+def _register(value: Any, name: str, source: str, length: int, signed: bool) -> int:
+    """a whole number that has to fit in a register of the given size in bytes"""
+    value = _integer(value, name, source)
+    bits = 8 * length
+    lowest, highest = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed else (0, (1 << bits) - 1)
+    if not lowest <= value <= highest:
+        raise ServoConfigError('{}: {} should be from {} to {}, not {}'.format(source, name, lowest, highest, value))
     return value

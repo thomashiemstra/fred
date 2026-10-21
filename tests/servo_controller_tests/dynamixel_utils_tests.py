@@ -31,6 +31,19 @@ class TestConversions(unittest.TestCase):
         self.assertEqual([0x00, 0x08, 0, 0], to_bytes(np.int64(2048), 4))
         self.assertEqual([2, 0, 0, 0], to_bytes(2.7, 4))
 
+    def test_to_bytes_accepts_the_edges_of_the_signed_and_unsigned_range(self):
+        self.assertEqual([0xFF], to_bytes(255, 1))
+        self.assertEqual([0x80], to_bytes(-128, 1))
+        self.assertEqual([0xFF, 0xFF], to_bytes(65535, 2))
+        self.assertEqual([0xFF] * 4, to_bytes(2 ** 32 - 1, 4))
+
+    def test_to_bytes_raises_when_the_value_does_not_fit(self):
+        for value, length in ((256, 1), (-129, 1), (70000, 2), (65536, 2), (-32769, 2), (2 ** 32, 4),
+                              (-2 ** 31 - 1, 4)):
+            with self.subTest(value=value, length=length):
+                with self.assertRaisesRegex(ValueError, 'does not fit in {} bytes'.format(length)):
+                    to_bytes(value, length)
+
     def test_to_signed(self):
         self.assertEqual(0, to_signed(0, 4))
         self.assertEqual(2 ** 31 - 1, to_signed(0x7FFFFFFF, 4))

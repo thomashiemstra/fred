@@ -8,12 +8,9 @@ class ServoPositionRecorder:
         super().__init__()
 
     def record(self, servos: list[Servo]) -> None:
-        data =  [[1, servos[1].current_position, servos[1].target_position],
-                 [2, servos[2].current_position, servos[2].target_position],
-                 [3, servos[3].current_position, servos[3].target_position],
-                 [4, servos[4].current_position, servos[4].target_position],
-                 [5, servos[5].current_position, servos[5].target_position],
-                 [6, servos[6].current_position, servos[6].target_position]]
+        """records the arm servos, servos[0] is servo 1 like in DynamixelRobotController._servos"""
+        data = [[servo_id, servo.current_position, servo.target_position]
+                for servo_id, servo in enumerate(servos[:6], start=1)]
 
         self._positions.append(data)
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import logging
@@ -169,6 +169,14 @@ class ServoWithOffsetFunction(Servo):
             return AdjustmentDirections.DOWN
 
 
+def _nearest_key(angle: float, table: Iterable[str]) -> str:
+    """
+    the key of the table (an angle in units of pi as text) closest to the angle, the first one for a tie. An angle
+    outside the table gets the key at the end of the table, one between two keys the nearer of them.
+    """
+    return min(table, key=lambda key: (abs(float(key) - angle), float(key)))
+
+
 class Servo2(Servo):
 
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
@@ -180,54 +188,17 @@ class Servo2(Servo):
         if dynamic_offsets is None:
             raise ValueError('Servo2 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
-        self.dynamic_offsets_info = self._get_dynamic_offsets_info(dynamic_offsets)
-        self.angle2_lookup_min = self.dynamic_offsets_info['min']
-        self.angle2_lookup_max = self.dynamic_offsets_info['max']
 
     def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         super().set_target_position_from_angle(angle)
         self.target_position -= self._get_dynamic_offsets(all_angles)
 
-    @staticmethod
-    def _get_dynamic_offsets_info(dynamic_offsets: dict[str, dict[str, int]]) -> dict[str, Any]:
-        info: dict[str, Any] = {}
-        angle2_values = []
-
-        for angle2 in dynamic_offsets:
-            angle2_values.append(round(float(angle2), 1))
-            servo3_dict = dynamic_offsets[angle2]
-            angle3_values = []
-            for angle3 in servo3_dict:
-                angle3_values.append(round(float(angle3), 1))
-            sorted_angle3_values = sorted(angle3_values)
-            info[angle2] = {}
-            info[angle2]["min"] = sorted_angle3_values[0]
-            info[angle2]["max"] = sorted_angle3_values[-1]
-
-        sorted_angle2_values = sorted(angle2_values)
-        info["min"] = sorted_angle2_values[0]
-        info["max"] = sorted_angle2_values[-1]
-
-        return info
-
     def _get_dynamic_offsets(self, all_angles: np.ndarray | None) -> int:
         if self.dynamic_offsets is None or all_angles is None:
             return 0
-        angle2rounded = round(all_angles[2] / pi, 1)
-        angle2lookup = str(angle2rounded)
-        if angle2rounded < self.angle2_lookup_min:
-            angle2lookup = str(self.angle2_lookup_min)
-        elif angle2rounded > self.angle2_lookup_max:
-            angle2lookup = str(self.angle2_lookup_max)
-
-        angle3rounded = round(all_angles[3] / pi, 1)
-        angle3_lookup = str(angle3rounded)
-        if angle3rounded < self.dynamic_offsets_info[angle2lookup]['min']:
-            angle3_lookup = str(self.dynamic_offsets_info[angle2lookup]['min'])
-        if angle3rounded > self.dynamic_offsets_info[angle2lookup]['max']:
-            angle3_lookup = str(self.dynamic_offsets_info[angle2lookup]['max'])
-
-        return self.dynamic_offsets[angle2lookup][angle3_lookup]
+        angle2_lookup = _nearest_key(round(all_angles[2] / pi, 1), self.dynamic_offsets)
+        angle3_lookup = _nearest_key(round(all_angles[3] / pi, 1), self.dynamic_offsets[angle2_lookup])
+        return self.dynamic_offsets[angle2_lookup][angle3_lookup]
 
 
 class Servo3(Servo):
@@ -241,29 +212,13 @@ class Servo3(Servo):
         if dynamic_offsets is None:
             raise ValueError('Servo3 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
-        self.angle_lookup_min, self.angle_lookup_max = self._get_dynamic_offsets_info(dynamic_offsets)
 
     def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
         super().set_target_position_from_angle(angle)
         self.target_position -= self._get_dynamic_offsets(all_angles)
 
-    @staticmethod
-    def _get_dynamic_offsets_info(dynamic_offset: dict[str, int]) -> tuple[float, float]:
-        angles = []
-        for angle in dynamic_offset:
-            angles.append(round(float(angle), 1))
-        sorted_angles = sorted(angles)
-        min_angle = sorted_angles[0]
-        max_angle = sorted_angles[-1]
-        return min_angle, max_angle
-
     def _get_dynamic_offsets(self, all_angles: np.ndarray | None) -> int:
         if self.dynamic_offsets is None or all_angles is None:
             return 0
-        angle_rounded = round((all_angles[2] + all_angles[3])/pi, 1)
-        angle_lookup = str(angle_rounded)
-        if angle_rounded < self.angle_lookup_min:
-            angle_lookup = str(self.angle_lookup_min)
-        if angle_rounded > self.angle_lookup_max:
-            angle_lookup = str(self.angle_lookup_max)
+        angle_lookup = _nearest_key(round((all_angles[2] + all_angles[3]) / pi, 1), self.dynamic_offsets)
         return self.dynamic_offsets[angle_lookup]

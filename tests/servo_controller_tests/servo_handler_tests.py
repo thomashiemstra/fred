@@ -374,6 +374,37 @@ class TestServoHandlerCommunication(unittest.TestCase):
                 self.assertLogs(servo_handler_module.logger, 'ERROR'):
             self.assertFalse(self.handler.reboot(timeout=3.0))
 
+    def fail_reboot_of(self, failing, comm_result=dxl.COMM_RX_TIMEOUT, error=0):
+        """patch the fake bus so the reboot command of the given servos fails, the servos still answer pings"""
+        reboot = self.bus.reboot
+        return mock.patch.object(
+            self.bus, 'reboot',
+            lambda port, servo_id: (comm_result, error) if servo_id in failing else reboot(port, servo_id))
+
+    def test_reboot_fails_when_the_reboot_command_fails_even_if_the_servo_answers_pings(self):
+        with self.fail_reboot_of({3}), mock.patch.object(servo_handler_module.time, 'sleep'), \
+                self.assertLogs(servo_handler_module.logger, 'ERROR') as logs:
+            self.assertFalse(self.handler.reboot())
+        self.assertEqual({1, 2, 4}, self.bus.rebooted)
+        self.assertTrue(any('[ID:003] reboot command failed' in line for line in logs.output))
+        self.assertFalse(any('did not respond' in line for line in logs.output))
+
+    def test_reboot_fails_when_the_servo_answers_the_reboot_command_with_an_error(self):
+        with self.fail_reboot_of({2}, dxl.COMM_SUCCESS, 0x01), \
+                mock.patch.object(servo_handler_module.time, 'sleep'), \
+                self.assertLogs(servo_handler_module.logger, 'ERROR'):
+            self.assertFalse(self.handler.reboot([1, 2]))
+
+    def test_reboot_still_waits_for_the_other_servos_when_one_command_fails(self):
+        self.bus.unresponsive = {4}
+        clock = iter(range(0, 1000))
+        with self.fail_reboot_of({1}), mock.patch.object(servo_handler_module.time, 'sleep'), \
+                mock.patch.object(servo_handler_module.time, 'monotonic', lambda: next(clock) * 0.5), \
+                self.assertLogs(servo_handler_module.logger, 'ERROR') as logs:
+            self.assertFalse(self.handler.reboot(timeout=3.0))
+        self.assertTrue(any('[ID:001] reboot command failed' in line for line in logs.output))
+        self.assertTrue(any('[ID:004] did not respond after reboot' in line for line in logs.output))
+
     # static load compensation
 
     def test_present_current_is_read_signed_with_a_packet_per_bus(self):

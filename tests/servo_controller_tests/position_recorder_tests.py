@@ -9,8 +9,9 @@ from src.robot_controllers.dynamixel_robot.position_recorder import ServoPositio
 class ServoPositionRecorderTests(unittest.TestCase):
 
     def test_each_recording_is_written_as_one_line(self):
-        servos = [None] + [types.SimpleNamespace(current_position=100 + servo_id, target_position=200 + servo_id)
-                           for servo_id in range(1, 8)]
+        # servo 1 first, like DynamixelRobotController._servos; the gripper (7) is not recorded
+        servos = [types.SimpleNamespace(current_position=100 + servo_id, target_position=200 + servo_id)
+                  for servo_id in range(1, 8)]
         recorder = ServoPositionRecorder()
         recorder.record(servos)
         recorder.record(servos)

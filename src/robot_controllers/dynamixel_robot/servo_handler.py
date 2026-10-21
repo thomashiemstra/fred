@@ -75,15 +75,18 @@ class ServoHandler(object):
     def reboot(self, servo_ids: Iterable[int] | None = None, timeout: float = 3.0) -> bool:
         """reboot the servos and wait until they respond again, returns True if all of them came back
 
+        A servo that does not confirm the reboot command counts as failed, even if it still answers a ping.
         A reboot disables the torque and wipes all settings that are not stored in the eeprom (pid, profile, etc.)
         """
         servo_ids = self.__ids(servo_ids)
+        failed = set()
         for servo_id in servo_ids:
             comm_result, error = self.packet_handler.reboot(self.port_handler, servo_id)
-            utils.check_result(self.packet_handler, servo_id, comm_result, error)
+            if not utils.check_result(self.packet_handler, servo_id, comm_result, error):
+                failed.add(servo_id)
 
         deadline = time.monotonic() + timeout
-        waiting = set(servo_ids)
+        waiting = set(servo_ids) - failed
         while waiting and time.monotonic() < deadline:
             time.sleep(0.1)
             for servo_id in list(waiting):
@@ -91,9 +94,11 @@ class ServoHandler(object):
                 if comm_result == dynamixel.COMM_SUCCESS and error == 0:
                     waiting.remove(servo_id)
 
-        for servo_id in waiting:
+        for servo_id in sorted(failed):
+            logger.error("[ID:%03d] reboot command failed", servo_id)
+        for servo_id in sorted(waiting):
             logger.error("[ID:%03d] did not respond after reboot", servo_id)
-        return not waiting
+        return not failed and not waiting
 
     @synchronized_with_lock("bus_lock")
     def set_torque(self, enable: bool, servo_ids: Iterable[int] | None = None) -> bool:
