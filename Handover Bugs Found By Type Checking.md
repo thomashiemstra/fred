@@ -8,8 +8,7 @@ robot.
 
 Environment: Windows 10 Pro, Python 3.12.2 in `venv/` at the repo root, opencv-python 4.9.0, tensorflow 2.19.
 `tf_agents` is imported by the reinforcement learning code and the camera obstacle avoidance but is **not installed**
-in the venv, so that code can't run at all right now. `requirements.txt` only lists the robot controller dependencies
-and mypy, not opencv or tensorflow.
+in the venv, so that code can't run at all right now. `requirements.txt` pins the packages of the venv.
 
 ## Summary
 
@@ -25,11 +24,12 @@ and mypy, not opencv or tensorflow.
 | 8 | `aruco_camera_calibration` without frames | fixed, the script is untested (needs the camera) |
 | 9 | `findChessboardCorners` flags in the wrong argument | fixed, the scripts are untested (needs the camera) |
 | 10 | `Movement.to_json` called a method `Pose` doesn't have | removed, it had no callers |
-| 11 | `ServoPositionRecorder.write` raised `TypeError` | fixed, tested |
+| 11 | `ServoPositionRecorder.write` raised `TypeError`, `record` was off by one servo | fixed, tested |
 | 12 | small things and stale scripts | fixed |
-| 13 | camera calibration scripts: image size and termination criteria | **open**, found while fixing 1 |
+| 13 | camera calibration scripts: image size, termination criteria, where they write | fixed, untested (needs the camera) |
 
-The test suite has 590 tests, all passing. Only the 5 that need `tf_agents` are skipped.
+The test suite has 667 tests (21 October), all passing. 5 are skipped: 4 need `tf_agents`, and
+`test_repulsive_vectors` waits until the control points of `fred_new.urdf` are checked.
 
 ## Still open
 
@@ -52,18 +52,6 @@ small markers. `cv2.drawFrameAxes`, which replaces `drawAxis`, only runs when dr
 If the camera that made `src/camera/calibration/calibration_data.json` is gone, recalibrate first. The calibration
 scripts (`aruco_camera_calibration.py`, `charuco_camera_calibration_from_images.py`, `camera_calibration.py`,
 `camera_calibration_from_images.py`) and `aruco_test.py` are ported but untested; they compile and pass mypy.
-Fix item 13 before relying on them.
-
-### 13. Camera calibration scripts: image size and termination criteria
-
-Found while porting, not changed:
-
-- The scripts pass `gray.shape` as the image size, which is (height, width). OpenCV expects (width, height).
-- The termination criteria are `TERM_CRITERIA_EPS & TERM_CRITERIA_COUNT`, which is 0. It should be `|`.
-- `camera_calibration.py` writes `calibration/calibration_data.txt`, but nothing reads that file; the handlers load
-  the `.json` files.
-
-These change the calibration result, so fix them together with a recalibration on the real camera.
 
 ### Optional checks on the robot
 
@@ -136,6 +124,7 @@ find-center mode, so two new poses can be recorded. Before, it raised a `TypeErr
 
 - 10: `Movement.to_json` is removed; recorded moves are saved with `jsonpickle`.
 - 11: `ServoPositionRecorder.write` writes one line per recording: id, current and target position of each servo.
+  `record` took servos 2-7 as 1-6 (the gripper as 6); it now starts at index 0, where the controller keeps servo 1.
 - 12:
   - The attribute that shadowed `BoardToBoardRobotController.should_filter()` is now `_should_filter`, and the
     control loop reads it through the locked method.
@@ -144,6 +133,19 @@ find-center mode, so two new poses can be recorded. Before, it raised a `TypeErr
   - `sim.py` calls `create_move` with the right arguments and exits when the arc is outside the workspace.
   - `scratches/json_dumping.py` passes the `SplineMovement` arguments in the right order.
   - `robot_move_test.py` stops with a message when `use_simulation` is set.
+
+### 13. Calibration script details
+
+The two ChArUco scripts passed `gray.shape`, which is (height, width), as the image size; OpenCV expects
+(width, height), and their initial camera matrix has its principal point at (989, 505), the middle of a 1920x1080
+image. Their termination criteria were `TERM_CRITERIA_EPS & TERM_CRITERIA_COUNT`, which is 0, a bug of the
+OpenCV tutorial they come from; now `+`, like the other criteria in those files. The chessboard scripts already
+reversed the shape.
+
+`camera_calibration.py` wrote `calibration/calibration_data.txt`, which nothing read. It now writes
+`calibration_data.json`, and all calibration scripts write to `src/camera/calibration/` instead of a
+`calibration/` relative to where they are started (21 October, issue 26 of the robot controller handover). The
+handlers use `calibration_data_charuco.json` when it exists, otherwise `calibration_data.json`.
 
 Every fix removed its `type: ignore`; 53 are left, all library typing gaps or places where mypy can't follow the logic.
 

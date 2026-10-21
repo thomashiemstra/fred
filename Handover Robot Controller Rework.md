@@ -23,15 +23,16 @@ latency timer. The gravity compensation plan is in `Handover Gravity and Spring 
   patching). The servo power has to be on, otherwise the bus setup raises `DynamixelError`.
 - The servo configuration lives in `servo_config.yaml`.
 - Safety: failed reads never leave stale positions, targets are clamped, servos are only enabled when the arm is in a
-  safe state (the check for servos 1 and 2 is a console prompt, issue 18), hardware errors and temperatures are
-  monitored.
+  safe state (servos 1 and 2 have to be inside their safe range, otherwise enabling is refused with a logged
+  error), hardware errors and temperatures are monitored.
 - Every move except the stick control is planned and checked completely before anything moves
   (`src/utils/movement.py`, merged from `cartesian_movement.py` and `movement_utils.py` on 19 October): the straight
   lines to and from the start pose, the joint space moves and the splines through recorded poses. The stick control
-  still sends the IK result straight to the servos (issue 21).
+  checks every step with the same checks, slows down where a joint would be too fast and holds the pose when a step
+  isn't safe (21 October).
 - The xbox controller: only its control loop thread moves the robot, start/stop are safe to call at any time.
 - The gripper is non-blocking and squeezes with up to 400mA.
-- 590 tests (20 October), all hardware faked: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"`.
+- 667 tests (21 October), all hardware faked: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"`.
 
 ## The physical robot, measured
 
@@ -67,7 +68,8 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 
 ## Running it
 
-- `venv\Scripts\python.exe main.py` runs Flask on `0.0.0.0:5000` (issue 8); `--use_simulation` uses the pybullet
+- `venv\Scripts\python.exe main.py` runs Flask on `127.0.0.1:5000`, so only this machine reaches it, and refuses
+  posts from other web pages (their `Origin`); `--use_simulation` uses the pybullet
   robot instead of the real one. The control panel is `http://127.0.0.1:5000/`, the xbox page `/xbox`, the camera
   page `/camera`; the pages post to hard coded `http://127.0.0.1:5000/...` urls.
 - The robot is created on the first `POST /xbox/start` by `global_objects.get_robot`: with `use_simulation` it is the
@@ -93,11 +95,10 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - `servo_config.yaml` + `servo_config.py`: per servo name, model, bus, mode, positions, angles (degrees) or states
   (gripper), offset, goal current, profile and pid, plus the temperature warning (45C) and limit (50C).
   `load_servo_config()` checks the structure (fields, mode name, `[first, last]` pairs, whole numbers,
-  `temperature_warning <= temperature_limit`) and returns new `Servo` objects every call. It does not check value
-  ranges: positions and offset against 0-4095, pid/profile/goal current against the register sizes (issue 17).
-  Recalibrating means editing the yaml. The one other place with raw positions is the safety check
-  (`servo_1_check`/`servo_2_check` in `src/utils/robot_controller_utils.py`, issue 18); adjust it when the positions
-  or offset of servo 1 or 2 change. The controller tests use `tests/servo_controller_tests/test_servo_config.yaml`;
+  `temperature_warning <= temperature_limit`) and returns new `Servo` objects every call. Every register value has
+  to fit its register (pid, profile, goal current, positions and offset); the datasheet limits of each model aren't
+  checked. Recalibrating means editing the yaml. The safety check (`servo_1_check`/`servo_2_check` in
+  `src/utils/robot_controller_utils.py`) works in angles, so it doesn't move when servo 1 or 2 is recalibrated. The controller tests use `tests/servo_controller_tests/test_servo_config.yaml`;
   `test_robot_starts_with_the_real_servo_configuration` and `servo_config_tests` also load the real file, so an
   invalid real yaml fails the tests.
 - `servo_handler.py`: all bus access, behind one `RLock` (`bus_lock`). Sync write/read helpers, adjacent registers in
@@ -122,10 +123,10 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - `dynamixel_robot_controller.py`: the facade.
   - `perform_safety_checks` (constructor, default `True`, also what `global_objects.get_robot` uses):
     `initialize_servos` and the first position read raise `DynamixelError` on failure, and `enable_servos` runs
-    `safety_check()` first. That check prints DANGER and blocks on `input()` when the raw present position of servo 1
-    or 2 is above 2500 or below 0 (about 99 degrees for servo 1 and 170 degrees for servo 2 with the current
-    calibration), anything but `y` refuses. It can fire from the server or `XboxRobotController.start()` and then
-    waits on stdin (issue 18). The hardware error and temperature checks always run.
+    `safety_check()` first. It refuses, with a logged error that says where the servo is and to move the arm by
+    hand, when servo 1 is outside -120.4 to 99.3 degrees or servo 2 outside -40.2 to 179.6 degrees (raw 0 and 2500
+    with the calibration of 20 October); both servos are reported. It never waits for input, so it is safe from the
+    server. The hardware error and temperature checks always run.
   - `enable_servos` refuses when `hold_current_position` can't read the positions, when hardware errors or
     temperatures can't be read, when a servo has a hardware error or is too warm, or when `safety_check()` fails; it
     sets the goal positions to the present positions before enabling the torque and disables all servos again when
@@ -197,7 +198,8 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   `recommended_max_servo_speed`: the duration is stretched up to `MAX_STRETCH` = 4 times (logged), beyond that
   the move is refused. A joint space move between differently flipped poses is such a slow move: joints 4 and 6
   turn by pi through the straight wrist and the tip swings around the wrist, within the workspace limits but
-  not on the path the recorded poses suggest (issue 4).
+  not on the path the recorded poses suggest (issue 4); the xbox recording no longer produces such moves, it only
+  records poses with the flip of its first pose.
 - Planner constants: `steps_per_second` = 100, `recommended_max_servo_speed` = 4 rad/s, `MAX_POSITION_ERROR` =
   0.1 cm, `MAX_START_ANGLE_ERROR` = 0.05 rad, `ANGLE_LIMIT_TOLERANCE` = 1e-6 rad. Defaults `linear_speed` = 5 cm/s,
   `angular_speed` = 0.5 rad/s; duration = max(distance / linear_speed, rotation / angular_speed, 1 s), so even a move
@@ -223,9 +225,14 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - Only the control loop thread moves the robot; requests from other threads that move it are put on a command queue
   the loop drains (`__handle_commands`). Find center is the only queued command. Playback of recorded moves checks
   the stop flag between moves, a running move can't be interrupted.
-- Every loop step the pose from the gamepad is checked against the workspace limits of the robot
-  (`robot.workspace_violation`); outside them the robot holds the current pose and the loop logs it once. The pose
-  updater's own clamp on the tip stays as a first filter.
+- Every loop step goes through `_take_step`/`_choose_step`. `current_pose` is the commanded pose and keeps the flip,
+  only the `a` button changes it. The loop sends the angles of the last step (`_send_current_pose`), which turn
+  towards the angles of the commanded pose at most at 95% of `recommended_max_servo_speed`; while they haven't
+  reached them the gamepad waits. So the arm slows down near a singularity instead of stopping, and when the wrist
+  has to turn over (a straight wrist passed with the same flip, or `a`) joints 4 and 6 turn by pi at that speed, to
+  the other solution of the same pose. A step that can't be reached or that `check_move` refuses (workspace limits,
+  servo ranges) is skipped, the arm holds and the loop warns once; a wrist joint at the end of its range holds there
+  instead of turning all the way round.
 - Every second (`HARDWARE_CHECK_INTERVAL`) the loop reads the hardware errors and temperatures. A hardware error
   raises `RuntimeError` and crashes the loop on purpose: that servo already switched its torque off, so no move back
   is attempted and the other servos hold until `stop()`. A servo above `temperature_limit` sets `_stop_requested`, a
@@ -240,23 +247,26 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   time that really passed since the previous one (capped at `MAX_STEP_TIME` = 0.1 s), so the speeds hold at any
   loop pace. The updater does no workspace clipping of its own, the loop's `workspace_violation` check is the only
   one; the platform sign of the right stick lives in `XboxController`.
-- Buttons are a table, `_button_actions`, the first pressed button wins. `get_buttons()` resets the momentary buttons
-  when read, the bumpers are the only buttons it doesn't reset, and they come first in the table (issue 23).
+- Buttons are a table, `_button_actions`; every button pressed in a read is handled, in table order, until a stop is
+  requested. `get_buttons()` resets the momentary buttons when read, the bumpers are the only buttons it doesn't
+  reset.
 - Gripper: `lb`/`rb` move the target `gripper_state` (0 open, 100 closed) by `GRIPPER_STEP = 1` every loop step while
   held. `__move_gripper` reads the actual state every step (one bus read) and clips the target to actual +/-
   `GRIPPER_MAX_LEAD = 25`, so a blocked gripper squeezes with at most the goal current and lets go within 25 steps;
-  when the read fails the target is only clipped to 0-100. After the start move `open_gripper()` sends
-  `gripper_state`, which keeps the value of the previous run (issue 22).
-- Recording and playback: `y` appends `current_pose` to `recorded_positions`; `x` turns 2 or more positions into a
-  move at `move_speed` (`create_move`: 2 poses -> `PoseToPoseMovement`, more -> `SplineMovement` checked against the
-  workspace limits), appends it to `recorded_moves` and keeps only the last position as the start of the next move;
+  when the read fails the target is only clipped to 0-100. `start()` resets `gripper_state` to 0 (open) and after the
+  start move `open_gripper()` sends it.
+- Recording and playback: `y` appends `current_pose` to `recorded_positions` when it has the flip of the first pose
+  of the recording (otherwise it logs a warning, a move between flips turns the wrist by pi); `x` turns 2 or more
+  positions into a move at `move_speed` (`create_move`: 2 poses -> `PoseToPoseMovement`, more -> `SplineMovement`
+  checked against the workspace limits), appends it to `recorded_moves` and keeps only the last position as the start of the next move;
   an impossible move moves straight back to the first position. `start` plays all recorded moves:
   `go_to_start_of_move` (a 4 s joint space move, planned and checked), then each move after checking the arm is
   within 0.4 rad of its first pose; the splines and pose to pose moves are planned and checked completely before
   they start (`plan_spline` and `move_between_poses` in `src/utils/movement.py`), a spline that would turn a joint
   too fast is slowed down, up to 4 times. A
   `MovementException` moves straight back to the start pose, when that fails the loop crashes. `recorded_moves`
-  survive `stop()`; save/restore go through `jsonpickle` (issue 9).
+  survive `stop()`; save/restore go through `jsonpickle`, as plain names in `recorded_moves/` at the repo root,
+  decoded with `safe=True` and checked to be a list of moves before they are used.
 - Find center: `/xbox/findcenter` queues `__start_find_center_mode`; the loop clears `recorded_positions` and
   `center`, sets `find_center_mode` and resets the orientation (a 1 s joint space move, `move_between_poses`; a refused turn is logged and the pose stays). In the mode the triggers
   (z) and the gamma stick are ignored. The second `y` sets `center = get_center(pos1, pos2)` and ends the mode. With
@@ -282,9 +292,10 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - REST: `server.py` mounts `xbox_control_resource.py` at `/xbox`. All return `{"success": bool}` unless noted:
   `/start` -> `start()` (`already started` as text when running); `/stop` -> `stop()` (`already stopped`), blocks
   until the arm is back; `/findcenter` -> `request_find_center_mode()` (queued, False when not running);
-  `/clearcenter`; `/saveToFile`, `/restoreFromFile` `{"filename"}` -> `save_recorded_moves_to_file(name + '.json')`,
-  `restore_recorded_moves_from_file`, relative to the working directory of the server; `/clearAll`; `/setSpeed`
-  `{"speed": 0-50}` -> `set_maximum_speed`; `/speed` `{"percentage": 1-100}` -> `set_profile_velocity_percentage` (a
+  `/clearcenter`; `/saveToFile`, `/restoreFromFile` `{"filename"}` (letters, digits, `-` and `_` only) ->
+  `save_recorded_moves_to_file(name)`, `restore_recorded_moves_from_file(name)`, `recorded_moves/<name>.json`, a
+  missing file is a 404; `/clearAll`; `/setSpeed`
+  `{"speed": 5-50}` -> `set_maximum_speed`; `/speed` `{"percentage": 1-100}` -> `set_profile_velocity_percentage` (a
   bus write from the request thread); `/setScenarioId` `{"scenario_id"}` -> `set_scenario` (pybullet obstacles, only
   works with the simulated robot or the `CombinedRobot`); `GET /test` returns a fixed pose. The controller, robot,
   gamepad thread and pose updater are created by `global_objects.get_xbox_robot_controller` (`lru_cache`) on the
@@ -302,7 +313,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 | Script | What it does |
 |---|---|
 | `python -m src.robot_controllers.dynamixel_robot.scan_servos` | lists the adapters and the servos that respond (read only) |
-| `python -m src.robot_controllers.dynamixel_robot.robot_move_test` | reads the pose and moves in a straight line to `Pose(30, 25, 5)` (issue 28), asks before moving |
+| `python -m src.robot_controllers.dynamixel_robot.robot_move_test` | reads the pose and moves in a straight line to the xbox start pose `Pose(30, 22, 4)`, asks before moving |
 | `python -m src.robot_controllers.dynamixel_robot.gripper_test` | gripper range, squeeze sweep (goal currents up to 1500mA) and lead test, asks before moving, only the gripper is enabled and moves. The port is found by pinging servos 1-6, so the arm must be powered |
 | `python -m src.simulation.build_urdf` | rebuilds the urdf files from `fred.xacro` and `robot_config.yaml`, no robot involved |
 | `python -m src.robot_controllers.dynamixel_robot.calibration.record_static_load` | enables the servos after asking and visits random poses from both directions to record the static load (sag) of every servo to a csv, see the gravity handover; the arm moves through the ranges it prints |
@@ -317,39 +328,63 @@ move them (`pid_test.py` leaves the torque on). They use the debug API that stil
 the four `record_going_*.py` scripts need the `keyboard` package (not installed) and an Arduino on COM5
 (`ArduinoAngleReader` opens it in `__init__`); the `record_going_*` scripts move servos 2 and 3 immediately.
 `gravity_compensation_with_math_angle2/3.py` are offline curve fits of the 2021 data in `calibration/results`.
-`arduino/arduino_experiment.py` needs `Arduino` (arduino-python3), not installed. `position_recorder.py` is broken
-(issue 19).
+`arduino/arduino_experiment.py` needs `Arduino` (arduino-python3), not installed. `position_recorder.py` records and writes
+the servo positions (fixed 20 October), nothing calls `set_recorder`.
 
 ## Open issues
 
-Found while writing the tests and in the code reviews of 15-18 October, not fixed. Issues 2, 13, 14, 19, 20 and 27
-were fixed on 20 October and are listed below the table; the issues in the table have no test in the repository. Where = repo-relative `path:line` plus the symbol; the numbers
+Found while writing the tests and in the code reviews of 15-18 October, not fixed then. All of them were fixed on 20
+and 21 October (listed below the table) except issue 10, which needs a rest pose measured on the arm, and the
+restored recordings of issue 4. Where = repo-relative `path:line` plus the symbol; the numbers
 1-17 are the original ones, 18-28 were added on 18 October; the rows are grouped by area.
 
 | # | Where | Issue | Impact |
 |---|---|---|---|
-| 17 | `src/robot_controllers/dynamixel_robot/dynamixel_utils.py:62-64` (`to_bytes`), `servo_config.py:140-143` | `to_bytes` masks values that don't fit (70000 in 2 bytes -> 4464) without raising; `_integer` only checks the type, so pid, goal current and profile values from the yaml have no range check, and a sync write has no status packet (`servo_handler.py:293`), so a value the servo rejects isn't reported either | low today, all values in the yaml fit; a typo writes a different gain or current limit, or none, while `set_pid`/`set_goal_current` return True |
-| 12 | `src/robot_controllers/dynamixel_robot/servo_handler.py:71-72` (`reboot`) | the result of the reboot command is logged and discarded, a servo that still answers pings counts as rebooted | low, `reboot()` can report success while a servo kept its hardware error; `reboot_all_servos` has no callers outside the tests, `FakeBus.reboot` always succeeds |
-| 16 | `src/robot_controllers/dynamixel_robot/servo.py:112,169` (`Servo2`, `Servo3`) | the lookup key is `str(round(angle / pi, 1))`, a small negative angle gives `'-0.0'`, which the min clamp misses, `KeyError('-0.0')`; a rounded value between two table keys also `KeyError`s | none, the classes are unused (`load_servo_config` only builds `Servo`), only `tests/utils_tests/servo_test.py` imports them |
-| 5 | `src/robot_controllers/dynamixel_robot/servo_config.py:63` | servo ids are sorted as text (`str(key)`), 10 before 7; `servos` and `buses` keep that order | none with ids 1-7; with ids >= 10 the order of the servos in the sync packets changes, the values stay right |
-| 18 | `src/utils/robot_controller_utils.py:18-41` (`servo_1_check`, `servo_2_check`), run by `enable_servos` | the safety check prints DANGER and blocks on `input()` when the raw position of servo 1 or 2 is above 2500 or below 0; `enable_servos` runs in the thread that calls it, so a `/xbox/start` request hangs on stdin (`EOFError` without a console); the thresholds are raw positions, they ignore `positions` and `offset` of the yaml | medium, `start()` hangs instead of failing; recalibrating servo 1 or 2 silently moves the angle at which it fires |
-| 1 | `src/kinematics/kinematics_utils.py:73-75` (`Pose.__copy__`), `src/utils/movement.py:169` | `__copy__` drops `euler_matrix` and `plan_move_to_pose` copies the target, so a target given as a matrix is planned with alpha=beta=gamma=0; `Pose.__eq__` (`kinematics_utils.py:81-83`) raises `ValueError` when only one side has a matrix | medium, latent today: the only caller (`xbox_robot_controller.py:277`) never passes matrix poses; the board to board controller builds matrix targets (`board_to_board_robot_controller.py:124`) but sends them through `move_between_poses`/`move_from_current_angles` (`:138-144`), whose IK reads the matrix, so it moves correctly until it is switched to `plan_move_to_pose` |
-| 3 | `src/kinematics/kinematics.py:193,199` (same copy in `src/reinforcementlearning/softActorCritic/custom_policy.py:38,44`, unused) | `jacobian_transpose_on_f` uses `c2` instead of `c1` in the joint 2 term of control points 1 and 2 (joints 1 and 3 are right); the test at `tests/kinematics_tests/kinematics_tests.py:181` only checks control point 3 | medium, wrong joint 2 force whenever a force on control point 1 or 2 has an x component: the repulsive forces in obstacle avoidance (`camera_control/obstacle_avoidance.py:202`, `simulation/obstacle_avoidance.py:219`) and the demonstrations the RL agent is cloned from |
-| 4 | `src/kinematics/kinematics.py:75-82` | with the wrist exactly straight (angle 5 = 0) `r13`, `r23`, `r31`, `r32` are rounding noise, so angle 4 and angle 6 are both arbitrary and the gripper roll is lost; on either side of angle 5 = 0 they differ by pi when the flip is kept | medium, planned moves refuse the jump (the joint speed check of `check_move`, `src/utils/movement.py:86-91`); a joint space move between differently flipped poses spreads the pi turn over the move and is accepted when it is slow enough (the tip swings around the wrist); the stick control (`xbox_robot_controller.py:217` -> `dynamixel_robot_controller.py:139-143`) sends the pi turn of joints 4 and 6 to the servos unchecked |
-| 21 | `src/xbox_control/xbox_robot_controller.py` (`_update_pose_within_the_workspace`, the loop at `:217`) | the stick control checks the workspace limits of every pose before moving (19 October), but still sends the IK result to the servos without the other checks of the planner: an unreachable target becomes the stretched arm (`kinematics.py:33-34`), joints 4 and 6 can turn by pi through the straight wrist (issue 4), joint ranges and speeds aren't checked; `move_to_pose` only lengthens the wait. The playback of recorded moves goes through the planner since 19 October | medium, the wrist spin is reachable with the sticks |
-| 6 | `src/xbox_control/xbox_robot_controller.py:406` (`set_scenario`) | accepts `scenario_id == len(scenarios)` (`>` should be `>=`; `medium_scenarios` has 7, so id 7 passes); `:414` stores the id before `:415` raises | medium, `IndexError`, a 500 from `/xbox/setScenarioId`, and every later `set_scenario` fails at `:412` until the server restarts; the arm is not affected |
-| 7 | `src/xbox_control/xbox_control_resource.py:92,106,115,131,138`, `src/xbox_control/xbox_robot_controller.py:389` | only `KeyError` is caught: a json body that is not an object or a non-string filename is a `TypeError`, `int()` of a bad value a `ValueError`, a missing restore file a `FileNotFoundError`; a non-json body is a 415 on Flask 3.0.3 | low, 500 errors, also from the UI forms (an empty speed field); the robot is not affected |
-| 9 | `src/xbox_control/xbox_control_resource.py:129-133`, `src/xbox_control/xbox_robot_controller.py:383,389-392` | `get_filename` only appends `.json`, save/restore `open()` any path (relative to the working directory of the server, `..` and absolute paths included); `jsonpickle.decode` (3.0.4, `safe=False`) runs `py/reduce`/`py/repr` from the file; the result is stored unchecked | high, overwrite any `*.json` with the recorded moves, code execution from a crafted `*.json` the server can read; reachable from the network and from web pages through issue 8 |
+| 4 | `src/kinematics/kinematics.py:75-82`, `src/xbox_control/xbox_robot_controller.py` (`restore_recorded_moves_from_file`) | with the wrist exactly straight (angle 5 = 0) angle 4 and angle 6 are arbitrary, and on either side of it they differ by pi when the flip is kept. Since 21 October the flip only changes with the `a` button, the stick control turns the wrist over at the joint speed limit when it has to, and a recording only accepts poses with the flip of its first pose. Still open: moves restored from a file aren't checked for mixed flips | low, a restored recording that mixes flips swings the tip around the wrist between them, within the workspace limits |
 | 10 | `src/xbox_control/xbox_robot_controller.py:279-282` (`stop_robot`, `start_pose` at `:47`) | stops at the start pose `Pose(30, 22.0, 4)` (4 cm above the table) and disables the torque, the arm drops; when the move back can't be planned the torque is disabled wherever the arm is; same in `src/camera_control/board_to_board_robot_controller.py:73-75` | high, every stop (api, overheating, stop during the start move or a playback) lets the arm fall unsupported; needs a rest pose on the table (`z_min = -5` allows it) |
-| 15 | `src/xbox_control/xbox360controller/XboxController.py:229-234` (`_left_trigger`, `_right_trigger`) | both write `lr_trigger`, the z input (`xbox_pose_updater.py:61`); the last event wins: releasing one trigger zeroes it while the other is held, pressing the second reverses the direction | medium, z movement ramps to a stop until the held trigger moves again |
-| 22 | `src/xbox_control/xbox_robot_controller.py:72,199-200,284-285` (`open_gripper`) | `gripper_state` is set once in the constructor; after the start move `open_gripper` sends it, so a second `start()` sends the last target of the previous run | low, the gripper doesn't open on a restart |
-| 23 | `src/xbox_control/xbox_robot_controller.py:77-87,303-309` (`handle_buttons`), `xbox360controller/XboxController.py:119-135` | `get_buttons()` resets the momentary buttons when read and `handle_buttons` handles only the first pressed button in `_button_actions` order; the bumpers come first and are held | low, `a`/`b`/`x`/`y`/`start`/d-pad presses are lost while a bumper is held |
-| 24 | `src/xbox_control/xbox_control_resource.py:93` (`/xbox/setSpeed`) | accepts `speed = 0` while the d-pad keeps it at 5-50 | low, the sticks stop moving the arm |
-| 8 | `src/server.py:17,86` | listens on 0.0.0.0 with CORS for every origin, no authentication | high, anyone on the network, or any web page, can start, stop or disable the arm; the UI only uses 127.0.0.1 (the fetch urls are hard coded, so the 0.0.0.0 bind gives the UI nothing) |
-| 25 | `src/server.py:56-59` (`/test2`) | debug route, calls `get_robot()` and prints it; without the port argument it can no longer evict the running robot, but a stray GET still builds the robot (pybullet window, serial port) before anyone pressed start | low, remove it |
-| 26 | `src/camera/image_handlers.py:70`, `src/camera/util.py:37-43` (`get_calibrations`) | `get_default_aurco_image_handler` reads `src/camera/calibration/calibration_data_charuco.json`, which isn't in the repository (`*.json` is gitignored, the calibration scripts write it to a cwd relative `calibration/`); `get_calibrations` calls `sys.exit()` when the file is missing | medium, `/camera/start_aruco` raises `SystemExit` in the request thread before it even reaches issue 2 |
-| 11 | `src/reinforcementlearning/environment/robot_env_utils.py:108,134-136` | `get_repulsive_forces_world` allocates `(3, n)` but fills `[i][0..2]` | none today, every caller uses 3 control points; another number raises `IndexError` |
-| 28 | `src/robot_controllers/dynamixel_robot/robot_move_test.py:26-27` | `START_POSE = Pose(30, 25.0, 5)` with the comment "the same start pose as the xbox controller", which uses `Pose(30, 22.0, 4)` | low, the script and the xbox controller end 3 cm apart |
+
+Fixed on 21 October, each with new tests, offline (a check on the robot is still worth it where noted):
+
+- 1: `Pose.__copy__` keeps `euler_matrix`, `Pose.__eq__` compares the orientations when a side has a matrix, and
+  `reset_orientation` drops the matrix too.
+- 3: `jacobian_transpose_on_f` (and its copy in `custom_policy.py`) uses `c1`; a finite difference test covers all
+  three control points. Before, control points 1 and 2 were off by up to 47.
+- 4 (stick control and the `a` button) and 21: the flip only changes with `a`. Every stick step commands a pose and
+  sends angles that turn towards its angles at 95% of `recommended_max_servo_speed`, the gamepad waits until they
+  arrive. A straight wrist passed with the same flip turns joints 4 and 6 over by pi at that speed: with the fake
+  robot at full stick speed the arm gets through in 1.5-2.1 s, the tip within 0.03 cm of the path. `a` turns the
+  wrist over to the other solution of the same pose in about 0.8 s instead of jumping at full servo speed; the
+  swing is checked, and at the start pose, 4 cm above the table, it would take the tip below the floor of the
+  workspace, so the arm holds partway and `a` again turns it back. A step is skipped (the arm holds) when the
+  position can't be reached or `check_move` refuses it (workspace, servo ranges); while the arm holds on the way to
+  a pose it can't reach, the sticks wait too, only `a` (back) or a stop gets it out. A wrist joint at the end of
+  its range holds there instead of turning all the way round. On the robot: check how the wrist feels turning over,
+  and press `a` only where the gripper has room to swing through straight.
+- 4 (recorded moves): `y` only records a pose with the flip of the first pose of the recording (the first recorded
+  move, or the first pending position), and logs a warning otherwise; after `/xbox/clearAll` any flip can start a
+  new recording. The two poses of find center mode may have any flip, they never become a move.
+- 5: servo ids are sorted as numbers.
+- 6: `set_scenario` only accepts ids within the list and stores the id after the scenario is built.
+- 7: bad requests get a 400 with `{"success": false, "error": ...}`, a missing restore file a 404.
+- 8: the server listens on 127.0.0.1, CORS allows only the two UI origins, and posts that carry another `Origin`
+  are refused with a 403 (CORS alone doesn't stop a page from sending a simple post).
+- 9: save/restore take plain names in `recorded_moves/`, restore decodes with `safe=True` and checks the result.
+  `jsonpickle` still reconstructs objects, so only restore files the server wrote.
+- 11: `get_repulsive_forces_world` allocates one row per control point.
+- 12: a failed reboot command counts as a failed reboot.
+- 15: each trigger keeps its own value, z is the right trigger minus the left one.
+- 16: the `Servo2`/`Servo3` lookup takes the nearest table key.
+- 17: `to_bytes` raises when a value doesn't fit, `load_servo_config` checks every register value against its
+  size.
+- 18: the safety check refuses instead of waiting on `input()` and works in angles (see the controller above).
+- 22: `start()` resets the gripper target, so a restart opens the gripper.
+- 23: every pressed button of a read is handled, not only the first.
+- 24: `/xbox/setSpeed` only accepts 5-50.
+- 25: `/test2` is removed.
+- 26: `get_calibrations` raises `FileNotFoundError` instead of `sys.exit()` and the camera endpoints answer with
+  the error; the handlers use `calibration_data_charuco.json` when it exists, otherwise `calibration_data.json`.
+  All calibration scripts write to `src/camera/calibration/`, `camera_calibration.py` as `calibration_data.json`.
+- 28: `robot_move_test.py` moves to the xbox start pose.
 
 Fixed on 20 October, after the type check found most of them again (details in
 `Handover Bugs Found By Type Checking.md`):
@@ -386,7 +421,7 @@ Fixed in `6efdd99` (found by the code review of the xbox rework): `/xbox/speed` 
 
 ## Working on it
 
-- Run the tests: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"` (590 tests on 20
+- Run the tests: `venv\Scripts\python.exe -m unittest discover -s tests -t . -p "*test*.py"` (667 tests on 21
   October, 5 skip: 4 `robot_env_test.py` tests because `tf_agents` is not installed, and `test_repulsive_vectors`
   until the control points of `fred_new.urdf` are checked). The pre-commit hook runs them after mypy; enable it once
   per clone with `git config core.hooksPath .githooks`.
