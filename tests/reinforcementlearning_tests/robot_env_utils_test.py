@@ -207,6 +207,19 @@ class RepulsiveForceTests(unittest.TestCase):
         self.assert_vectors([0, 0, 50], clipped[1])
         self.assert_vectors([0, 0, 0], clipped[2])
 
+    def test_one_force_vector_per_control_point(self):
+        for number_of_control_points in (1, 2, 4, 5):
+            control_points = [self.control_point(i + 1) for i in range(number_of_control_points)]
+            # only the last control point is close to the obstacle
+            distances = {(number_of_control_points, 'obs'): ([0, 1, 0], 3)}
+
+            forces = self.get_forces(distances, control_points, ['obs'])
+
+            self.assertEqual((number_of_control_points, 3), forces.shape)
+            for force in forces[:-1]:
+                self.assert_vectors([0, 0, 0], force)
+            self.assert_vectors([0, (1 / 2 - 1 / 10) / (2 * 2), 0], forces[-1])
+
     def assert_vectors(self, expected_vector, actual_vector):
         np.testing.assert_allclose(actual_vector, expected_vector, atol=1e-6)
 

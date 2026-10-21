@@ -1,4 +1,5 @@
 import unittest
+from copy import copy
 
 from src.kinematics.kinematics import inverse_kinematics, forward_kinematics, forward_position_kinematics, \
     jacobian_transpose_on_f
@@ -196,6 +197,37 @@ class JacobianTransposeTests(unittest.TestCase):
             np.testing.assert_allclose(expected, jacobian_transpose_on_f(force, angles, robot_config, 10.0),
                                        atol=1e-5)
 
+    def test_every_control_point_matches_the_numerical_jacobian(self):
+        # J^T.f for a force on one control point, with J the derivative of that control point's position
+        rng = np.random.default_rng(10)
+        h = 1e-6
+        for c1_location in (robot_config.d4 / 2, 7.3, robot_config.d4):
+            for _ in range(20):
+                angles = random_angles(rng, bool(rng.random() < 0.5))
+                for control_point in range(3):
+                    force = np.zeros((3, 3))
+                    force[control_point] = rng.normal(size=3)
+                    expected = np.zeros(7)
+                    for joint in range(1, 7):
+                        delta = np.zeros(7)
+                        delta[joint] = h
+                        derivative = (self.control_point_position(angles + delta, control_point, c1_location) -
+                                      self.control_point_position(angles - delta, control_point, c1_location)) / (2 * h)
+                        expected[joint] = force[control_point] @ derivative
+                    np.testing.assert_allclose(
+                        expected, jacobian_transpose_on_f(force, angles, robot_config, c1_location), atol=1e-5,
+                        err_msg='control point {}, c1_location {}'.format(control_point + 1, c1_location))
+
+    @staticmethod
+    def control_point_position(angles, control_point, c1_location):
+        """control point 1 is c1_location along the forearm, 2 is the origin of frame 4, 3 the end effector"""
+        if control_point == 0:
+            q1, q2, q3 = angles[1], angles[2], angles[3]
+            reach = robot_config.a2 * cos(q2) + c1_location * sin(q2 + q3)
+            return np.array([cos(q1) * reach, sin(q1) * reach,
+                             robot_config.d1 + robot_config.a2 * sin(q2) - c1_location * cos(q2 + q3)])
+        return forward_position_kinematics(angles, robot_config)[2 + control_point]
+
 
 class PoseTest(unittest.TestCase):
 
@@ -276,6 +308,57 @@ class PoseTest(unittest.TestCase):
         np.testing.assert_array_equal(matrix, pose.get_euler_matrix())
         np.testing.assert_allclose(inverse_kinematics(Pose(25, 25, 10, alpha=0.5), robot_config),
                                    inverse_kinematics(pose, robot_config))
+
+    def test_copy_keeps_the_euler_matrix(self):
+        matrix = Pose(0, 0, 0, alpha=0.5, beta=0.3, gamma=-0.4).get_euler_matrix()
+        pose = Pose(25, 20, 10, flip=True, alpha=0.1, gamma=0.2, time=3.0, euler_matrix=matrix)
+
+        copied = copy(pose)
+
+        np.testing.assert_array_equal(matrix, copied.get_euler_matrix())
+        self.assertIsNot(pose.euler_matrix, copied.euler_matrix)
+        self.assertEqual(pose, copied)
+        np.testing.assert_allclose(inverse_kinematics(pose, robot_config), inverse_kinematics(copied, robot_config))
+        # the copy has to ignore alpha, beta and gamma like the original does
+        without_matrix = Pose(25, 20, 10, flip=True, alpha=0.1, gamma=0.2)
+        self.assertFalse(np.allclose(inverse_kinematics(without_matrix, robot_config),
+                                     inverse_kinematics(copied, robot_config)))
+
+    def test_reset_orientation_also_drops_the_euler_matrix(self):
+        matrix = Pose(0, 0, 0, alpha=0.5, beta=0.3, gamma=-0.4).get_euler_matrix()
+        pose = Pose(25, 20, 10, euler_matrix=matrix)
+
+        pose.reset_orientation()
+
+        np.testing.assert_allclose(inverse_kinematics(Pose(25, 20, 10), robot_config),
+                                   inverse_kinematics(pose, robot_config))
+
+    def test_copy_without_matrix_has_none(self):
+        pose = Pose(1, 2, 3, flip=True, alpha=0.1, beta=0.2, gamma=0.3, time=4.0)
+        copied = copy(pose)
+
+        self.assertIsNone(copied.euler_matrix)
+        self.assertEqual(pose.__dict__, copied.__dict__)
+
+    def test_equal_with_a_matrix_on_one_side_does_not_raise(self):
+        matrix = Pose(0, 0, 0, alpha=0.5).get_euler_matrix()
+        with_matrix = Pose(25, 25, 10, euler_matrix=matrix)
+
+        # the same orientation in both representations is the same pose
+        self.assertTrue(with_matrix == Pose(25, 25, 10, alpha=0.5))
+        self.assertTrue(Pose(25, 25, 10, alpha=0.5) == with_matrix)
+        self.assertFalse(with_matrix == Pose(25, 25, 10))
+        self.assertFalse(Pose(25, 25, 10) == with_matrix)
+        self.assertTrue(with_matrix != Pose(25, 25, 11, alpha=0.5))
+
+    def test_equal_with_matrices_on_both_sides(self):
+        matrix = Pose(0, 0, 0, alpha=0.5).get_euler_matrix()
+
+        # alpha, beta and gamma are ignored when there is a matrix
+        self.assertEqual(Pose(1, 2, 3, euler_matrix=matrix), Pose(1, 2, 3, alpha=0.9, euler_matrix=matrix.copy()))
+        self.assertNotEqual(Pose(1, 2, 3, euler_matrix=matrix), Pose(1, 2, 3, euler_matrix=np.eye(3)))
+        self.assertNotEqual(Pose(1, 2, 3, euler_matrix=matrix), Pose(1, 2, 3, flip=True, euler_matrix=matrix))
+        self.assertNotEqual(Pose(1, 2, 3, euler_matrix=matrix), 'pose')
 
 
 class RobotConfigTests(unittest.TestCase):

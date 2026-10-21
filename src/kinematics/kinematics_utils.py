@@ -72,18 +72,26 @@ class Pose:
         self.alpha = 0
         self.gamma = 0
         self.beta = 0
+        # a matrix overrides the angles in the inverse kinematics
+        self.euler_matrix = None
 
     def __copy__(self) -> Pose:
-        res = Pose(self.x, self.y, self.z, self.flip, self.alpha, self.beta, self.gamma, self.time)
-        return res
+        euler_matrix = None if self.euler_matrix is None else self.euler_matrix.copy()
+        return Pose(self.x, self.y, self.z, self.flip, self.alpha, self.beta, self.gamma, self.time, euler_matrix)
 
     def __str__(self) -> str:
         return 'POSE: x={} y={} z={}, a={} b={} g={} ,time={} filp={}'\
             .format(self.x, self.y, self.z, self.alpha, self.beta, self.gamma, self.time, self.flip)
 
     def __eq__(self, other: object) -> bool:
-        return (isinstance(other, self.__class__)
-                and self.__dict__ == other.__dict__)
+        if not isinstance(other, self.__class__):
+            return False
+        if self.euler_matrix is None and other.euler_matrix is None:
+            return self.__dict__ == other.__dict__
+        # a matrix overrides alpha, beta and gamma, so compare the orientations the poses stand for
+        return (self.x == other.x and self.y == other.y and self.z == other.z and self.time == other.time
+                and self.flip == other.flip
+                and bool(np.allclose(self.get_euler_matrix(), other.get_euler_matrix(), rtol=0, atol=1e-9)))
 
 
 class RobotConfig:

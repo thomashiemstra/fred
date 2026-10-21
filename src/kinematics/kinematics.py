@@ -193,13 +193,13 @@ def jacobian_transpose_on_f(workspace_force: np.ndarray, angles: np.ndarray, rob
     # first control point, somewhere between frame 3 and frame 4
     fx, fy, fz = workspace_force[0][x_comp], workspace_force[0][y_comp], workspace_force[0][z_comp]
     joint_forces[1] += (fy * c1 - fx * s1) * (a2 * c2 + c1_location * s23)
-    joint_forces[2] += a2 * fz * c2 + (fx * c2 + fy * s1) * (c1_location * c23 - a2 * s2) + c1_location * fz * s23
+    joint_forces[2] += a2 * fz * c2 + (fx * c1 + fy * s1) * (c1_location * c23 - a2 * s2) + c1_location * fz * s23
     joint_forces[3] += c1_location * c23 * (fx * c1 + fy * s1) + c1_location * fz * s23
 
     # second control point, origin of frame 4
     fx, fy, fz = workspace_force[1][x_comp], workspace_force[1][y_comp], workspace_force[1][z_comp]
     joint_forces[1] += (fy * c1 - fx * s1) * (a2 * c2 + d4 * s23)
-    joint_forces[2] += a2 * fz * c2 + (fx * c2 + fy * s1) * (d4 * c23 - a2 * s2) + d4 * fz * s23
+    joint_forces[2] += a2 * fz * c2 + (fx * c1 + fy * s1) * (d4 * c23 - a2 * s2) + d4 * fz * s23
     joint_forces[3] += d4 * c23 * (fx * c1 + fy * s1) + d4 * fz * s23
 
     # third control point, origin of frame 6

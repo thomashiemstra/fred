@@ -114,7 +114,7 @@ def get_repulsive_forces_world(robot_body_id: int, control_points: np.ndarray, o
                                physics_client_id: int, repulsive_cutoff_distance: float = 2,
                                clip_force: float | None = None) -> np.ndarray:
     nr_of_control_points = control_points.shape[0]
-    workspace_forces = np.zeros((3, nr_of_control_points))
+    workspace_forces = np.zeros((nr_of_control_points, 3))
 
     for i in range(nr_of_control_points):
         control_point = control_points[i]
