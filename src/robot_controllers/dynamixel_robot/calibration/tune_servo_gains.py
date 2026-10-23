@@ -6,16 +6,17 @@ nothing in its way and a hand near the power switch; one joint per run, the wris
 For every pose (--pose, a few named poses per joint by default) the script moves there with the planner at the yaml
 gains, records a baseline at rest, and then runs trials at increasing P (--factor steps from the yaml value up to
 --max-factor times it, or down from it when the yaml value itself fails). A trial clamps the goal pwm of the servo
-under test (a multiple of the pwm it needs to hold the pose, the only torque limit the XC430 wrist servos have),
-writes the gains to that servo only, records the rest (ripple of the position and the pwm), steps the goal a few
-positions up and down with the profile of the servo switched off (the response of the position loop itself:
-overshoot, rings, settle time, steady state error per direction), and streams a short planned move with the
-production profile (the tracking of the trajectory). The step is sized so the pwm stays below the clamp. A trial
-that overshoots, rings, doesn't settle, or raises the ripple or the pwm noise at rest is the knee of the sweep; the
-recommended P is 0.65 times the knee. When every pose has a recommendation, the smallest is the P of the joint, and
-the D gains 0, P/8, P/4 and P/2 are tried at that P at every pose where the step overshoots; the D with the least
-overshoot that doesn't add pwm noise is recommended. The other joints hold their position at their yaml gains
-throughout.
+under test (a multiple of the pwm it needs to hold the pose, the only torque limit the XC430 wrist servos have; the
+full 885 on joints 1, 4 and 6, which carry no static load), writes the gains to that servo only, records the rest
+(ripple of the position and the pwm), steps the goal a few positions up and down with the profile of the servo
+switched off (the response of the position loop itself: overshoot, rings, settle time, steady state error per
+direction), and streams a short planned move with the production profile (the tracking of the trajectory). The step
+is sized so the pwm stays below the clamp. A trial that overshoots, rings, doesn't settle, or raises the ripple or
+the pwm noise at rest is the knee of the sweep; the recommended P is 0.65 times the knee. When every pose has a
+recommendation, the smallest is the P of the joint, and the D gains 0, P/8, P/4, P/2 and the yaml D are tried at
+that P at every pose. A larger D than the smallest that passed is recommended only when it lowers the overshoot or
+the resting error after the steps (the friction band the joint lands in) by a position or removes a ring, without
+adding pwm noise. The other joints hold their position at their yaml gains throughout.
 
 Safety: every sample is checked live (temperature, voltage drop, position jumps, divergence from the trajectory,
 oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the profile and the goal pwm
@@ -87,7 +88,7 @@ SAMPLE_FIELDS = ('joint', 'pose', 'trial', 'p', 'd', 'segment', 'repeat', 'step_
                  'moving_status', 'voltage', 'temperature')
 TRIAL_FIELDS = ('joint', 'pose', 'pose_degrees', 'trial', 'phase', 'p', 'i', 'd', 'clamp', 'step', 'step_limited',
                 'rest_pp', 'rest_pwm_mean', 'rest_pwm_std', 'rest_pwm_residual_std', 'rest_error', 'max_overshoot',
-                'max_ring_count',
+                'max_ring_count', 'mean_abs_error',
                 'max_settle_time', 'min_rise_time', 'error_up', 'error_down', 'pwm_per_position', 'track_peak',
                 'track_rms', 'track_final', 'following_error', 'flags', 'warnings', 'aborted', 'temperature_start',
                 'temperature_end', 'voltage_min', 'sample_period')
@@ -96,6 +97,9 @@ MOVE_HOLD = 1.0  # seconds of hold after a streamed move
 GAIN_SETTLE = 0.3  # seconds between a gain write and the first measurement
 SAMPLES_PER_ABORT_CHECK = 5
 READ_ATTEMPTS = 3  # reads of the servo before a failure stops the run
+# the base yaw and the two wrist rolls carry no static load: a clamp of 3 times their holding pwm would sit at the
+# floor of pwm_clamp and starve the steps, so they run at the full MAX_PWM unless --pwm-clamp is given
+UNLOADED_JOINTS = (1, 4, 6)
 
 
 class Stop(Exception):
@@ -181,6 +185,11 @@ class TrialResult(NamedTuple):
     @property
     def max_ring_count(self) -> int:
         return max((m.ring_count for m in self.steps), default=0)
+
+    @property
+    def mean_abs_error(self) -> float:
+        """the mean of |final - goal| of the steps: where in its friction band the joint comes to rest"""
+        return float(np.mean([abs(m.error) for m in self.steps])) if self.steps else 0.0
 
 
 class PoseResult(NamedTuple):
@@ -440,6 +449,7 @@ class TuningSession:
             'rest_pwm_residual_std': '{:.2f}'.format(result.rest.pwm_residual_std),
             'rest_error': '{:.1f}'.format(result.rest.error_mean),
             'max_overshoot': '{:.1f}'.format(result.max_overshoot), 'max_ring_count': result.max_ring_count,
+            'mean_abs_error': '{:.1f}'.format(result.mean_abs_error) if result.steps else '',
             'max_settle_time': max_settle,
             'min_rise_time': '{:.3f}'.format(min(rise)) if rise else '',
             'error_up': '{:.1f}'.format(float(np.mean(errors_up))) if errors_up else '',
@@ -498,6 +508,8 @@ class TuningSession:
                 raise Stop('--pwm-clamp {} is below 1.5 times the holding pwm of {:.0f} at this pose'.format(
                     settings.clamp, holding))
             clamp = settings.clamp
+        elif self.joint in UNLOADED_JOINTS:
+            clamp = cfg.MAX_PWM
         else:
             clamp = pwm_clamp(holding)
         # the sag scales with 1 / P, the abort rules allow a multiple of it
@@ -697,12 +709,8 @@ class TuningSession:
         for d in sorted(set(values)):
             trial = self.run_trial(result.pose, 'd', joint_p, d, baseline)
             self.record(trials, trial)
-            if d == 0 and trial.passed and trial.max_overshoot <= settings.criteria.min_overshoot_positions \
-                    and self.servo.d == 0:
-                print('  no overshoot to damp at d=0, skipping the other D values')
-                break
-        recommended_d = choose_d([(t.d, t.passed, t.max_overshoot, t.max_ring_count, t.rest.pwm_residual_std)
-                                  for t in trials], settings.criteria.pwm_std_factor,
+        recommended_d = choose_d([(t.d, t.passed, t.max_overshoot, t.max_ring_count, t.rest.pwm_residual_std,
+                                   t.mean_abs_error) for t in trials], settings.criteria.pwm_std_factor,
                                  settings.criteria.pwm_std_floor)
         print('  D: recommended {}'.format(recommended_d))
         return result._replace(baseline=baseline, trials=result.trials + trials, recommended_d=recommended_d,
@@ -729,8 +737,9 @@ class TuningSession:
 def recommend(results: Sequence[PoseResult], yaml_d: int,
               criteria: Criteria = Criteria()) -> tuple[int | None, int | None]:
     """
-    the gains for the joint from the poses: the smallest recommended P (None when a pose has none), and the D that
-    passed at every pose where it was tried with the least overshoot (the yaml D when D was not tried, None when no
+    the gains for the joint from the poses: the smallest recommended P (None when a pose has none), and the D of
+    choose_d over the poses, judged per D on its worst pose: the largest overshoot, ring count, pwm noise and resting
+    error, passed only when it passed at every pose where it was tried (the yaml D when D was not tried, None when no
     D passed)
     """
     p = joint_p_of(results)
@@ -745,7 +754,8 @@ def recommend(results: Sequence[PoseResult], yaml_d: int,
             if t.phase == 'd':
                 by_d.setdefault(t.d, []).append(t)
     candidates = [(d, all(t.passed for t in trials), max(t.max_overshoot for t in trials),
-                   max(t.max_ring_count for t in trials), max(t.rest.pwm_residual_std for t in trials))
+                   max(t.max_ring_count for t in trials), max(t.rest.pwm_residual_std for t in trials),
+                   max(t.mean_abs_error for t in trials))
                   for d, trials in by_d.items()]
     return p, choose_d(candidates, criteria.pwm_std_factor, criteria.pwm_std_floor)
 
@@ -761,9 +771,10 @@ def print_summary(joint: int, results: Sequence[PoseResult], servo_p: int, servo
             r.number, pose_degrees(r.pose), r.knee_p, r.recommended_p,
             r.recommended_d if r.d_tested else 'not tried'))
         for t in r.trials:
-            print('    {:7s} p={:5d} d={:4d} step {:3d}: overshoot {:5.1f} rings {} rest pp {} pwm residual {:5.1f} '
-                  'slope {} {}{}'.format(t.phase, t.p, t.d, t.step, t.max_overshoot, t.max_ring_count,
-                                         t.rest.position_pp, t.rest.pwm_residual_std,
+            print('    {:7s} p={:5d} d={:4d} step {:3d}: overshoot {:5.1f} rings {} mean |error| {:4.1f} rest pp {} '
+                  'pwm residual {:5.1f} slope {} {}{}'.format(t.phase, t.p, t.d, t.step, t.max_overshoot,
+                                                              t.max_ring_count, t.mean_abs_error, t.rest.position_pp,
+                                                              t.rest.pwm_residual_std,
                                          '?' if t.pwm_slope is None else '{:.1f}'.format(t.pwm_slope),
                                          t.aborted or ' '.join(t.flags) or 'passed',
                                          ' (warnings: {})'.format(' '.join(t.warnings)) if t.warnings else ''))
@@ -824,7 +835,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--speed', type=float, default=0.5, help='joint speed of the planned moves in rad/s')
     parser.add_argument('--pwm-clamp', type=int, default=None,
                         help='goal pwm during the trials (885 is 100%%), default 3 times the holding pwm, at least '
-                             'half the limit')
+                             'half the limit, and the limit on joints {}'.format(
+                                 ', '.join(str(j) for j in UNLOADED_JOINTS)))
     parser.add_argument('--max-temperature', type=float, default=AbortLimits().max_temperature,
                         help='abort a trial when the servo reaches this temperature')
     parser.add_argument('--floor', type=float, default=None,

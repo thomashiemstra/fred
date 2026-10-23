@@ -17,8 +17,9 @@ decisions here come from a research and refutation pass over the plan and from a
   the friction band an integrator hunts or creeps; and the feedforward already carries the predictable part.
 - `src/robot_controllers/dynamixel_robot/calibration/tune_servo_gains.py` tunes P and D of one joint per run: small
   steps with the profile of the servo switched off under a goal pwm clamp, rising P until the first sign of ringing,
-  ripple or pwm noise, 0.65 times that knee as the recommendation, D only where the step overshoots. Order: the
-  wrist first (6, 4, 5), then 3, 1 and 2.
+  ripple or pwm noise, 0.65 times that knee as the recommendation, then the whole D grid at that P, a D above the
+  smallest passing one only where it lowers the overshoot or the resting error after the steps by a position.
+  Order: the wrist first (6, 4, 5), then 3, 1 and 2.
 - The script is tested against a simulated servo with friction and reviewed, not run on the robot. The abort
   thresholds are guesses until joint 6 has run.
 
@@ -110,12 +111,17 @@ One joint per run. The other joints hold their position at their yaml gains thro
 2. Trials at P = yaml P times 1.3^k up to twice the yaml P (`--factor`, `--max-factor`), or downwards from the
    yaml P when that one fails. A trial:
    - sets the goal pwm clamp of the servo: 3 times the holding pwm, at least half of 885, never above 885,
-     written and read back before the gains change, so the output is bounded from that moment;
+     written and read back before the gains change, so the output is bounded from that moment. Joints 1, 4 and 6
+     (the base yaw and the two wrist rolls) carry no static load and run at the full 885 by default since 23
+     October: their clamp sat at the floor of 442 and starved the steps, and a run of joint 6 needed
+     `--pwm-clamp 885` to measure anything;
    - writes the gains to this servo only and reads them back (sync writes aren't acknowledged), re-sends the goal;
    - records 3 s of rest: ripple, pwm noise, sag. The holding pwm of this rest may exceed the baseline's, because
      the servo sits on the other side of the friction band; the clamp is widened then;
    - sizes the step: `(0.8 * clamp - holding pwm) * 128 / P` positions, between 8 and 60, so the pwm stays below
-     the clamp if the servo really outputs P / 128 per position (the measured slope goes to the csv);
+     the clamp if the servo really outputs P / 128 per position (the measured slope goes to the csv). At the full
+     clamp of joints 1, 4 and 6 that is 60 positions up to a P of about 1500 and 34 at 2600, twice what the floor
+     of 442 allowed;
    - switches the profile of the servo off (velocity and acceleration 0, a step instruction) and steps the goal:
      up, back, down, back, twice; each step is held 0.8 s;
    - restores the profile and the goal pwm and streams a planned 8 degree move of the joint away and back with the
@@ -123,8 +129,19 @@ One joint per run. The other joints hold their position at their yaml gains thro
    - restores the yaml gains and reads everything back.
 3. The first trial that violates a criterion is the knee; 0.65 times the knee is the recommended P of the pose.
 4. When every pose has a recommendation, the smallest is the P of the joint. At that P, at every pose, D = 0,
-   P/8, P/4, P/2 (and the yaml D) are tried unless the step at D = 0 doesn't overshoot; the D with the least overshoot
-   and rings whose pwm noise stays below 1.5 times that of D = 0 is recommended.
+   P/8, P/4, P/2 and the yaml D are all tried, also where the step at D = 0 doesn't overshoot (until 23 October
+   the grid stopped there). A D counts when it passed and its pwm noise stays below 1.5 times that of the smallest D
+   tried (at least 5 units). The reference is D = 0, or the smallest D that passed when 0 failed; a larger D
+   replaces it only when it lowers the overshoot or the mean resting error after the steps (`mean_abs_error`, the
+   mean of |final - goal|) by at least a position, or removes a ring, without being a position worse in the other;
+   of those the one with the least resting error wins, then the least overshoot, rings, and the smaller D. Per
+   joint a D is judged on its worst pose. The resting error is what tells the D values apart on a joint that
+   doesn't overshoot: joint 6 at P 2600 on 23 October (`tune_joint6_20261023_1822`) passed with D 0, 320, 650, 1100
+   and 1300, all with an overshoot of a position or less, and the old rule picked 1100 on a 0.3 position
+   difference. What really differed was where the steps came to rest: D 0 at +4 +5 +3 +5 after the steps up and
+   -6 -3 -6 -3 after the steps down, D 1100 at +0 +2 +0 +2 and -3 +0 -2 +0 at the same pose. Without damping the
+   joint runs into the far side of its friction band, with damping it arrives at the setpoint. On a loaded joint
+   the sag dominates the resting error (the band sits around it), so there the choice falls back to the overshoot.
 
 Everything is measured against the final value of a step, not the goal: with I = 0 the servo settles at the goal
 minus the sag, so "settled within 2 positions of the goal" never happens on a loaded joint.
@@ -206,13 +223,15 @@ With the arm powered, its torque off, nothing in its way, foam under the elbow a
 hand near the power switch. It prints the plan and asks before enabling the servos (`--yes` skips the question).
 Options: `--pose`, `--factor` 1.3, `--max-factor` 2.0, `--no-d`, `--d-fractions 0,0.125,0.25,0.5`, `--repeats` 2,
 `--hold` 0.8 s, `--rest` 3 s, `--baseline-rest` 5 s, `--move-degrees` 8 (0 disables the streamed move), `--speed`
-0.5 rad/s, `--pwm-clamp` (overrides the clamp, refused below 1.5 times the holding pwm), `--max-temperature` 42,
-`--floor`, `--output-dir`, `--plot`.
+0.5 rad/s, `--pwm-clamp` (overrides the clamp on every joint, refused below 1.5 times the holding pwm; by default
+3 times the holding pwm, at least 442, and the full 885 on joints 1, 4 and 6, which carry no static load),
+`--max-temperature` 50, `--floor`, `--output-dir`, `--plot`.
 
 Output in `--output-dir`: `tune_joint<N>_<time>_samples.csv` (every sample: pose, trial, p, d, segment, repeat,
 step index, direction, time, tick, goal, position, position trajectory, velocity, velocity trajectory, pwm, current,
 moving status, voltage, temperature) and `..._trials.csv` (per trial: gains, clamp, step, rest ripple and pwm,
-sag, max overshoot, rings, settle and rise times, the steady state error per direction, the measured pwm per
+sag, max overshoot, rings, the mean resting error after the steps (`mean_abs_error`), settle and rise times, the
+steady state error per direction, the measured pwm per
 position, the tracking of the move, flags, warnings, abort reason, temperatures, voltage). The console shows every
 trial as it ends and a summary per pose with the yaml line to copy:
 
@@ -247,8 +266,9 @@ again.
   `MAX_GAIN` 16383, `MAX_PWM` 885, the moving status bits. `servo_config.py` bounds the yaml gains to `MAX_GAIN`.
 - Tests: `tests/servo_controller_tests/gain_tuning_tests.py` (the metrics on synthetic traces, every abort rule,
   the choices, and the whole session on a simulated second order servo with coulomb friction, a damping that drops
-  above a P threshold so it rings and, with a steep enough drop, oscillates with a bounded amplitude; the knee, the
-  abort, the sweep downwards, the D phase at the joint P, an environmental stop, a warm servo, a leftover clamp, a
+  above a P threshold so it rings and, with a steep enough drop, oscillates with a bounded amplitude, and a friction
+  band that narrows with D; the knee, the abort, the sweep downwards, the D phase at the joint P, a D chosen for the
+  band it rests in, the full clamp of an unloaded joint, an environmental stop, a warm servo, a leftover clamp, a
   flaky read, a refused pose) and the block read tests at the end of `servo_handler_tests.py`.
 - Removed: `calibration/pid_test.py` (2021: a quarter turn step of servo 1 at import, torque left on).
 
@@ -321,7 +341,8 @@ Open items:
   bounds the amplitude but needs access to the torque command, which the firmware's position mode doesn't give;
   G. Ellis, Control System Design Guide, 4th edition, Butterworth-Heinemann 2012, the servo drive practice the
   script follows: small steps in the linear region, raise P to the first ripple or overshoot and back off, D only
-  where the step overshoots, feedforward for the tracking lag.
+  where the step overshoots (the script also takes a D for the resting error, see the method), feedforward for the
+  tracking lag.
 - Dynamixel specifically: no peer reviewed tuning guidance. The ROBOTIS e-manual pages of the XM430-W350,
   XM540-W270, XC430-W240/W150 and XL330-M288 (the position controller diagram: the error feeds P, I and D in
   parallel, the feedforward gains act on the trajectory velocity and acceleration, the output is limited by the goal

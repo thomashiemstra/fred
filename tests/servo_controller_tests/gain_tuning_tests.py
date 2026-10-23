@@ -313,13 +313,39 @@ class ChoiceTests(unittest.TestCase):
         self.assertEqual((None, None), choose_p([], 1.3))
 
     def test_choose_d(self):
-        results = [(0, True, 5.0, 1, 3.0), (200, True, 2.0, 0, 3.5), (400, True, 1.0, 0, 6.0),
-                   (800, False, 0.5, 0, 9.0)]
+        # (d, passed, overshoot, rings, pwm residual std, mean |error|)
+        results = [(0, True, 5.0, 1, 3.0, 2.0), (200, True, 2.0, 0, 3.5, 2.0), (400, True, 1.0, 0, 6.0, 2.0),
+                   (800, False, 0.5, 0, 9.0, 2.0)]
         self.assertEqual(200, choose_d(results), 'the least overshoot without pwm noise')
         self.assertEqual(400, choose_d(results, pwm_std_floor=6.0), 'the floor admits the noisier one')
-        self.assertEqual(0, choose_d([(0, True, 1.0, 0, 3.0), (200, True, 1.0, 0, 3.0)]), 'the smallest on a tie')
-        self.assertIsNone(choose_d([(0, False, 1.0, 0, 3.0)]))
+        self.assertEqual(0, choose_d([(0, True, 1.0, 0, 3.0, 2.0), (200, True, 1.0, 0, 3.0, 2.0)]),
+                         'the smallest on a tie')
+        self.assertIsNone(choose_d([(0, False, 1.0, 0, 3.0, 2.0)]))
         self.assertIsNone(choose_d([]))
+
+    def test_choose_d_on_the_resting_error(self):
+        # joint 6 on 23 October: every D passed with an overshoot of a position or less, D 0 rested 4.4 positions
+        # from the goal on average, the damped joint 1.1
+        self.assertEqual(650, choose_d([(0, True, 1.0, 0, 3.0, 4.4), (650, True, 0.7, 0, 3.5, 1.4)]),
+                         'the same overshoot within noise, 3 positions less resting error')
+        self.assertEqual(0, choose_d([(0, True, 1.0, 0, 3.0, 2.0), (650, True, 0.7, 0, 3.5, 1.5)]),
+                         'half a position is noise')
+        self.assertEqual(0, choose_d([(0, True, 1.0, 0, 3.0, 4.4), (650, True, 1.0, 0, 6.0, 1.4)]),
+                         'less resting error but pwm noise above the limit')
+        self.assertEqual(0, choose_d([(0, True, 0.5, 0, 3.0, 4.4), (650, True, 1.8, 0, 3.5, 1.4)]),
+                         'less resting error but more overshoot by more than a position')
+        self.assertEqual(320, choose_d([(0, True, 1.0, 1, 3.0, 2.0), (320, True, 1.0, 0, 3.0, 2.0)]),
+                         'removes a ring')
+        self.assertEqual(1100, choose_d([(0, True, 1.0, 0, 3.0, 4.4), (320, True, 0.8, 0, 3.0, 3.2),
+                                         (650, True, 0.6, 0, 3.5, 2.0), (1100, True, 0.9, 0, 4.0, 1.1),
+                                         (1300, True, 0.5, 0, 4.4, 1.2)]),
+                         'the least resting error of the ones that qualify')
+        # D 0 failed: the reference is the smallest D that passed, a larger one has to improve on that
+        failed_at_0 = [(0, False, 4.0, 2, 3.0, 4.0), (320, True, 1.0, 0, 3.5, 3.0), (650, True, 0.8, 0, 4.0, 2.5)]
+        self.assertEqual(320, choose_d(failed_at_0), '650 gains only half a position over 320')
+        failed_at_0[2] = (650, True, 0.8, 0, 4.0, 1.8)
+        self.assertEqual(650, choose_d(failed_at_0))
+        self.assertEqual(320, choose_d(failed_at_0, min_improvement=1.5))
 
     def test_parse_pose(self):
         pose = parse_pose('elbow_out')
@@ -336,14 +362,17 @@ SIM_DAMPING = 73.0
 
 class SimulatedServo:
     """a second order position loop with a constant load: pwm = P / 128 * error, clamped to the goal pwm, the
-    damping falls as P rises, so the step overshoots more and more; D adds damping and pwm noise"""
+    damping falls as P rises, so the step overshoots more and more; D adds damping and pwm noise, and narrows the
+    friction band the servo comes to rest in (on the robot the damped joint arrives at the setpoint instead of running
+    into the far side of the band, joint 6 on 23 October)"""
 
     FORCE_PER_PWM = 213.0
     DAMPING = SIM_DAMPING
     DAMPING_PER_D = 0.078
     NOISE_PER_D = 0.02
     MAX_VELOCITY = 2000.0  # positions per second, bounds the amplitude of an unstable loop
-    FRICTION = 6000.0  # force units, about 28 pwm or 2.4 positions of error at P 1500
+    FRICTION = 6000.0  # force units, about 28 pwm or 2.4 positions of error at P 1500, at D = 0
+    FRICTION_D = 600.0  # the friction is FRICTION / (1 + D / FRICTION_D)
 
     def __init__(self, position, load=50000.0, resonance_above=None, resonance_slope=0.1, damping=SIM_DAMPING,
                  dt=DT):
@@ -368,6 +397,7 @@ class SimulatedServo:
 
     def advance(self, seconds):
         steps = max(1, int(round(seconds / self.dt)))
+        friction = self.FRICTION / (1.0 + self.d / self.FRICTION_D)
         for _ in range(steps):
             error = self.goal - self.position
             self.pwm = self.p / 128.0 * error - self.d / 16.0 * self.velocity * 0.0059
@@ -378,9 +408,9 @@ class SimulatedServo:
             net = self.pwm * self.FORCE_PER_PWM - damping * self.velocity - self.load
             # coulomb friction: it sticks until the net force exceeds the friction, and stops at a zero crossing
             if self.velocity == 0.0:
-                acceleration = 0.0 if abs(net) <= self.FRICTION else net - self.FRICTION * np.sign(net)
+                acceleration = 0.0 if abs(net) <= friction else net - friction * np.sign(net)
             else:
-                acceleration = net - self.FRICTION * np.sign(self.velocity)
+                acceleration = net - friction * np.sign(self.velocity)
             velocity = self.velocity + acceleration * self.dt
             if velocity * self.velocity < 0:
                 velocity = 0.0
@@ -489,9 +519,9 @@ class FakeTuningRobot(FakeRobot):
 
 
 def session_for(joint=3, resonance_above=None, resonance_slope=0.1, settings=None, writers=False,
-                resonance_by_pose=None):
+                resonance_by_pose=None, load=50000.0):
     pose = parse_pose('elbow_out')
-    sim = SimulatedServo(2048, resonance_above=resonance_above, resonance_slope=resonance_slope)
+    sim = SimulatedServo(2048, load=load, resonance_above=resonance_above, resonance_slope=resonance_slope)
     robot = FakeTuningRobot(pose, joint, sim, resonance_by_pose)
     servo = robot.servo_handler.get_servo(joint)
     servo.set_target_position_from_angle(pose[joint], pose)
@@ -539,10 +569,12 @@ class SessionTests(unittest.TestCase):
         self.assertAlmostEqual(-20, p_trials[0].steps[0].error, delta=2)
         self.assertAlmostEqual(1500 / 128, p_trials[0].pwm_slope, delta=1.0)
         self.assertTrue(all(m.moved for t in p_trials for m in t.steps))
-        # D: nothing to damp at the recommended P with a yaml D of 0, so only d=0 is tried, at the P of the joint
+        # D: the whole grid at the P of the joint, though d=0 doesn't overshoot; the larger ones add pwm noise and
+        # nothing else, the sag of the load sets the resting error
         d_trials = [t for t in extended.trials if t.phase == 'd']
-        self.assertEqual([0], [t.d for t in d_trials])
-        self.assertEqual([1650], [t.p for t in d_trials])
+        self.assertEqual([0, 210, 410, 820], [t.d for t in d_trials])
+        self.assertEqual({1650}, {t.p for t in d_trials})
+        self.assertLessEqual(d_trials[0].max_overshoot, Criteria().min_overshoot_positions)
         self.assertEqual(0, extended.recommended_d)
         self.assertEqual((1650, 0), recommend(results, servo.d))
         # the trials ran in two phases: the P sweeps of both poses, then the D sweeps
@@ -632,6 +664,58 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(d_trials)
             self.assertEqual({1270}, {t.p for t in d_trials}, 'D is tried at the P of the joint at every pose')
         self.assertEqual((1270, 0), recommend(results, 0))
+
+    def test_damping_is_chosen_for_the_friction_band_it_lands_in(self):
+        # an unloaded roll like joint 6: nothing overshoots, but D narrows the band the steps come to rest in
+        session, robot, sim, _, trial_file = self.session(joint=6, load=0.0, writers=True)
+        sim.NOISE_PER_D = 0.005  # so the largest D of the grid passes the pwm noise rule as well
+        results = session.run([parse_pose('elbow_out'), parse_pose('low')])
+        self.assertEqual(780, joint_p_of(results))
+        for r in results:
+            d_trials = [t for t in r.trials if t.phase == 'd']
+            self.assertEqual([0, 100, 200, 390], [t.d for t in d_trials])
+            self.assertTrue(all(t.passed for t in d_trials))
+            self.assertLessEqual(max(t.max_overshoot for t in d_trials), 1.0, 'no D wins on overshoot')
+            self.assertGreaterEqual(d_trials[0].mean_abs_error - d_trials[-1].mean_abs_error, 1.5)
+            self.assertEqual(390, r.recommended_d)
+        self.assertEqual((780, 390), recommend(results, 0))
+        rows = list(csv.DictReader(io.StringIO(trial_file.getvalue()), fieldnames=TRIAL_FIELDS))
+        self.assertEqual('{:.1f}'.format(results[-1].trials[-1].mean_abs_error), rows[-1]['mean_abs_error'])
+
+    def clamps_of(self, session):
+        """the clamps the trials of the session set, in order"""
+        clamps = []
+        original = session.set_clamp
+
+        def recording(clamp):
+            clamps.append(clamp)
+            original(clamp)
+        session.set_clamp = recording
+        return clamps
+
+    def test_the_unloaded_joints_run_at_the_full_clamp(self):
+        settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, max_factor=1.0,
+                            tune_d=False)
+        self.assertIn(6, tune_servo_gains.UNLOADED_JOINTS)
+        session, robot, sim, _, _ = self.session(joint=6, load=0.0, settings=settings)
+        clamps = self.clamps_of(session)
+        results = session.run([parse_pose('elbow_out')])
+        self.assertEqual(cfg.MAX_PWM, clamps[0])
+        self.assertEqual({cfg.MAX_PWM}, {t.clamp for t in results[0].trials})
+        self.assertTrue(results[0].trials[0].passed)
+        self.assertEqual({(6, cfg.MAX_PWM)}, set(robot.servo_handler.goal_pwm_writes), 'never below the limit')
+        # a loaded joint keeps 3 times its holding pwm
+        session, robot, sim, _, _ = self.session(joint=3, settings=settings)
+        clamps = self.clamps_of(session)
+        results = session.run([parse_pose('elbow_out')])
+        self.assertAlmostEqual(3 * abs(results[0].baseline.pwm_mean), clamps[0], delta=30)
+        self.assertLess(clamps[0], cfg.MAX_PWM)
+        # --pwm-clamp still overrides on every joint
+        session, robot, sim, _, _ = self.session(joint=6, load=0.0, settings=settings._replace(clamp=600))
+        clamps = self.clamps_of(session)
+        results = session.run([parse_pose('elbow_out')])
+        self.assertEqual(600, clamps[0])
+        self.assertEqual({600}, {t.clamp for t in results[0].trials})
 
     def test_an_environmental_abort_stops_the_run_and_keeps_the_finished_poses(self):
         session, robot, sim, _, trial_file = self.session(writers=True)

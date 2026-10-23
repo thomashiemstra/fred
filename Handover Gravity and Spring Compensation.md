@@ -362,13 +362,16 @@ The friction band scales with 1/P too and the feedforward can't remove it, so P 
 script `calibration/tune_servo_gains.py` (one joint per run, `--joint`) does that: at a few poses it records a
 baseline at rest, then trials at rising P (x1.3 from the yaml value up to 2x, or down when the yaml value fails):
 the rest ripple of the position and the pwm, small steps (sized to keep the pwm below a goal pwm clamp of 3 times
-the holding pwm, at least half the limit, applied before the gains are written) with the profile of the servo off
+the holding pwm, at least half the limit, the full limit on the unloaded joints 1, 4 and 6, applied before the
+gains are written) with the profile of the servo off
 so the loop itself is seen (overshoot, rings, settle time, steady state error per direction, the measured pwm per
 position of error against P / 128), and a streamed planned move with the production profile (tracking against the
 position trajectory of the servo). The first trial that overshoots more than 10 %, rings more than once, doesn't
 settle in 0.5 s or raises the ripple or pwm noise at rest (per unit of P) is the knee; it recommends 0.65 times
-the knee per pose. The smallest of the poses is the P of the joint; at that P it tries D = 0, P/8, P/4, P/2 at
-every pose where the step overshoots. Live abort rules (temperature, voltage drop, position jump, divergence,
+the knee per pose. The smallest of the poses is the P of the joint; at that P it tries D = 0, P/8, P/4, P/2 and
+the yaml D at every pose, and takes a D above the smallest passing one only where it lowers the overshoot or the
+resting error after the steps by a position without adding pwm noise (joint 6 on 23 October: every D overshot a
+position or less, but D 0 rested 3-6 positions from the goal and D 1100 0-3). Live abort rules (temperature, voltage drop, position jump, divergence,
 oscillation, pwm at the clamp) and Ctrl+C restore the yaml gains, profile and goal pwm at once; divergence,
 oscillation and pwm at the clamp count as the knee, the other three end the run with the finished poses kept;
 nothing touches the eeprom. Tested offline against a simulated second order servo with friction

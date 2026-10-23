@@ -404,20 +404,42 @@ def choose_p(results: Sequence[tuple[int, bool]], factor: float, margin: float =
     return None, None
 
 
-def choose_d(results: Sequence[tuple[int, bool, float, int, float]], pwm_std_factor: float = 1.5,
-             pwm_std_floor: float = 5.0) -> int | None:
+def choose_d(results: Sequence[tuple[int, bool, float, int, float, float]], pwm_std_factor: float = 1.5,
+             pwm_std_floor: float = 5.0, min_improvement: float = 1.0) -> int | None:
     """
     the D gain to use from the trials at the chosen P
-    :param results: (d, passed, overshoot in positions, ring count, pwm residual std at rest) per trial
-    :return: the passed D with the least overshoot and rings whose pwm noise stays below pwm_std_factor times that
-        of D = 0 (or of the smallest D tried) and the floor, the smallest D on a tie, None when nothing passed
+    :param results: (d, passed, overshoot in positions, ring count, pwm residual std at rest, mean of |final -
+        goal| of the steps in positions) per trial
+    :param min_improvement: positions of overshoot or of resting error a larger D has to gain over the reference
+    :return: None when nothing passed. The candidates passed and keep their pwm noise below pwm_std_factor times
+        that of the smallest D tried and the floor. The reference is the smallest candidate (D = 0 when it passed);
+        a larger D replaces it only when it beats it by min_improvement in overshoot or in resting error, or removes
+        a ring, without being worse by min_improvement in either. Of those the one with the least resting error,
+        then overshoot, then rings, then the smallest D.
+
+    The resting error is the signal where every D passes on overshoot: without damping the joint runs into the far
+    side of its friction band, with damping it arrives at the setpoint (joint 6 on 23 October: D 0 rested at +4 +5
+    +3 +5 / -6 -3 -6 -3 after the steps up and down, D 1100 at +0 +2 +0 +2 / -3 +0 -2 +0, both with an overshoot
+    of 1 position or less).
     """
     if not results:
         return None
-    reference = min(results, key=lambda r: r[0])[4]
-    limit = max(pwm_std_floor, pwm_std_factor * reference)
+    noise_reference = min(results, key=lambda r: r[0])[4]
+    limit = max(pwm_std_floor, pwm_std_factor * noise_reference)
     candidates = [r for r in results if r[1] and r[4] <= limit]
     if not candidates:
         return None
-    best = min(candidates, key=lambda r: (round(r[2], 1), r[3], r[0]))
-    return best[0]
+    reference = min(candidates, key=lambda r: r[0])
+    margin = min_improvement - 1e-9  # an improvement of exactly min_improvement counts
+
+    def qualifies(r: tuple[int, bool, float, int, float, float]) -> bool:
+        overshoot_gain = reference[2] - r[2]
+        error_gain = reference[5] - r[5]
+        better = overshoot_gain >= margin or error_gain >= margin or r[3] < reference[3]
+        worse = -overshoot_gain >= margin or -error_gain >= margin
+        return better and not worse
+
+    better = [r for r in candidates if r[0] > reference[0] and qualifies(r)]
+    if not better:
+        return reference[0]
+    return min(better, key=lambda r: (round(r[5], 1), round(r[2], 1), r[3], r[0]))[0]
