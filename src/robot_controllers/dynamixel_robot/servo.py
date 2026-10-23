@@ -96,10 +96,14 @@ class Servo:
             self._direction, self._extreme_angle = DOWN, angle
         return self._direction
 
+    def calibrated_range(self) -> tuple[int, int]:
+        """the lowest and the highest raw position of the calibrated range of this servo, offset included"""
+        return (min(self.min_position, self.max_position) + self.constant_offset,
+                max(self.min_position, self.max_position) + self.constant_offset)
+
     def clamp_position(self, position: float) -> int:
         """clamp the position to the calibrated range of this servo, including the constant offset"""
-        lower = min(self.min_position, self.max_position) + self.constant_offset
-        upper = max(self.min_position, self.max_position) + self.constant_offset
+        lower, upper = self.calibrated_range()
         return int(np.clip(position, lower, upper))
 
     def clamp_target_position(self) -> int:

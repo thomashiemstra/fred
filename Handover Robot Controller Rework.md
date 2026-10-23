@@ -96,8 +96,8 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   `load_servo_config()` checks the structure (fields, mode name, `[first, last]` pairs, whole numbers,
   `temperature_warning <= temperature_limit`) and returns new `Servo` objects every call. Every register value has
   to fit its register (pid, profile, goal current, positions and offset); the datasheet limits of each model aren't
-  checked. Recalibrating means editing the yaml. The safety check (`servo_1_check`/`servo_2_check` in
-  `src/utils/robot_controller_utils.py`) works in angles, so it doesn't move when servo 1 or 2 is recalibrated. The controller tests use `tests/servo_controller_tests/test_servo_config.yaml`;
+  checked. Recalibrating means editing the yaml. The range check of `enable_servos` uses the calibrated range of
+  the yaml, offset included, so it follows a recalibration. The controller tests use `tests/servo_controller_tests/test_servo_config.yaml`;
   `test_robot_starts_with_the_real_servo_configuration` and `servo_config_tests` also load the real file, so an
   invalid real yaml fails the tests.
 - `servo_handler.py`: all bus access, behind one `RLock` (`bus_lock`). Sync write/read helpers, adjacent registers in
@@ -121,15 +121,16 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   skipped with a warning), `DynamixelError` instead of `sys.exit`.
 - `dynamixel_robot_controller.py`: the facade.
   - `perform_safety_checks` (constructor, default `True`, also what `global_objects.get_robot` uses):
-    `initialize_servos` and the first position read raise `DynamixelError` on failure, and `enable_servos` runs
-    `safety_check()` first. It refuses, with a logged error that says where the servo is and to move the arm by
-    hand, when servo 1 is outside -120.4 to 99.3 degrees or servo 2 outside -40.2 to 179.6 degrees (raw 0 and 2500
-    with the calibration of 20 October); both servos are reported. It never waits for input, so it is safe from the
-    server. The hardware error and temperature checks always run.
-  - `enable_servos` refuses when `hold_current_position` can't read the positions, when hardware errors or
-    temperatures can't be read, when a servo has a hardware error or is too warm, or when `safety_check()` fails; it
-    sets the goal positions to the present positions before enabling the torque and disables all servos again when
-    one fails.
+    `initialize_servos` and the first position read raise `DynamixelError` on failure, and `enable_servos` first
+    checks that no arm servo rests more than `CALIBRATED_RANGE_MARGIN_DEGREES` (5) outside its calibrated range
+    (`get_servos_outside_calibrated_range`, the yaml range with the offset). Outside the range the reported angle is
+    clamped, so the first move would jump; it refuses with a logged error per servo that says where the servo is and
+    to move the arm by hand or recalibrate. It never waits for input, so it is safe from the server. The hardware
+    error and temperature checks always run. (Until 23 October 2026 this was a 2021 check of the raw positions of
+    servos 1 and 2 against 0 and 2500, translated into fixed angles, which forbade 99 to 180 degrees of the base.)
+  - `enable_servos` refuses when the positions, hardware errors or temperatures can't be read, when a servo has a
+    hardware error or is too warm, or when an arm servo is outside its calibrated range; it sets the goal positions
+    to the present positions before enabling the torque and disables all servos again when one fails.
   - `move_servos(angles)`: `angles` is a 7-element array indexed by servo id, index 0 unused. It stores the commanded
     angles as `_current_angles`, passes the whole array to `set_target_position_from_angle(angle, all_angles)` of
     servos 1-6 (the hook for the gravity compensation, unused by the plain `Servo` the yaml produces) and writes
@@ -363,8 +364,8 @@ The fixes of 20 and 21 October were only tested offline:
   `src/camera/calibration/calibration_data.json` is gone.
 - Failed reads: cut the servo power during a move, it should stop with a `MovementException` (or a
   `DynamixelError` from `move_to_pose`) and the arm should hold.
-- The safety check of servos 1 and 2 refuses with a logged error instead of asking on the console: check the message
-  with the arm resting outside the range.
+- `enable_servos` refuses with a logged error when an arm servo rests more than 5 degrees outside its calibrated
+  range: check the message with the arm resting outside the range, and that a drooped arm at rest stays inside it.
 - The Arduino angle sensor (COM5), if it is used again: `ArduinoAngleReader.stop()` was only tested on a loopback
   port.
 

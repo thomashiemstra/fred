@@ -126,15 +126,15 @@ way:
    The reached pose it prints should be within a few mm of the target; an offset error of 10 positions on servo 2 is
    about 0.9 degrees, 4 mm at the wrist. Check the base points straight ahead at the start pose.
 
-8. Update the "Servo 2 at rest" row of `Handover Robot Controller Rework.md` and the `safety_check` thresholds (below).
+8. Update the "Servo 2 at rest" row of `Handover Robot Controller Rework.md`.
 
 ## What else the offset touches
 
-- `servo_1_check` and `servo_2_check` in `src/utils/robot_controller_utils.py` compare the raw position with 2500
-  and 0 before the torque is enabled, and ask on the console when it is outside. With `offset: -567` the raw range
-  of servo 2 is 457-2505, so the top 5 positions of its range (179.6-180 degrees) would trigger the question; with
-  an offset above 428 the lower end of servo 1 would. Express these checks in angles instead (open issue 18 of the
-  rework handover).
+- Before the torque is enabled, `enable_servos` refuses when an arm servo rests more than 5 degrees
+  (`CALIBRATED_RANGE_MARGIN_DEGREES`) outside the calibrated range of the yaml, offset included: outside the range
+  the angle the controller reports is clamped to the range, so the first move would jump. The check follows the
+  offset, nothing else to update. (The 2021 check of the raw position against 0 and 2500 and its translation into
+  fixed angles were removed on 23 October 2026, they forbade 99 to 180 degrees of the base.)
 - The calibrated range in the yaml (`positions`) stays [1024, 3072]; only the offset moves. The mechanical range of
   the joint still has to cover it.
 - The gravity compensation handover assumes joint positions; the offset doesn't change it.

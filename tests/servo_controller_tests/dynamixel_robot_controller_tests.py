@@ -20,7 +20,7 @@ TEST_SERVO_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__))
 
 def calibrated_range(servo):
     """the lowest and highest position of the calibrated range of the servo, including its offset"""
-    return servo.clamp_position(-2 ** 31), servo.clamp_position(2 ** 31)
+    return servo.calibrated_range()
 
 
 def position_of(servo, angle):
@@ -252,9 +252,9 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.assertIsNone(self.robot.get_current_angles())
         self.assertEqual(1500, self.servos[0].current_position)
 
-    def test_failed_read_fails_the_safety_check(self):
+    def test_failed_read_refuses_to_enable(self):
         self.bus.unresponsive = {3}
-        self.assertFalse(self.robot.safety_check())
+        self.assertIsNone(self.robot.get_servos_outside_calibrated_range())
         self.assertFalse(self.robot.enable_servos())
 
     def test_single_servo_position(self):
@@ -347,6 +347,12 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.assertEqual({}, self.robot.get_servos_outside_calibrated_range())
         self.bus.set_position(2, lower - 15)
         self.assertEqual({2: (lower - 15, (lower, upper))}, self.robot.get_servos_outside_calibrated_range())
+        # with a margin: 5 degrees is 57 positions on a servo with 2048 positions per 180 degrees
+        self.assertEqual({}, self.robot.get_servos_outside_calibrated_range(margin_degrees=5.0))
+        self.bus.set_position(2, lower - 57)
+        self.assertEqual({}, self.robot.get_servos_outside_calibrated_range(margin_degrees=5.0))
+        self.bus.set_position(2, lower - 58)
+        self.assertEqual({2: (lower - 58, (lower, upper))}, self.robot.get_servos_outside_calibrated_range(5.0))
 
     def test_recalibrated_offset_is_used(self):
         servo = self.servos[1]
@@ -362,8 +368,7 @@ class TestDynamixelRobotController(unittest.TestCase):
 
     def test_enable_servos_disables_all_servos_when_one_fails(self):
         self.bus.unresponsive = {5}
-        with mock.patch.object(self.robot, 'safety_check', return_value=True):
-            self.assertFalse(self.robot.enable_servos())
+        self.assertFalse(self.robot.enable_servos())
         self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
 
     def test_profile_velocity_percentage_never_writes_zero(self):
@@ -416,40 +421,52 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.assertEqual([], bus.mock_calls)
 
     def test_servos_are_not_enabled_when_the_hardware_errors_can_not_be_read(self):
-        with mock.patch.object(self.robot, 'safety_check', return_value=True), \
-                mock.patch.object(self.robot.servo_handler, 'read_hardware_errors', return_value=None):
+        with mock.patch.object(self.robot.servo_handler, 'read_hardware_errors', return_value=None):
             self.assertFalse(self.robot.enable_servos())
         self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
 
     def test_servos_are_not_enabled_when_the_temperatures_can_not_be_read(self):
-        with mock.patch.object(self.robot, 'safety_check', return_value=True), \
-                mock.patch.object(self.robot.servo_handler, 'read_temperatures', return_value=None):
+        with mock.patch.object(self.robot.servo_handler, 'read_temperatures', return_value=None):
             self.assertIsNone(self.robot.get_overheating_servos())
             self.assertFalse(self.robot.enable_servos())
         self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
 
-    def test_failed_safety_check_disables_the_servos(self):
+    def test_servos_are_not_enabled_when_one_rests_outside_its_calibrated_range(self):
+        # the calibrated range of the yaml, offset included, plus the margin; servo 3 is mounted the other way around
         self.assertTrue(self.robot.enable_servos())
-        with mock.patch.object(self.robot, 'safety_check', return_value=False):
-            self.assertFalse(self.robot.enable_servos())
-        self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+        margin = drc.CALIBRATED_RANGE_MARGIN_DEGREES * 2048 / 180
+        for servo_id in (1, 2, 3):
+            lower, upper = calibrated_range(self.servos[servo_id - 1])
+            for position in (int(lower - margin - 2), int(upper + margin + 2)):
+                with self.subTest(servo=servo_id, position=position):
+                    self.bus.set_position(servo_id, position)
+                    writes = [p for p in self.bus.packets if p[0] == 'sync_write']
+                    with mock.patch('builtins.input', side_effect=AssertionError('read from stdin')), \
+                            self.assertLogs(drc.logger, 'ERROR') as logs:
+                        self.assertFalse(self.robot.enable_servos())
+                    self.assertIn('DANGER servo {} '.format(servo_id), logs.output[0])
+                    self.assertIn('raw position {}'.format(position), logs.output[0])
+                    self.assertIn('by hand', logs.output[0])
+                    self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+                    # no goal position was written either
+                    self.assertEqual(writes, [p for p in self.bus.packets if p[0] == 'sync_write'])
+                    self.bus.set_position(servo_id, 2048)
 
-    def test_servos_are_not_enabled_when_servo_1_or_2_is_out_of_range(self):
-        # raw positions that are below the 0 degree line or past the upper limit for the offsets of the test config
-        for servo_id, position in ((1, 0), (1, 3000), (2, 0), (2, 3000)):
-            with self.subTest(servo=servo_id, position=position):
-                self.bus.set_position(servo_id, position)
-                writes = [p for p in self.bus.packets if p[0] == 'sync_write']
-                with mock.patch('builtins.input', side_effect=AssertionError('read from stdin')), \
-                        self.assertLogs('src.utils.robot_controller_utils', 'ERROR') as check_logs, \
-                        self.assertLogs(drc.logger, 'ERROR') as logs:
-                    self.assertFalse(self.robot.enable_servos())
-                self.assertIn('servo {} '.format(servo_id), check_logs.output[0])
-                self.assertIn('failed the safety check', logs.output[0])
-                self.assertFalse(any(self.bus.torque(servo_id) for servo_id in range(1, 8)))
-                # no goal position was written either
-                self.assertEqual(writes, [p for p in self.bus.packets if p[0] == 'sync_write'])
-                self.bus.set_position(servo_id, 2048)
+    def test_a_little_outside_the_calibrated_range_is_allowed(self):
+        margin = drc.CALIBRATED_RANGE_MARGIN_DEGREES * 2048 / 180
+        lower, upper = calibrated_range(self.servos[1])
+        for position in (int(lower - margin + 2), int(upper + margin - 2)):
+            with self.subTest(position=position):
+                self.bus.set_position(2, position)
+                self.assertTrue(self.robot.enable_servos())
+                self.assertTrue(all(self.bus.torque(servo_id) for servo_id in range(1, 8)))
+                self.robot.disable_servos()
+
+    def test_the_range_check_is_skipped_without_safety_checks(self):
+        robot = self.make_robot(perform_safety_checks=False)
+        lower, _ = calibrated_range(self.servos[1])
+        self.bus.set_position(2, lower - 500)
+        self.assertTrue(robot.enable_servos())
 
     def test_servos_are_not_enabled_when_the_goal_position_can_not_be_set(self):
         with mock.patch.object(self.robot.servo_handler, 'hold_current_position', return_value=False):

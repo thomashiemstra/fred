@@ -16,7 +16,7 @@ from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement import move_from_current_angles
-from src.utils.robot_controller_utils import get_recommended_wait_time, servo_2_check, servo_1_check
+from src.utils.robot_controller_utils import get_recommended_wait_time, position_to_degrees
 
 if TYPE_CHECKING:
     from src.kinematics.kinematics_utils import Pose, RobotConfig
@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 ARM_IDS = (1, 2, 3, 4, 5, 6)
 GRIPPER_ID = 7
+# how far outside its calibrated range (servo_config.yaml, offset included) an arm servo may rest when the torque is
+# enabled: further out its reported angle is clamped to the range and the first move would jump
+CALIBRATED_RANGE_MARGIN_DEGREES = 5.0
 
 
 # Facade for the robot as a whole, abstracting away the servo handling
@@ -108,11 +111,31 @@ class DynamixelRobotController(AbstractRobotController):
 
     @synchronized_with_lock("bus_lock")
     def enable_servos(self) -> bool:
-        """enable the torque of all servos, returns True on success"""
-        if self.perform_safety_checks and not self.safety_check():
-            logger.error('failed the safety check, disabling servos!')
-            self.disable_servos()
-            return False
+        """enable the torque of all servos, returns True on success
+
+        Refuses when an arm servo rests more than CALIBRATED_RANGE_MARGIN_DEGREES outside its calibrated range (with
+        perform_safety_checks), when a servo has a hardware error or is too warm, or when anything can't be read.
+        """
+        if self.perform_safety_checks:
+            outside = self.get_servos_outside_calibrated_range(CALIBRATED_RANGE_MARGIN_DEGREES)
+            if outside is None:
+                logger.error('failed to read the servo positions, disabling servos!')
+                self.disable_servos()
+                return False
+            if outside:
+                for servo_id, (position, (lower, upper)) in outside.items():
+                    servo = self.servo_handler.get_servo(servo_id)
+                    low_degrees, high_degrees = sorted((position_to_degrees(servo, lower),
+                                                        position_to_degrees(servo, upper)))
+                    logger.error('DANGER servo %d is at raw position %d (%.1f degrees), more than %.0f degrees outside '
+                                 'its calibrated range of %d to %d (%.0f to %.0f degrees): its reported angle would be '
+                                 'clamped to the range and the first move would jump. Move the arm by hand into the '
+                                 'range, or recalibrate the offset, and try again', servo_id, position,
+                                 position_to_degrees(servo, position), CALIBRATED_RANGE_MARGIN_DEGREES, lower, upper,
+                                 low_degrees, high_degrees)
+                logger.error('servos %s are outside their calibrated range, disabling servos!', sorted(outside))
+                self.disable_servos()
+                return False
 
         if self.get_hardware_errors() != {}:
             logger.error('not all servos are working, not enabling the servos!')
@@ -132,15 +155,6 @@ class DynamixelRobotController(AbstractRobotController):
             logger.error('failed to enable all servos, disabling servos!')
             self.disable_servos()
         return success
-
-    def safety_check(self) -> bool:
-        positions = self.get_current_positions()
-        if positions is None:
-            return False
-        # both checks run, so both servos are reported when both are out of range
-        servo_1_safe = servo_1_check(positions, self.servo1)
-        servo_2_safe = servo_2_check(positions, self.servo2)
-        return servo_1_safe and servo_2_safe
 
     def disable_servos(self) -> bool:
         """disable the torque of all servos, returns True on success"""
@@ -218,17 +232,25 @@ class DynamixelRobotController(AbstractRobotController):
             logger.error('servo %d is too warm: %dC, the limit is %dC', servo_id, temperature, limit)
         return overheating
 
-    def get_servos_outside_calibrated_range(self) -> dict[int, tuple[int, tuple[int, int]]] | None:
-        """returns a mapping of servo id to (present position, calibrated range) of the arm servos outside their
-        calibrated range, their angle is clamped to the range so it differs from the actual angle"""
+    def get_servos_outside_calibrated_range(self, margin_degrees: float = 0.0
+                                            ) -> dict[int, tuple[int, tuple[int, int]]] | None:
+        """
+        returns a mapping of servo id to (present position, calibrated range) of the arm servos that are more than
+        the margin outside their calibrated range, or None if the servos could not be read. Outside the range the
+        angle a servo reports is clamped to the range, so it differs from the actual angle.
+        :param margin_degrees: how far outside the range (offset included) a servo may be
+        """
         outside = {}
         if not self.servo_handler.read_current_pos(ARM_IDS):
             return None
         for servo_id in ARM_IDS:
             servo = self.servo_handler.get_servo(servo_id)
-            if servo.clamp_position(servo.current_position) != servo.current_position:
-                calibrated_range = (servo.clamp_position(-2 ** 31), servo.clamp_position(2 ** 31))
-                outside[servo_id] = (servo.current_position, calibrated_range)
+            lower, upper = servo.calibrated_range()
+            positions_per_degree = abs(servo.max_position - servo.min_position) / np.degrees(
+                servo.max_angle - servo.min_angle)
+            margin = int(round(margin_degrees * positions_per_degree))
+            if not lower - margin <= servo.current_position <= upper + margin:
+                outside[servo_id] = (servo.current_position, (lower, upper))
         return outside
 
     def get_current_gripper_position(self) -> np.ndarray | None:
