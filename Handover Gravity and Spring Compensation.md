@@ -374,7 +374,7 @@ oscillation and pwm at the clamp count as the knee, the other three end the run 
 nothing touches the eeprom. Tested offline against a simulated second order servo with friction
 (`tests/servo_controller_tests/gain_tuning_tests.py`) and reviewed; joint 6 ran on 21-23 October without a
 false abort (the thresholds: 40 positions or 2.5 times the sag of divergence, 6 positions of oscillation, 90 % of
-the clamp, 50 C, 0.7 V).
+the clamp, 50 C, 1.5 V).
 Order: the wrist first (6, 4, 5: the rolls carry no static load, so a mistake is cheap and the sampling, the abort
 rules and the restore get checked there), then 3, 1 and 2 last (the belt joints; 2 carries the arm). Distal first
 because the distal joints are the load of the proximal ones and have to hold stiffly with their final gains when

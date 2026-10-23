@@ -97,7 +97,7 @@ class Criteria(NamedTuple):
 class AbortLimits(NamedTuple):
     """the live limits, a sample beyond one aborts the trial and restores the gains at once"""
     max_temperature: float = 50.0  # degrees, at the 50 C shutoff temp of the robot, the winding is warmer than the sensor
-    max_voltage_drop: float = 0.7  # volts below the voltage at the start of the trial
+    max_voltage_drop: float = 1.5  # volts below the voltage at the start of the trial
     max_jump: int = 50  # positions between two samples, an encoder glitch or a slipped belt
     divergence_factor: float = 3.0  # times the step, or
     divergence_minimum: int = 40  # positions of error against the trajectory, or

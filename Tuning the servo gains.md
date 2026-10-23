@@ -152,7 +152,7 @@ and the goal pwm at once:
 | oscillation | after the grace, position peak to peak over 0.2 s above max(6, 3 times the baseline) | the knee |
 | pwm at the clamp | the pwm within 10 % of the clamp for 0.1 s | the knee |
 | temperature | 50 C, the stop limit of the robot (raised from 42 on 23 October); the 45 C warning check between trials stops the run earlier, and a servo is not tried within 3 C of the abort limit | ends the run |
-| voltage | 0.7 V below the voltage at the start of the trial | ends the run |
+| voltage | 1.5 V below the voltage at the start of the trial (0.7 until 23 October, which the dips of the supply reached) | ends the run |
 | position jump | more than 50 positions between two samples (encoder glitch, slipped belt) | ends the run |
 
 The sag expected at the gains of a trial is the sag of the baseline times yaml P / P; the baseline itself runs with
@@ -272,8 +272,8 @@ Assumptions the plan still rests on, each a one line measurement on joint 6:
   "based on present movement velocity"), so the tracking error of the move test is meaningful; log the host goal
   next to it, which the csv does.
 - The abort thresholds: 40 positions or 2.5 times the sag of divergence, 6 positions of oscillation, 90 % of the
-  clamp for 0.1 s, 50 C, 0.7 V, 50 positions of jump. They are guesses; the joint 6 runs of 21-23 October did
-  not trip them falsely at rest.
+  clamp for 0.1 s, 50 C, 1.5 V, 50 positions of jump. They are guesses; the joint 6 runs of 21-23 October did
+  not trip them falsely at rest once the temperature and voltage limits were raised.
 - The loop rate of the servos (about 1 kHz is assumed everywhere, nothing in the manual says so), the behaviour of
   the integrator across goals (irrelevant while I = 0), and the Bus Watchdog as a dead man (untested, not used).
 

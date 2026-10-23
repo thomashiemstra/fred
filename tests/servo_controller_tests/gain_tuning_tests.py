@@ -252,8 +252,9 @@ class AbortTests(unittest.TestCase):
         self.assertEqual('temperature {}C'.format(limit), self.check(samples([2000] * 10, temperature=limit)))
         self.assertIsNone(self.check(samples([2000] * 10, temperature=limit),
                                      limits=AbortLimits(max_temperature=limit + 3)))
-        self.assertIn('voltage', self.check(samples([2000] * 10, voltage=11.0)))
-        self.assertIsNone(self.check(samples([2000] * 10, voltage=11.2)))
+        drop = AbortLimits().max_voltage_drop
+        self.assertIn('voltage', self.check(samples([2000] * 10, voltage=11.8 - drop - 0.1)))
+        self.assertIsNone(self.check(samples([2000] * 10, voltage=11.8 - drop + 0.1)))
 
     def test_position_jump(self):
         self.assertIn('jumped', self.check(samples([2000, 2000, 2060])))
@@ -278,7 +279,7 @@ class AbortTests(unittest.TestCase):
 
     def test_environmental_reasons(self):
         for rows in (samples([2000] * 10, temperature=int(AbortLimits().max_temperature)),
-                     samples([2000] * 10, voltage=11.0),
+                     samples([2000] * 10, voltage=11.8 - AbortLimits().max_voltage_drop - 0.1),
                      samples([2000, 2000, 2060])):
             self.assertTrue(environmental_abort(self.check(rows)))
         for rows in (samples([2000] * 400, trajectory=2100), samples([2000, 2010] * 200),
