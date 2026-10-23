@@ -18,7 +18,8 @@ Flask==3.0.3
 Flask-Cors==4.0.1
 Flask-CDN==1.5.3
 inputs==0.5
-# not installed: evdev, which the wireless xbox controller (XboxOneController) needs on Linux only
+# the wireless xbox controller (XboxOneController) on Linux, pip skips it elsewhere, so it isn't in the windows venv
+evdev==2.0.0; sys_platform == "linux"
 jsonpickle==3.0.4
 # reinforcement learning; incomplete, it also needs tf-agents, tensorflow-probability and gin-config (see
 # Sacrequirements.txt for the docker image), which aren't installed, so that code doesn't run yet

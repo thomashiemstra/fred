@@ -4,7 +4,7 @@ The wireless xbox one controller. It delivers the same inputs as the wired Xbox3
 On Windows the wireless controller is an xinput device like the wired one, so the inputs library reads it and
 nothing differs. On Linux the inputs library doesn't find it over Bluetooth (it only looks in /dev/input/by-id and
 /dev/input/by-path, where Bluetooth devices aren't listed), so it is read with evdev, which only exists on Linux and
-isn't in requirements.txt. The kernel's hid driver gives it other codes and ranges than the xpad driver gives the
+is only installed there. The kernel's hid driver gives it other codes and ranges than the xpad driver gives the
 wired controller: the right stick is ABS_Z and ABS_RZ, the triggers are ABS_BRAKE and ABS_GAS with 0..1023 and the
 sticks report 0..65535. Every input is turned into what the wired controller reports, so the scaling, the dead zone
 and the signs are those of Xbox360Controller. The xpadneo driver uses yet other codes, it isn't supported. Without
