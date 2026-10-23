@@ -4,9 +4,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import dynamixel_sdk as dynamixel
 import src.robot_controllers.dynamixel_robot.dynamixel_utils as utils
@@ -18,6 +18,24 @@ if TYPE_CHECKING:
     from src.robot_controllers.dynamixel_robot.servo import Servo
 
 logger = logging.getLogger(__name__)
+
+# a field of a block read: address, length and whether the value is signed
+Field = tuple[int, int, bool]
+
+
+class ServoState(NamedTuple):
+    """the registers of the control loop of a servo, read in one packet by ServoHandler.read_state"""
+    tick: int  # the realtime tick of the servo in ms, wraps at 32767
+    moving: int
+    moving_status: int  # see MOVING_STATUS_* in dynamixel_x_config
+    pwm: int  # signed, 885 is 100 % duty
+    current: int  # signed, the present current (XM, XL servos) or the present load (XC430)
+    velocity: int  # signed, 0.229 rpm per unit
+    position: int  # signed
+    velocity_trajectory: int  # signed, the velocity the profile of the servo asks for
+    position_trajectory: int  # signed, the position the profile asks for, the setpoint of the position loop
+    voltage: float  # input voltage in volts
+    temperature: int  # degrees celsius
 
 
 class ServoHandler(object):
@@ -56,6 +74,10 @@ class ServoHandler(object):
         if (config.ADDR_PROFILE_ACCELERATION + config.LEN_PROFILE_ACCELERATION != config.ADDR_PROFILE_VELOCITY or
                 config.ADDR_D + config.LEN_PID != config.ADDR_I or config.ADDR_I + config.LEN_PID != config.ADDR_P):
             raise ValueError("the profile or pid registers in the config are not adjacent")
+        # the state block of read_state runs from the realtime tick to the temperature
+        if (config.ADDR_PRESENT_TEMPERATURE + config.LEN_PRESENT_TEMPERATURE - config.ADDR_REALTIME_TICK
+                != config.LEN_STATE_BLOCK):
+            raise ValueError("the state block in the config doesn't cover the tick to the temperature")
         # guards the usb connection, all communication with the servos goes through this lock
         self.bus_lock = threading.RLock()
 
@@ -147,6 +169,18 @@ class ServoHandler(object):
         return self.__sync_write(self.config.ADDR_PROFILE_ACCELERATION,
                                  self.config.LEN_PROFILE_ACCELERATION + self.config.LEN_PROFILE_VELOCITY, data)
 
+    def set_profile(self, servo_id: int, velocity: int, acceleration: int) -> bool:
+        """
+        set the profile of one servo to the given values instead of the configured ones, the Servo object keeps
+        its configured profile so set_profile_velocity_and_acceleration restores it; 0 means unlimited
+        """
+        if velocity < 0 or acceleration < 0:
+            raise ValueError("the profile velocity and acceleration can't be negative")
+        data = {servo_id: (utils.to_bytes(acceleration, self.config.LEN_PROFILE_ACCELERATION) +
+                           utils.to_bytes(velocity, self.config.LEN_PROFILE_VELOCITY))}
+        return self.__sync_write(self.config.ADDR_PROFILE_ACCELERATION,
+                                 self.config.LEN_PROFILE_ACCELERATION + self.config.LEN_PROFILE_VELOCITY, data)
+
     def set_profile_velocity_percentage(self, percentage: float, servo_ids: Iterable[int] | None = None) -> bool:
         """
         set the profile velocity as percentage of the maximum configured
@@ -182,8 +216,18 @@ class ServoHandler(object):
         return self.__write_pid(pid)
 
     def set_pid_single_servo(self, servo_id: int, p: int, i: int, d: int) -> bool:
-        """set the pid values of a single servo, this get's wiped after a reboot"""
+        """set the pid values of a single servo, this get's wiped after a reboot; the Servo object keeps the
+        configured values, so set_pid restores them"""
         return self.__write_pid({servo_id: (p, i, d)})
+
+    def set_goal_pwm(self, servo_id: int, value: int) -> bool:
+        """
+        set the goal pwm of one servo: in position mode a limit on the pwm output, so on the torque, between
+        -MAX_PWM and MAX_PWM (885, 100 %); it is reset to the pwm limit by a reboot or a change of operating mode
+        """
+        if abs(value) > self.config.MAX_PWM:
+            raise ValueError("the goal pwm %d is outside -%d..%d" % (value, self.config.MAX_PWM, self.config.MAX_PWM))
+        return self.__sync_write_values(self.config.ADDR_GOAL_PWM, self.config.LEN_GOAL_PWM, {servo_id: value})
 
     def move_to_angles(self, servo_ids: Iterable[int] | None = None) -> bool:
         """set the physical servos to their target position"""
@@ -236,10 +280,74 @@ class ServoHandler(object):
             return None
         return self.servo_map[servo_id].current_position
 
+    def read_torque_enabled(self, servo_ids: Iterable[int] | None = None) -> dict[int, bool] | None:
+        """returns a mapping of servo id to whether its torque is enabled, or None on failure"""
+        values = self.__sync_read(self.config.ADDR_TORQUE_ENABLE, 1, self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: bool(value) for servo_id, value in values.items()}
+
     def read_profile_velocity(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
         """returns a mapping of servo id to profile velocity, or None if the servos could not be read"""
         return self.__sync_read(self.config.ADDR_PROFILE_VELOCITY, self.config.LEN_PROFILE_VELOCITY,
                                 self.__ids(servo_ids))
+
+    def read_profile(self, servo_ids: Iterable[int] | None = None) -> dict[int, tuple[int, int]] | None:
+        """returns a mapping of servo id to (profile velocity, profile acceleration), or None on failure"""
+        c = self.config
+        fields: Sequence[Field] = ((c.ADDR_PROFILE_VELOCITY, c.LEN_PROFILE_VELOCITY, False),
+                                   (c.ADDR_PROFILE_ACCELERATION, c.LEN_PROFILE_ACCELERATION, False))
+        values = self.__sync_read_fields(c.ADDR_PROFILE_ACCELERATION,
+                                         c.LEN_PROFILE_ACCELERATION + c.LEN_PROFILE_VELOCITY, fields,
+                                         self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: (value[0], value[1]) for servo_id, value in values.items()}
+
+    def read_pid(self, servo_ids: Iterable[int] | None = None) -> dict[int, tuple[int, int, int]] | None:
+        """returns a mapping of servo id to the (p, i, d) gains the servo has, or None on failure; a sync write
+        isn't acknowledged, so this is the only way to know a gain write took"""
+        c = self.config
+        fields: Sequence[Field] = ((c.ADDR_P, c.LEN_PID, False), (c.ADDR_I, c.LEN_PID, False),
+                                   (c.ADDR_D, c.LEN_PID, False))
+        values = self.__sync_read_fields(c.ADDR_D, 3 * c.LEN_PID, fields, self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: (value[0], value[1], value[2]) for servo_id, value in values.items()}
+
+    def read_goal_pwm(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
+        """returns a mapping of servo id to its signed goal pwm, or None on failure"""
+        values = self.__sync_read(self.config.ADDR_GOAL_PWM, self.config.LEN_GOAL_PWM, self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: utils.to_signed(value, self.config.LEN_GOAL_PWM) for servo_id, value in values.items()}
+
+    def read_state(self, servo_ids: Iterable[int] | None = None) -> dict[int, ServoState] | None:
+        """
+        returns a mapping of servo id to the ServoState of the servo, read in one packet per bus (addresses
+        120 to 146: the realtime tick, moving, moving status, present pwm, current or load, velocity and position,
+        the velocity and position trajectory of the profile, the input voltage and the temperature), or None on
+        failure. About 2 ms for one servo, 1 ms more per servo on the same bus.
+        """
+        c = self.config
+        fields: Sequence[Field] = (
+            (c.ADDR_REALTIME_TICK, c.LEN_REALTIME_TICK, False), (c.ADDR_MOVING, c.LEN_MOVING, False),
+            (c.ADDR_MOVING_STATUS, c.LEN_MOVING_STATUS, False), (c.ADDR_PRESENT_PWM, c.LEN_PRESENT_PWM, True),
+            (c.ADDR_PRESENT_CURRENT, c.LEN_PRESENT_CURRENT, True),
+            (c.ADDR_PRESENT_VELOCITY, c.LEN_PRESENT_VELOCITY, True),
+            (c.ADDR_PRESENT_POSITION, c.LEN_PRESENT_POSITION, True),
+            (c.ADDR_VELOCITY_TRAJECTORY, c.LEN_VELOCITY_TRAJECTORY, True),
+            (c.ADDR_POSITION_TRAJECTORY, c.LEN_POSITION_TRAJECTORY, True),
+            (c.ADDR_PRESENT_INPUT_VOLTAGE, c.LEN_PRESENT_INPUT_VOLTAGE, False),
+            (c.ADDR_PRESENT_TEMPERATURE, c.LEN_PRESENT_TEMPERATURE, False))
+        values = self.__sync_read_fields(c.ADDR_REALTIME_TICK, c.LEN_STATE_BLOCK, fields, self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: ServoState(tick=value[0], moving=value[1], moving_status=value[2], pwm=value[3],
+                                     current=value[4], velocity=value[5], position=value[6],
+                                     velocity_trajectory=value[7], position_trajectory=value[8],
+                                     voltage=value[9] / 10.0, temperature=value[10])
+                for servo_id, value in values.items()}
 
     def read_hardware_errors(self, servo_ids: Iterable[int] | None = None) -> dict[int, list[str]] | None:
         """returns a mapping of servo id to a list of the names of its hardware errors, for the servos that have one
@@ -280,14 +388,17 @@ class ServoHandler(object):
             self, servo_ids: Iterable[int] | None = None
     ) -> dict[int, tuple[int, float]] | None:
         """returns a mapping of servo id to (temperature in degrees celsius, input voltage), or None on failure"""
-        servo_ids = self.__ids(servo_ids)
-        temperatures = self.read_temperatures(servo_ids)
-        voltages = self.__sync_read(self.config.ADDR_PRESENT_INPUT_VOLTAGE, self.config.LEN_PRESENT_INPUT_VOLTAGE,
-                                    servo_ids)
-        if temperatures is None or voltages is None:
+        c = self.config
+        # the voltage and temperature registers are adjacent, so they are read in one packet per bus
+        fields: Sequence[Field] = ((c.ADDR_PRESENT_TEMPERATURE, c.LEN_PRESENT_TEMPERATURE, False),
+                                   (c.ADDR_PRESENT_INPUT_VOLTAGE, c.LEN_PRESENT_INPUT_VOLTAGE, False))
+        values = self.__sync_read_fields(c.ADDR_PRESENT_INPUT_VOLTAGE,
+                                         c.LEN_PRESENT_INPUT_VOLTAGE + c.LEN_PRESENT_TEMPERATURE, fields,
+                                         self.__ids(servo_ids))
+        if values is None:
             return None
         # the input voltage is in units of 0.1V
-        return {servo_id: (temperatures[servo_id], voltages[servo_id] / 10.0) for servo_id in servo_ids}
+        return {servo_id: (value[0], value[1] / 10.0) for servo_id, value in values.items()}
 
     def __ids(self, servo_ids: Iterable[int] | None) -> list[int]:
         if servo_ids is None:
@@ -313,6 +424,11 @@ class ServoHandler(object):
         # the d, i and p registers are adjacent (in that order), so they are written in a single packet
         data = {}
         for servo_id, (p, i, d) in pid.items():
+            for name, gain in (('p', p), ('i', i), ('d', d)):
+                # the servos drop a gain outside their range silently, the sync write isn't acknowledged
+                if not 0 <= gain <= self.config.MAX_GAIN:
+                    raise ValueError("[ID:%03d] the %s gain %d is outside 0..%d" % (servo_id, name, gain,
+                                                                                    self.config.MAX_GAIN))
             data[servo_id] = (utils.to_bytes(d, self.config.LEN_PID) +
                               utils.to_bytes(i, self.config.LEN_PID) +
                               utils.to_bytes(p, self.config.LEN_PID))
@@ -344,25 +460,40 @@ class ServoHandler(object):
             return False
         return True
 
-    @synchronized_with_lock("bus_lock")
     def __sync_read(self, address: int, length: int, servo_ids: list[int]) -> dict[int, int] | None:
         """read the given address of all servos with a single packet per bus
 
         returns a mapping of servo id to the unsigned value, or None if any of the servos could not be read
+        """
+        values = self.__sync_read_fields(address, length, ((address, length, False),), servo_ids)
+        if values is None:
+            return None
+        return {servo_id: fields[0] for servo_id, fields in values.items()}
+
+    @synchronized_with_lock("bus_lock")
+    def __sync_read_fields(self, address: int, length: int, fields: Sequence[Field],
+                           servo_ids: list[int]) -> dict[int, tuple[int, ...]] | None:
+        """read a block of registers of all servos with a single packet per bus and pick fields out of it
+
+        :param address: the start of the block
+        :param length: the length of the block in bytes
+        :param fields: the (address, length, signed) of every value wanted from the block, 1, 2 or 4 bytes each
+        :return: a mapping of servo id to the values of the fields, or None if any of the servos could not be read
         """
         values = {}
         for bus in self.buses:
             bus_servo_ids = [servo_id for servo_id in servo_ids if servo_id in bus]
             if not bus_servo_ids:
                 continue
-            bus_values = self.__sync_read_bus(address, length, bus_servo_ids)
+            bus_values = self.__sync_read_bus(address, length, fields, bus_servo_ids)
             if bus_values is None:
                 return None
             values.update(bus_values)
         return values
 
-    def __sync_read_bus(self, address: int, length: int, servo_ids: list[int]) -> dict[int, int] | None:
-        """read the given address of servos that are on the same bus in a single packet"""
+    def __sync_read_bus(self, address: int, length: int, fields: Sequence[Field],
+                        servo_ids: list[int]) -> dict[int, tuple[int, ...]] | None:
+        """read a block of registers of servos that are on the same bus in a single packet, see __sync_read_fields"""
         group_sync_read = dynamixel.GroupSyncRead(self.port_handler, self.packet_handler, address, length)
         for servo_id in servo_ids:
             if not group_sync_read.addParam(servo_id):
@@ -370,7 +501,7 @@ class ServoHandler(object):
 
         comm_result = group_sync_read.txRxPacket()
         if comm_result != dynamixel.COMM_SUCCESS:
-            logger.warning("sync read of address %d failed: %s", address,
+            logger.warning("sync read of address %d from servos %s failed: %s", address, servo_ids,
                            self.packet_handler.getTxRxResult(comm_result))
             return None
 
@@ -379,5 +510,9 @@ class ServoHandler(object):
             if not group_sync_read.isAvailable(servo_id, address, length):
                 logger.warning("[ID:%03d] groupSyncRead getdata failed", servo_id)
                 return None
-            values[servo_id] = group_sync_read.getData(servo_id, address, length)
+            # the sdk picks any 1, 2 or 4 byte value out of the block it received
+            values[servo_id] = tuple(
+                utils.to_signed(group_sync_read.getData(servo_id, field_address, field_length), field_length)
+                if signed else group_sync_read.getData(servo_id, field_address, field_length)
+                for field_address, field_length, signed in fields)
         return values

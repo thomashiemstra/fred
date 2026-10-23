@@ -12,7 +12,7 @@ from src.robot_controllers.dynamixel_robot import dynamixel_x_config
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot import servo_handler as servo_handler_module
 from src.robot_controllers.dynamixel_robot.servo import Servo
-from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
+from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler, ServoState
 from tests.servo_controller_tests.dynamixel_robot_controller_tests import FakeBus
 
 
@@ -443,6 +443,110 @@ class TestServoHandlerCommunication(unittest.TestCase):
         with self.assertLogs(servo_handler_module.logger, 'WARNING'):
             self.assertTrue(self.handler.move_to_angles([3]))
         self.assertEqual(cfg.MAX_POSITION, self.goal_position(3))
+
+
+
+class TestServoHandlerBlockReads(unittest.TestCase):
+    """the block reads and the single servo setters of the gain tuning, on the fake bus of two buses"""
+
+    BUSES = ((1, 2), (3, 4))
+
+    def setUp(self):
+        self.servos = [
+            Servo(1024, 3072, 0, pi, POSITION_CONTROL_MODE, profile_velocity=250, profile_acceleration=100,
+                  p=1500, i=20, d=500, offset=100),
+            Servo(3072, 1024, -pi / 2, pi / 2, POSITION_CONTROL_MODE, p=0x1234, i=0x0102, d=0x0A0B),
+            Servo(0, 4096, -pi, pi, EXTENDED_POSITION_CONTROL, profile_velocity=300, profile_acceleration=50),
+            Servo(1024, 2048, 0, 100, CURRENT_BASED_POSITION_CONTROL_MODE, goal_current=400),
+        ]
+        self.bus = FakeBus(self.servos, self.BUSES)
+        self.handler = ServoHandler({servo_id: servo for servo_id, servo in enumerate(self.servos, start=1)},
+                                    cfg, mock.Mock(), self.bus, self.BUSES)
+
+    def set(self, servo_id, address, length, value):
+        self.bus.memory[servo_id][address:address + length] = (value & ((1 << (8 * length)) - 1)).to_bytes(
+            length, 'little')
+
+    def test_state_is_read_in_one_block_per_bus(self):
+        self.set(1, cfg.ADDR_REALTIME_TICK, 2, 1234)
+        self.set(1, cfg.ADDR_MOVING, 1, 1)
+        self.set(1, cfg.ADDR_MOVING_STATUS, 1, cfg.MOVING_STATUS_IN_POSITION | cfg.MOVING_STATUS_FOLLOWING_ERROR)
+        self.set(1, cfg.ADDR_PRESENT_PWM, 2, -300)
+        self.set(1, cfg.ADDR_PRESENT_CURRENT, 2, -20)
+        self.set(1, cfg.ADDR_PRESENT_VELOCITY, 4, -5)
+        self.bus.set_position(1, 2000)
+        self.set(1, cfg.ADDR_VELOCITY_TRAJECTORY, 4, 7)
+        self.set(1, cfg.ADDR_POSITION_TRAJECTORY, 4, -2010)
+        self.set(1, cfg.ADDR_PRESENT_INPUT_VOLTAGE, 2, 118)
+        self.set(1, cfg.ADDR_PRESENT_TEMPERATURE, 1, 33)
+        states = self.handler.read_state()
+        self.assertEqual(ServoState(tick=1234, moving=1, moving_status=9, pwm=-300, current=-20, velocity=-5,
+                                    position=2000, velocity_trajectory=7, position_trajectory=-2010, voltage=11.8,
+                                    temperature=33), states[1])
+        self.assertEqual(2048, states[3].position)
+        self.assertEqual([('sync_read', cfg.ADDR_REALTIME_TICK, [1, 2]), ('sync_read', cfg.ADDR_REALTIME_TICK, [3, 4])],
+                         self.bus.packets)
+        self.bus.packets.clear()
+        self.assertEqual({3: states[3]}, self.handler.read_state([3]))
+        self.assertEqual([('sync_read', cfg.ADDR_REALTIME_TICK, [3])], self.bus.packets)
+        self.bus.unresponsive = {2}
+        self.assertIsNone(self.handler.read_state())
+
+    def test_pid_is_read_back(self):
+        self.assertTrue(self.handler.set_pid_single_servo(3, 800, 0, 60))
+        self.bus.packets.clear()
+        self.assertEqual({3: (800, 0, 60)}, self.handler.read_pid([3]))
+        self.assertEqual([('sync_read', cfg.ADDR_D, [3])], self.bus.packets)
+        self.assertTrue(self.handler.set_pid())
+        self.assertEqual({1: (1500, 20, 500), 2: (0x1234, 0x0102, 0x0A0B), 3: (1000, 600, 500), 4: (1000, 600, 500)},
+                         self.handler.read_pid())
+        self.bus.unresponsive = {4}
+        self.assertIsNone(self.handler.read_pid())
+
+    def test_gains_outside_the_firmware_range_are_refused(self):
+        for p, i, d in ((cfg.MAX_GAIN + 1, 0, 0), (800, -1, 0), (800, 0, 70000)):
+            with self.assertRaises(ValueError):
+                self.handler.set_pid_single_servo(3, p, i, d)
+        self.assertEqual([], self.bus.packets)
+        self.assertTrue(self.handler.set_pid_single_servo(3, cfg.MAX_GAIN, 0, 0))
+
+    def test_goal_pwm_is_written_signed_and_read_back(self):
+        self.assertTrue(self.handler.set_goal_pwm(2, -400))
+        self.assertEqual([('sync_write', cfg.ADDR_GOAL_PWM, [2])], self.bus.packets)
+        self.assertEqual(-400, self.bus.get(2, cfg.ADDR_GOAL_PWM, 2, signed=True))
+        self.assertEqual({2: -400}, self.handler.read_goal_pwm([2]))
+        with self.assertRaises(ValueError):
+            self.handler.set_goal_pwm(2, cfg.MAX_PWM + 1)
+        self.bus.unresponsive = {2}
+        self.assertIsNone(self.handler.read_goal_pwm([2]))
+
+    def test_profile_of_one_servo_is_set_without_changing_the_configured_one(self):
+        self.assertTrue(self.handler.set_profile(1, 0, 0))
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1])], self.bus.packets)
+        self.assertEqual({1: (0, 0)}, self.handler.read_profile([1]))
+        self.assertEqual((250, 100), (self.servos[0].profile_velocity, self.servos[0].profile_acceleration))
+        self.assertTrue(self.handler.set_profile_velocity_and_acceleration([1]))
+        self.assertEqual({1: (250, 100)}, self.handler.read_profile([1]))
+        with self.assertRaises(ValueError):
+            self.handler.set_profile(1, -1, 0)
+        self.bus.unresponsive = {1}
+        self.assertIsNone(self.handler.read_profile([1]))
+
+    def test_torque_enabled_is_read(self):
+        self.bus.memory[2][cfg.ADDR_TORQUE_ENABLE] = 1
+        self.assertEqual({1: False, 2: True, 3: False, 4: False}, self.handler.read_torque_enabled())
+        self.assertEqual([('sync_read', cfg.ADDR_TORQUE_ENABLE, [1, 2]), ('sync_read', cfg.ADDR_TORQUE_ENABLE, [3, 4])],
+                         self.bus.packets)
+        self.bus.unresponsive = {3}
+        self.assertIsNone(self.handler.read_torque_enabled())
+
+    def test_temperature_and_voltage_are_read_in_one_packet_per_bus(self):
+        self.set(4, cfg.ADDR_PRESENT_TEMPERATURE, 1, 39)
+        self.set(4, cfg.ADDR_PRESENT_INPUT_VOLTAGE, 2, 52)
+        self.assertEqual({1: (0, 0.0), 2: (0, 0.0), 3: (0, 0.0), 4: (39, 5.2)},
+                         self.handler.read_temperature_and_voltage())
+        self.assertEqual([('sync_read', cfg.ADDR_PRESENT_INPUT_VOLTAGE, [1, 2]),
+                          ('sync_read', cfg.ADDR_PRESENT_INPUT_VOLTAGE, [3, 4])], self.bus.packets)
 
 
 if __name__ == '__main__':

@@ -151,11 +151,12 @@ class ParseServoConfigTests(unittest.TestCase):
         self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': None, 'd': 0})), 'i should be a whole number')
 
     def test_values_that_do_not_fit_their_register(self):
-        # the register sizes are in dynamixel_x_config.py: pid 2 bytes, profile 4 bytes, goal current 2 bytes signed
+        # the register sizes are in dynamixel_x_config.py: pid 2 bytes but at most MAX_GAIN, profile 4 bytes, goal
+        # current 2 bytes signed
         for servo_id, field, value, message in (
-                (1, 'pid', {'p': 70000, 'i': 0, 'd': 0}, 'servo 1: p should be from 0 to 65535, not 70000'),
-                (1, 'pid', {'p': 1, 'i': -1, 'd': 0}, 'servo 1: i should be from 0 to 65535, not -1'),
-                (2, 'pid', {'p': 1, 'i': 0, 'd': 65536}, 'servo 2: d should be from 0 to 65535, not 65536'),
+                (1, 'pid', {'p': 70000, 'i': 0, 'd': 0}, 'servo 1: p should be from 0 to 16383, not 70000'),
+                (1, 'pid', {'p': 1, 'i': -1, 'd': 0}, 'servo 1: i should be from 0 to 16383, not -1'),
+                (2, 'pid', {'p': 1, 'i': 0, 'd': 16384}, 'servo 2: d should be from 0 to 16383, not 16384'),
                 (1, 'profile', {'velocity': 2 ** 32, 'acceleration': 1}, 'servo 1: profile velocity should be from 0'),
                 (1, 'profile', {'velocity': 1, 'acceleration': -5}, 'servo 1: profile acceleration should be from 0'),
                 (7, 'goal_current', 40000, 'servo 7: goal_current should be from -32768 to 32767, not 40000'),
@@ -166,10 +167,10 @@ class ParseServoConfigTests(unittest.TestCase):
 
     def test_values_at_the_edge_of_their_register_are_valid(self):
         config = parse_servo_config(config_with(
-            pid=(1, 'pid', {'p': 65535, 'i': 0, 'd': 0}),
+            pid=(1, 'pid', {'p': 16383, 'i': 0, 'd': 0}),
             profile=(1, 'profile', {'velocity': 2 ** 32 - 1, 'acceleration': 0}),
             current=(7, 'goal_current', -32768)))
-        self.assertEqual((65535, 2 ** 32 - 1, -32768), (config.servos[1].p, config.servos[1].profile_velocity,
+        self.assertEqual((16383, 2 ** 32 - 1, -32768), (config.servos[1].p, config.servos[1].profile_velocity,
                                                         config.servos[7].goal_current))
 
     def test_invalid_pairs(self):

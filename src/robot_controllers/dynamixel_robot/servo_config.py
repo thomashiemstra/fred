@@ -32,7 +32,7 @@ _OPTIONAL_COMPENSATION_FIELDS = {UP, DOWN}
 _POSITION_REGISTER = (cfg.LEN_GOAL_POSITION, True)
 _PROFILE_ACCELERATION_REGISTER = (cfg.LEN_PROFILE_ACCELERATION, False)
 _PROFILE_VELOCITY_REGISTER = (cfg.LEN_PROFILE_VELOCITY, False)
-_PID_REGISTER = (cfg.LEN_PID, False)
+_PID_REGISTER = (cfg.LEN_PID, False, cfg.MAX_GAIN)  # the servos accept 0..16383 and drop a larger gain silently
 _GOAL_CURRENT_REGISTER = (cfg.LEN_GOAL_CURRENT, True)
 
 
@@ -228,11 +228,13 @@ def _integer(value: Any, name: str, source: str) -> int:
     return value
 
 
-def _register(value: Any, name: str, source: str, length: int, signed: bool) -> int:
-    """a whole number that has to fit in a register of the given size in bytes"""
+def _register(value: Any, name: str, source: str, length: int, signed: bool, maximum: int | None = None) -> int:
+    """a whole number that has to fit in a register of the given size in bytes, and below the maximum if given"""
     value = _integer(value, name, source)
     bits = 8 * length
     lowest, highest = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed else (0, (1 << bits) - 1)
+    if maximum is not None:
+        highest = min(highest, maximum)
     if not lowest <= value <= highest:
         raise ServoConfigError('{}: {} should be from {} to {}, not {}'.format(source, name, lowest, highest, value))
     return value
