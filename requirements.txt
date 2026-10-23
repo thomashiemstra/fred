@@ -15,7 +15,7 @@ matplotlib==3.8.4
 opencv-python==4.9.0.80
 # web server, xbox controller and saved moves
 Flask==3.0.3
-Flask-Cors==4.0.1
+Flask-Cors==6.0.0
 Flask-CDN==1.5.3
 inputs==0.5
 # the wireless xbox controller (XboxOneController) on Linux, pip skips it elsewhere, so it isn't in the windows venv
