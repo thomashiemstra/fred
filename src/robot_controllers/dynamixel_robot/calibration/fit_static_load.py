@@ -6,7 +6,8 @@ Fits the static load compensation of the arm servos to the data of record_static
 
 For every joint the mean of the errors of the two directions at a pose is its static load, half the difference is
 the friction hysteresis. The static load is fitted with linear least squares on the basis of static_compensation.py
-(with the spring terms when servo_config.yaml has a spring section). A share of the poses is held out to report how
+(gravity; the spring terms only when servo_config.yaml has a spring section, which it hasn't since the spring was
+removed from the robot on 23 October 2026). A share of the poses is held out to report how
 well the fit generalises, in positions and degrees. --split fits the two directions separately as well and prints
 them as the up and down blocks, which compensates the hysteresis too.
 """
@@ -20,7 +21,7 @@ from typing import Any
 import numpy as np
 
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
-from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names, SPRING_TERMS, \
+from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names, \
     UP, DOWN, SpringGeometry
 
 DEGREES_PER_POSITION = 360.0 / 4096
@@ -122,7 +123,7 @@ def fit_joint(joint: int, samples: Sequence[Sample], spring: SpringGeometry | No
     """
     rng = rng if rng is not None else np.random.default_rng(0)
     if names is None:
-        names = tuple(name for name in term_names(joint) if spring is not None or name not in SPRING_TERMS)
+        names = term_names(joint, spring is not None)
     rows: Any = []
     targets: Any = []
     for sample in samples:
@@ -207,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--seed', type=int, default=0, help='seed of the hold-out selection')
     parser.add_argument('--split', action='store_true', help='also fit the two directions separately')
     parser.add_argument('--max-positions', type=int, default=60, help='clamp of the compensation in the yaml')
-    parser.add_argument('--no-spring', action='store_true', help='fit without the spring terms')
+    parser.add_argument('--no-spring', action='store_true',
+                        help='fit without the spring terms even when the yaml has a spring section')
     args = parser.parse_args(argv)
 
     samples = samples_from_rows(read_rows(args.files))

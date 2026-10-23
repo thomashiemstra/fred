@@ -56,9 +56,12 @@ class BasisTests(unittest.TestCase):
         self.assertAlmostEqual(np.cos(1.5), term_values(3, angles)['cos_phi'])
 
     def test_term_names_and_rows(self):
+        self.assertEqual(('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach'), term_names(2),
+                         'the spring terms are not in the default model since the spring was removed')
         self.assertEqual(('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach') + SPRING_TERMS,
-                         term_names(2))
+                         term_names(2, spring=True))
         self.assertEqual(('constant', 'wrist_pitch'), term_names(5))
+        self.assertEqual(('constant', 'wrist_pitch'), term_names(5, spring=True), 'the spring loads joints 2 and 3')
         with self.assertRaises(ValueError):
             term_names(1)
         angles = np.array([0, 1.0, 0.2, 1.0, 0.1, 0.4, 0])

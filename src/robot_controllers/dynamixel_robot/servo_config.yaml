@@ -15,19 +15,19 @@
 #   profile                     velocity and acceleration of the movement profile of the servo
 #   pid                         the gains of the position controller of the servo
 #   compensation                the static load compensation of the joint (optional, joints 2-5), the positions
-#                               added to every target for gravity and the spring at the commanded pose, fitted by
+#                               added to every target for gravity at the commanded pose, fitted by
 #                               calibration/fit_static_load.py from the data of calibration/record_static_load.py,
 #                               see static_compensation.py and Handover Gravity and Spring Compensation.md:
 #                                 max_positions: 60                           the compensation is clipped to this
 #                                 terms: {constant: 1.0, cos_q2: 12.0, ...}   coefficient per term in positions
 #                                 up: {...}, down: {...}                      optional, per direction of the joint
-#                               the terms: joint 2 constant, cos_q2, sin_q2, sin_phi, cos_phi, wrist_reach,
-#                               spring_dl; joint 3 constant, sin_phi, cos_phi, wrist_reach, spring_dl;
-#                               joint 4 constant, wrist_roll; joint 5 constant, wrist_pitch
+#                               the terms: joint 2 constant, cos_q2, sin_q2, sin_phi, cos_phi, wrist_reach;
+#                               joint 3 constant, sin_phi, cos_phi, wrist_reach; joint 4 constant, wrist_roll;
+#                               joint 5 constant, wrist_pitch
 #
-# spring (optional, top level): the spring between the servo 2 and servo 3 housings, needed for the spring terms
-#   base_anchor: [radial, up]   cm from the joint 2 axis, radial away from the base axis
-#   arm_anchor: [along, perp]   cm from the joint 3 axis, along the upper arm and perpendicular to it
+# The spring between the servo 2 and servo 3 housings was removed on 23 October 2026 (it overloaded servo 3). A
+# top level `spring` section (base_anchor: [radial, up] cm from the joint 2 axis, arm_anchor: [along, perp] cm from
+# the joint 3 axis) is still accepted and adds the spring_dl term to joints 2 and 3, should a spring return.
 
 # The robot is printed in PLA, which softens around 55-65C. A servo that is warmer than the warning temperature is
 # logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure
@@ -54,7 +54,7 @@ servos:
     mode: position
     positions: [1024, 3072]
     angles: [0, 180]
-    offset: -571  # measured in the jig at 0 degrees, raw 453
+    offset: -550  # measured in the jig at 0 degrees, raw 474
     profile: {velocity: 500, acceleration: 500}
     pid: {p: 1000, i: 0, d: 0}
   3:
@@ -73,7 +73,7 @@ servos:
     mode: position
     positions: [0, 4096]
     angles: [-180, 180]
-    offset: -10  # measured in the jig at 0 degrees, raw 2038
+    offset: 3  # measured in the jig at 0 degrees, raw 2051
     profile: {velocity: 300, acceleration: 100}
     pid: {p: 1000, i: 0, d: 0}
   5:
@@ -83,7 +83,7 @@ servos:
     mode: position
     positions: [0, 4096]
     angles: [-180, 180]
-    offset: 60  # measured in the jig at 0 degrees, raw 2108
+    offset: 55  # measured in the jig at 0 degrees, raw 2103
     profile: {velocity: 300, acceleration: 100}
     pid: {p: 2000, i: 0, d: 0}
   6:
@@ -94,7 +94,7 @@ servos:
     positions: [0, 4096]
     angles: [-180, 180]
     profile: {velocity: 300, acceleration: 100}
-    pid: {p: 600, i: 0, d: 0}
+    pid: {p: 2250, i: 0, d: 0}
   # 0 is open and 100 is closed, it closes freely all the way. When an object blocks the gripper, it squeezes with
   # about 2mA per position the target is beyond the object (with p=500), up to the goal current. Squeezing a pen was
   # tested without hardware errors and without heating up up to about 580mA, the most it reaches with the target at

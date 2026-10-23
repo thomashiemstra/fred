@@ -169,7 +169,7 @@ def _parse_spring(data: Any, source: str, a2: float) -> SpringGeometry:
 def _parse_compensation(data: Any, source: str, servo_id: int, spring: SpringGeometry | None) -> StaticCompensation:
     _check_fields(data, _REQUIRED_COMPENSATION_FIELDS, _OPTIONAL_COMPENSATION_FIELDS, source)
     try:
-        names = term_names(servo_id)
+        names = term_names(servo_id, spring is not None)
     except ValueError as e:
         raise ServoConfigError('{}: {}'.format(source, e)) from e
     max_positions = _integer(data['max_positions'], 'max_positions', source)
@@ -189,12 +189,12 @@ def _parse_compensation(data: Any, source: str, servo_id: int, spring: SpringGeo
 def _terms(data: Any, source: str, names: Sequence[str], spring: SpringGeometry | None) -> dict[str, float]:
     if not isinstance(data, dict):
         raise ServoConfigError('{}: should be a mapping of term to coefficient in positions'.format(source))
+    if spring is None and any(name in SPRING_TERMS for name in data):
+        raise ServoConfigError('{}: the spring terms need a spring section'.format(source))
     unknown = set(data) - set(names)
     if unknown:
         raise ServoConfigError('{}: unknown terms {}, the terms are {}'.format(
             source, ', '.join(sorted(str(name) for name in unknown)), ', '.join(names)))
-    if spring is None and any(name in SPRING_TERMS for name in data):
-        raise ServoConfigError('{}: the spring terms need a spring section'.format(source))
     return {name: float(_number(value, name, source)) for name, value in data.items()}
 
 

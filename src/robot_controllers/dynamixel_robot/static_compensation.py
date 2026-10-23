@@ -1,6 +1,8 @@
 """
 Static load compensation: the positions a servo has to be commanded beyond the target of an angle to hold the arm
-there against gravity and the spring. See Handover Gravity and Spring Compensation.md.
+there against gravity (and a spring, if the robot has one: the spring between servos 2 and 3 was removed on 23
+October 2026, the spring term stays available for a yaml with a `spring` section). See Handover Gravity and Spring
+Compensation.md.
 
 The holding load of every joint is a linear combination of a few sin/cos terms of the joint angles, the basis
 below, in the conventions of src/kinematics/kinematics.py: angles are indexed by servo id in radians, angle 2 = 0 is
@@ -17,7 +19,8 @@ Terms per joint (h = mass times centre of mass of a link, a along the link, p pe
     joint 3:  sin_phi (h3a), cos_phi (h3p), wrist_reach (the gripper, m6 c6)
     joint 5:  wrist_pitch (the gripper)
     joint 4:  wrist_roll (the gripper when the wrist is bent and rolled, small)
-    spring_dl on joints 2 and 3: dL/dq of the spring length, coefficient -k L0 (in positions)
+    spring_dl on joints 2 and 3, only with a SpringGeometry: dL/dq of the spring length, coefficient -k L0 (in
+              positions)
 
 A linear spring of stiffness k and free length L0 loads a joint with k (L - L0) dL/dq. The k L dL/dq part is a spring
 of zero free length, and such a spring pulls exactly like a mass does: its torque is a combination of the same
@@ -33,9 +36,11 @@ DOWN = 'down'
 DIRECTIONS = (UP, DOWN)
 
 SPRING_TERMS = ('spring_dl',)
+SPRING_JOINTS = (2, 3)  # the joints a spring between the servo 2 and 3 housings loads
+# the terms of the gravity model; the spring terms are added for SPRING_JOINTS when a spring is given
 TERMS_OF_JOINT = {
-    2: ('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach') + SPRING_TERMS,
-    3: ('constant', 'sin_phi', 'cos_phi', 'wrist_reach') + SPRING_TERMS,
+    2: ('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach'),
+    3: ('constant', 'sin_phi', 'cos_phi', 'wrist_reach'),
     4: ('constant', 'wrist_roll'),
     5: ('constant', 'wrist_pitch'),
 }
@@ -84,11 +89,15 @@ class SpringGeometry:
                 and np.array_equal(self.arm_anchor, other.arm_anchor) and self.a2 == other.a2)
 
 
-def term_names(joint: int) -> tuple[str, ...]:
-    """the names of the terms of the holding load of the joint, in the order of regressor_row"""
+def term_names(joint: int, spring: bool = False) -> tuple[str, ...]:
+    """
+    the names of the terms of the holding load of the joint, in the order of regressor_row
+    :param spring: include the spring terms (joints 2 and 3), for a robot with the spring
+    """
     if joint not in TERMS_OF_JOINT:
         raise ValueError('joint {} has no static load terms, only joints {} have'.format(joint, sorted(TERMS_OF_JOINT)))
-    return TERMS_OF_JOINT[joint]
+    names = TERMS_OF_JOINT[joint]
+    return names + SPRING_TERMS if spring and joint in SPRING_JOINTS else names
 
 
 def term_values(joint: int, angles: np.ndarray, spring: SpringGeometry | None = None) -> dict[str, float]:
@@ -112,10 +121,10 @@ def term_values(joint: int, angles: np.ndarray, spring: SpringGeometry | None = 
         'wrist_pitch': np.cos(phi) * np.sin(q5) + np.cos(q4) * np.cos(q5) * np.sin(phi),
         'wrist_roll': np.sin(q4) * np.sin(q5) * np.sin(phi),
     }
-    if spring is not None and joint in (2, 3):
+    if spring is not None and joint in SPRING_JOINTS:
         _, d_q2, d_q3 = spring.length_and_gradient(q2, q3)
         values['spring_dl'] = d_q2 if joint == 2 else d_q3
-    return {name: values[name] for name in term_names(joint) if name in values}
+    return {name: values[name] for name in term_names(joint, spring is not None)}
 
 
 def regressor_row(joint: int, angles: np.ndarray, spring: SpringGeometry | None = None,
@@ -164,12 +173,12 @@ class StaticCompensation:
         self.directional = {UP: self._checked(up), DOWN: self._checked(down)} if up is not None else {}  # type: ignore[arg-type]  # down is given when up is
 
     def _checked(self, terms: Mapping[str, float]) -> dict[str, float]:
-        names = term_names(self.joint)
+        if self.spring is None and any(name in SPRING_TERMS for name in terms):
+            raise ValueError('the spring terms of joint {} need the spring geometry'.format(self.joint))
+        names = term_names(self.joint, self.spring is not None)
         unknown = [name for name in terms if name not in names]
         if unknown:
             raise ValueError('joint {} has no terms {}, it has {}'.format(self.joint, unknown, list(names)))
-        if self.spring is None and any(name in SPRING_TERMS for name in terms):
-            raise ValueError('the spring terms of joint {} need the spring geometry'.format(self.joint))
         return {name: float(coefficient) for name, coefficient in terms.items()}
 
     def coefficients(self, direction: str | None = None) -> dict[str, float]:
