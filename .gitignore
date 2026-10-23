@@ -123,3 +123,8 @@ train/
 !src/robot_controllers/dynamixel_robot/servo_config.yaml
 !tests/servo_controller_tests/test_servo_config.yaml
 !src/robot_config.yaml
+
+# recordings of the calibration scripts (record_static_load, tune_servo_gains, check_supply_voltage)
+static_load_*.csv
+tune_joint*_*.csv
+supply_voltage_*.csv
