@@ -290,7 +290,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   `no gamepad connected`. Touch the gamepad before `/xbox/start`.
 - `XboxOneController` (`src/xbox_control/xboxonecontroller/`, 21 October) is the wireless xbox one controller, not
   used anywhere yet. It is an `Xbox360Controller`: on Windows it is read the same way (xinput), on Linux over
-  Bluetooth with evdev (not installed), its codes and ranges turned into those of the wired controller. Never tried
+  Bluetooth with evdev (in requirements.txt for Linux only), its codes and ranges turned into those of the wired controller. Never tried
   on a real controller, `python -m src.xbox_control.xboxonecontroller.XboxOneController` prints what it reads.
 - REST: `server.py` mounts `xbox_control_resource.py` at `/xbox`. All return `{"success": bool}` unless noted:
   `/start` -> `start()` (`already started` as text when running); `/stop` -> `stop()` (`already stopped`), blocks
@@ -323,13 +323,16 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 | `python -m src.robot_controllers.dynamixel_robot.calibration.fit_static_load <csv>` | fits the compensation to a recording and prints the yaml blocks, no robot involved |
 | `python -m src.robot_controllers.dynamixel_robot.calibration.measure_offsets` | reads servos 1, 2 and 4 held by the jig (90, 0 and 0 degrees, `--jig 1=90 2=0 4=0`), prints the offsets and writes them to `servo_config.yaml` after asking (`--dry-run` to only print); never enables the torque, see `Calibrating the servo offsets.md` |
 
-Other scripts in `src/robot_controllers/dynamixel_robot/`, none asks before moving: `calibration/angle_check.py`,
-`gui_test.py` and `pid_test.py` run at import, call `get_robot()`, enable the servos and
-move them (`pid_test.py` leaves the torque on). They use the debug API that still exists (`robot.servoN`,
+| `python -m src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains --joint 6` | tunes the position P and D gains of one arm servo: planned moves to a few poses, small steps of that joint with its profile off at rising P, a streamed move per trial, live abort rules that restore the yaml gains; asks before moving, prints the yaml line, see `Tuning the servo gains.md`. Replaced `calibration/pid_test.py` (2021, a quarter turn step of servo 1 at import) on 21 October |
+| `python -m src.robot_controllers.dynamixel_robot.calibration.check_supply_voltage` | samples the input voltage, current or load and temperature of all 7 servos at rest with the torque off, holding the named poses of the tuning script and during a planned move between two of them, and reports per phase and servo the min, mean and max voltage, the drop along the chain and against the reference of 21 October, flags readings outside the rated range, and says whether the supply, the leads or a connector loses the voltage; asks before enabling, offers to disable the torque at the end |
+
+Other scripts in `src/robot_controllers/dynamixel_robot/`, none asks before moving: `calibration/angle_check.py`
+and `gui_test.py` run at import, call `get_robot()`, enable the servos and
+move them. They use the debug API that still exists (`robot.servoN`,
 `move_servo`, `move_servos`, `get_current_positions`, `set_pid_single_servo`, `set_servo_position`,
-`get_servo_position`, `Servo.target_position`, `Servo.constant_offset`). `calibration/gravity_compensation.py` and
-the four `record_going_*.py` scripts need the `keyboard` package (not installed) and an Arduino on COM5
-(`ArduinoAngleReader` opens it in `__init__`); the `record_going_*` scripts move servos 2 and 3 immediately.
+`get_servo_position`, `Servo.target_position`, `Servo.constant_offset`). `calibration/gravity_compensation.py`
+needs the `keyboard` package (not installed) and an Arduino on COM5 (`ArduinoAngleReader` opens it in `__init__`);
+the four `record_going_*.py` scripts of 2021 were deleted on 23 October 2026, `record_static_load.py` replaces them.
 `gravity_compensation_with_math_angle2/3.py` are offline curve fits of the 2021 data in `calibration/results`.
 `arduino/arduino_experiment.py` needs `Arduino` (arduino-python3), not installed. `position_recorder.py` records and writes
 the servo positions (fixed 20 October), nothing calls `set_recorder`.

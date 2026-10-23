@@ -1,7 +1,9 @@
 # Handover: Gravity and spring compensation
 
 Oct 16, 2026 · @wew. Revised 18 October 2026 against the code, the servo manuals and the 2021 calibration data. Code
-references are to the state after the controller rework (`Handover Robot Controller Rework.md`).
+references are to the state after the controller rework (`Handover Robot Controller Rework.md`). Revised 23 October
+2026: the spring was removed from the robot (Step 3) and the friction of joint 2 was measured; the gains come first,
+see `Tuning the servo gains.md`.
 
 ## Summary
 
@@ -21,9 +23,13 @@ path.
 - Rigid-body gravity: each link is a first moment (mass times centre of mass) in the arm plane; the holding load of
   every joint is a linear combination of a handful of sin/cos terms of q2, q3, q4, q5. Fitted with linear least
   squares in positions, per joint.
-- Spring: it runs from the housing of servo 2 (on the base plate) to the housing of servo 3, which moves with the
-  upper arm, so its length depends on q2 and q3 and it loads both joints: one potential of the length, two linear
-  columns per joint.
+- Spring: removed from the robot on 23 October 2026. With it servo 3 tripped its overload protection holding the
+  upper arm horizontal, without it the same hold ran for minutes and joint 2 holds the stretched arm at 15 % of its
+  stall current (Step 3). The model is gravity plus residual; the code keeps the spring term as an option for a
+  yaml with a `spring` section.
+- Friction: on joint 2 the Coulomb friction is nearly as large as the gravity load (about 100 against 150 units
+  of current, 23 October), so the static load has to be recorded from both directions and fitted as up/down or as
+  the mean, never from one direction, and final poses should be approached from a consistent direction.
 - Residual: a low order polynomial or a grid on (q2, q3) for what the physics misses.
 - Expected outcome: static sag below the friction deadband per joint, roughly 0.1-0.3 degrees (1-3 positions) on
   joints 2 and 3 when a pose is approached from a fixed direction, up to half the hysteresis otherwise.
@@ -41,7 +47,8 @@ path.
   terms.
 - The recording tools: `calibration/gravity_compensation.py` (`Servo2Manager`, keyboard driven: step servo 2 or 3,
   wait, record `present - target`), `record_going_up.py`, `record_going_down.py` and the `_servo3` variants (scripted
-  sweeps, 3 s settle per point), the raw data in `calibration/results` (servo 2 over a grid of q2 and q3, servo 3 over
+  sweeps, 3 s settle per point; the four `record_going_*` scripts were deleted on 23 October 2026,
+  `record_static_load.py` replaces them), the raw data in `calibration/results` (servo 2 over a grid of q2 and q3, servo 3 over
   q2 + q3, going up and going down, in positions), the fits in `gravity_compensation_with_math_angle2.py` and
   `_angle3.py` (`scipy.optimize.curve_fit`, offline). They need the `keyboard` package (not in the venv) and an
   Arduino angle sensor on COM5 (`arduino/ArduinoAngleReader.py`, an external reference for joint 2). They still call
@@ -73,15 +80,24 @@ path.
 | Joint | Servo | P gain (yaml) | Current sensing | Current-based position mode | Stall torque, current (12 V) | Gravity load |
 |---|---|---|---|---|---|---|
 | 1 base | XM430-W350 | 1500 (d 500) | Present Current, 2.69 mA per unit | yes (5) | 4.1 N.m, 2.3 A (1.78 N.m/A) | none, yaw |
-| 2 shoulder | XM540-W270 | 1000 | Present Current, 2.69 mA per unit | yes | 10.6 N.m, 4.4 A (2.41 N.m/A) | largest |
-| 3 elbow | XM430-W350 | 1500 | Present Current | yes | 4.1 N.m, 2.3 A | large; mounted reversed (`positions: [3072, 1024]`) |
+| 2 shoulder | XM540-W270 | 1000 | Present Current, 2.69 mA per unit | yes | 10.6 N.m, 4.4 A (2.41 N.m/A) | largest; holds the arm stretched out at about 250 units (0.67 A, 15 % of the stall current, about 4.8 N.m at the joint through the belt) without the spring |
+| 3 elbow | XM430-W350 | 1500 | Present Current | yes | 4.1 N.m, 2.3 A | large; mounted reversed (`positions: [3072, 1024]`); holds the upper arm horizontal at about 280 units (0.75 A) without the spring, 300-320 (0.81-0.86 A) with it, which tripped its overload protection in a static hold (23 October) |
 | 4 wrist 1 | XC430-W240 | 1000 | none, address 126 is Present Load (0.1 %); PWM limit instead of a current limit | no (modes 1, 3, 4, 16) | 1.9 N.m, 1.4 A | roll, only through the bent wrist, small |
 | 5 wrist 2 | XC430-W240 | 2000 | none | no | 1.9 N.m, 1.4 A | pitch, the gripper |
 | 6 wrist 3 | XC430-W150 | 600 | none | no | | roll, none |
 | 7 gripper | XL330-M288 | 500 | Present Current, 1 mA per unit | in use (goal current 400 mA) | 0.52 N.m, 1.47 A at 5 V | |
 
 - All arm servos run in position mode (3) with I = 0 and D = 0 (servo 1: D = 500). Manual defaults are P 800 (XM),
-  700 (XC), 400 (XL); the configured gains are higher.
+  700 (XC430-W240), 460 (XC430-W150), 400 (XL); the configured gains are higher. The gains, profile and goal
+  current are RAM registers written by `initialize_servos` when the controller is constructed (not at enable), so
+  after a power cycle the servos run at the defaults until a script starts the robot, and a gain changed on the fly
+  stays until the next start or an explicit `set_pid()`. The servos accept gains of 0-16383 and drop a larger one
+  silently (the handler refuses it since 21 October); `ServoHandler.read_pid` reads them back.
+- Reads measured on 21 October: `ServoHandler.read_state` (addresses 120-146 in one packet: tick, moving status,
+  pwm, current or load, velocity, position, the velocity and position trajectory of the profile, voltage,
+  temperature) takes 2.0 ms for one servo, 4.3 ms for the RS-485 bus, 5.0 ms for the TTL bus, 9.2 ms for the arm;
+  the same as a 4 byte position read, the latency timer and the return delays dominate. The input voltage reads
+  11.2-11.6 V along the chain.
 - 4096 positions per joint turn on every joint, 0.0879 degrees per position. Joints 1 and 2 have a 3:1 timing belt
   reduction after the servo gearbox with the servo's magnetic encoder moved to the joint output shaft: the position
   loop closes on the joint, the belt is inside the loop, and the motor delivers about 3 times its torque at the
@@ -92,7 +108,10 @@ path.
   bus (RS-485: 1-3, TTL: 4-7), 8 ms for the whole arm, return delay time 500 us. `move_servos` runs at 100 Hz from
   `execute_move` and the xbox loop on a `perf_counter` schedule. There is no Present Current read in
   `servo_handler.py` yet; only `gripper_test.py` reads it, with `read2ByteTxRx`.
-- Safety: the robot warns at 45 C and stops at 50 C (PLA). The arm drops when the torque goes off.
+- Safety: the robot warns at 45 C and stops at 50 C (PLA). The arm drops when the torque goes off. Servo 3 trips
+  its overload protection (Hardware Error Status 32, the overload bit) in a static hold of the upper arm
+  horizontal at about 0.8 A of holding current, as it did after the tuning run `tune_joint6_20261023_0039` with the
+  spring attached; the torque is off until a reboot, which drops the arm. The threshold isn't documented.
 - Settings: latency timer 1 ms, sync read/write and a fixed period loop are done. 4 Mbps
   is not worth an eeprom change on every servo: a bus read is the latency timer plus the return delays plus about
   0.5 ms of bytes at 1 Mbps, so 4 Mbps saves ~0.35 ms per bus while a lower return delay saves 1.5-2 ms. `chrt` and
@@ -111,13 +130,19 @@ path.
 - Current-based position mode (5) would make the loop output a current (torque) instead of a PWM duty, so K would
   not depend on the supply voltage. Only joints 1-3 have it.
 - Friction and backlash: 2021 measured about 20 positions between approaching a pose from above and from below on
-  servo 3. No static model removes that; a direction-dependent offset (what 2021 did) halves it.
+  servo 3. No static model removes that; a direction-dependent offset (what 2021 did) halves it. Joint 2 measured
+  in current on 23 October, holding a pose with the arm out: about 250 units after moving up and stopping, about
+  50 after moving down a little and stopping; the mean, about 150 units (0.4 A), is gravity, half the difference,
+  about 100 units (0.27 A), is Coulomb friction of the gearbox and the 3:1 belt. Friction is nearly as large as
+  gravity on joint 2, so the direction of approach decides most of its resting error.
 
 ## The static model
 
 ```
-load(q) = gravity(q) + spring(q) + residual(q)
+load(q) = gravity(q) + residual(q)
 ```
+
+(Until 23 October 2026 there was a `spring(q)` term; the spring is gone, see Step 3.)
 
 Only joints 2, 3 and 5 carry a meaningful gravity load: joint 1 (yaw) none; joints 4 and 6 (rolls) only through the
 gripper's off-axis mass when the wrist is bent, a few hundredths of a N.m, ignored.
@@ -144,16 +169,12 @@ coefficient absorbs `g / K` of its joint, so fit per joint; the terms shared bet
 fit positions directly and the sign comes out of the fit. The 2021 fit `a cos(q2) + b sin(phi)` is this model without
 the perpendicular and wrist terms.
 
-Spring. It runs from the housing of servo 2, on the base plate, to the housing of servo 3. Servo 3 is mounted
-reversed: its housing is part of the upper arm and turns with q2 + q3 about the elbow, so the spring length is
-`L(q2, q3)` and the spring loads both joints (the readme doesn't mention it; measure the anchors). For a linear
-spring the torque on joint j is `k (L - L0) dL/dqj`. The `k L dL/dqj` part is a spring of zero free length, and such
-a spring pulls exactly like a mass: its torque is a combination of the same sin/cos terms as gravity (checked: the
-regressor with an `L dL/dq` column has a condition number of 1e11), so it is absorbed by the gravity coefficients.
-Only `dL/dqj` is a column of its own, with coefficient `-k L0` in torque (in positions each joint absorbs its own
-`1 / K`); a nonlinear or pre-tensioned spring gets a polynomial in `L` instead. The anchor on the upper arm sits
-close to the joint 3 axis, so `dL/dq3` and the joint 3 load are small compared to joint 2, which is why q2 and q3
-have to be varied independently to tell the spring from gravity.
+Spring (removed). The spring ran from the housing of servo 2, on the base plate, to the housing of servo 3, which is
+part of the upper arm, so its length was `L(q2, q3)` and it loaded both joints. For a linear spring the torque on
+joint j is `k (L - L0) dL/dqj`; the `k L dL/dqj` part pulls like a mass and is absorbed by the gravity terms, only
+`dL/dqj` is a column of its own (`spring_dl` in the code, coefficient `-k L0`). The term is still in
+`static_compensation.py` behind `term_names(joint, spring=True)` and a `spring` section in the yaml, off by
+default since 23 October 2026.
 
 Residual. What the physics leaves over on (q2, q3), maybe q5: a low order polynomial or a
 `scipy.interpolate.RegularGridInterpolator` on a q2 x q3 grid. An MLP is more than a few hundred poses support.
@@ -170,11 +191,14 @@ term with `c = d6`; this needs K.
 - Reads: add a sync read of address 126 (2 bytes, signed) to `servo_handler.py` for the current, one packet per bus
   like the other reads. `read_current_pos` and `Servo.target_position` give the error (`_print_position_error` in the
   controller prints exactly that).
-- Poses: random inside the calibrated ranges, q2 and q3 varied independently (to separate the spring from gravity),
-  q4 and q5 varied for the wrist terms, including poses near the range ends. Approach each pose from both
-  directions, wait until the arm has settled (2021: 3 s), log angles (radians, the 7 element array), goal and
-  present position per servo, current, temperature and input voltage, as csv. The mean of both directions is the
-  static load, half the difference the friction deadband. Hold out about 20 % of the poses.
+- Poses: random inside the calibrated ranges, q2 and q3 varied independently (they load joints 2 and 3 with
+  different levers), q4 and q5 varied for the wrist terms, including poses near the range ends. Approach each pose
+  from both directions, wait until the arm has settled (2021: 3 s), log angles (radians, the 7 element array), goal
+  and present position per servo, current, temperature and input voltage, as csv. The mean of both directions is
+  the static load, half the difference the friction deadband. On joint 2 the deadband is nearly as large as the
+  load (23 October), so a recording from one direction would be off by half of it. Hold out about 20 % of the
+  poses. Servo 3 overloads in long static holds of the upper arm horizontal (about 0.8 A); the 3 s settles are
+  short, but check the hardware error status between poses, which `record_static_load.py` does.
 - Warm up with a few minutes of slow sweeps but stay below the 45 C warning (the robot stops at 50 C), and log the
   temperatures.
 - Moving: `plan_move_to_pose`/`execute_move` for checked moves, or `move_servo` for one joint at a time (unchecked,
@@ -183,7 +207,8 @@ term with `c = d6`; this needs K.
 ## Step 2: fit the gravity model
 
 The code: the terms live in `static_compensation.py` (`term_values`, `regressor_row`; the names are `constant`,
-`cos_q2`, `sin_q2`, `sin_phi`, `cos_phi`, `wrist_reach`, `wrist_pitch`, `wrist_roll` and `spring_dl`) and
+`cos_q2`, `sin_q2`, `sin_phi`, `cos_phi`, `wrist_reach`, `wrist_pitch`, `wrist_roll`, and `spring_dl` only with a
+`spring` section in the yaml) and
 `calibration/fit_static_load.py` does what the snippet below shows, per joint, with hold-out poses and standard
 errors. The snippet is the idea in 30 lines:
 
@@ -201,24 +226,8 @@ def basis(q):
     row5 = [np.cos(phi) * np.sin(q5) + np.cos(q4) * np.cos(q5) * np.sin(phi)]  # m6 c6
     return {2: np.array(row2), 3: np.array(row3), 5: np.array(row5)}
 
-def spring_columns(q2, q3, base_anchor, arm_anchor, a2=20.0, h=1e-6):
-    """{joint: dL/dq} for the spring between the servo 2 housing (anchor relative to joint 2: radial, up, in cm)
-    and the servo 3 housing, which moves with the upper arm (anchor relative to joint 3: along the upper arm,
-    perpendicular to it); the coefficient is -k L0, the k L part is absorbed by the gravity terms"""
-    def length(q2, q3):
-        phi = q2 + q3
-        along, perp = arm_anchor
-        anchor = np.array([a2 * np.cos(q2) + along * np.sin(phi) + perp * np.cos(phi),
-                           a2 * np.sin(q2) - along * np.cos(phi) + perp * np.sin(phi)])
-        return np.linalg.norm(anchor - np.asarray(base_anchor))
-    dL2 = (length(q2 + h, q3) - length(q2 - h, q3)) / (2 * h)
-    dL3 = (length(q2, q3 + h) - length(q2, q3 - h)) / (2 * h)
-    return {2: dL2, 3: dL3}
-
 # Q: list of angle arrays, E: {servo id: steady state error in positions}, mean of both directions
 A = {j: np.array([basis(q)[j] for q in Q]) for j in (2, 3, 5)}
-for j in (2, 3):
-    A[j] = np.hstack([A[j], np.array([[spring_columns(q[2], q[3], base_anchor, arm_anchor)[j]] for q in Q])])
 coefficients = {}
 for j in (2, 3, 5):
     coefficients[j], _, rank, _ = np.linalg.lstsq(A[j], E[j], rcond=None)
@@ -231,14 +240,24 @@ for j in (2, 3, 5):
   each other (same physical moments, different K); the `cos(q2)` coefficient of joint 2 should be the largest.
 - Check the fit on the held-out poses in positions; the 2021 scatter was 1-2 positions.
 
-## Step 3: the spring
+## Step 3: the spring (obsolete, the spring was removed on 23 October 2026)
 
-1. Measure the anchor on the servo 2 housing relative to the joint 2 axis (radial and vertical offset in the arm
-   plane) and the anchor on the servo 3 housing relative to the joint 3 axis (along the upper arm and perpendicular
-   to it), with a ruler or from the CAD.
-2. Measure k and L0 offline by hanging weights, as a check on the fitted `-k L0`.
-3. The fitted `-k L0` has to come out the same from the joint 2 and the joint 3 columns up to the ratio `K3 / K2`;
-   if not, or if it is far from the measured one, suspect the anchor measurement or a sign error, not the spring.
+Measured by hand on the robot on 23 October, raw register reads:
+
+- After the tuning run `tune_joint6_20261023_0039` servo 3 reported a hardware error: Hardware Error Status
+  (address 70) read 32, the overload bit. It happened during a static hold with the upper arm horizontal and was
+  cleared by a reboot.
+- Present Current of servo 3 (address 126, 2.69 mA per unit) holding the upper arm horizontal: -300 to -320 with
+  the spring (0.81-0.86 A), about -280 without it (0.75 A). With the spring the overload tripped in a static hold;
+  without it the same hold ran for several minutes without an error.
+- Pulling on the spring by hand did not visibly change the current of servo 3 (its anchor is close to the joint 3
+  axis, as the model said), yet the overload only occurred with the spring attached.
+- Joint 2 without the spring, arm fully stretched out: about 250 units (0.67 A, about 15 % of the stall current
+  of the XM540, about 4.8 N.m at the joint through the 3:1 belt). Comfortable, the spring is not needed.
+
+Decision: the spring is off the robot. The anchor measurements, k and L0 and the consistency check of the fitted
+`-k L0` between the two joints are no longer needed. The code keeps the term optional (a `spring` section in
+`servo_config.yaml`, `--no-spring` in the fit script to leave it out even then) should a spring return.
 
 ## Step 4: the residual
 
@@ -258,8 +277,9 @@ Where it plugs into the code (implemented on 19 October, see the work list at th
   `all_angles` and they are added; `compensation_positions` keeps what was added. `move_servos` passes the
   commanded angles, so the model input is the target pose, not the measured one.
 - Parameters in the yaml: the optional `compensation` field of a servo (`max_positions`, `terms`, optional `up` and
-  `down`) and the top level `spring` section (the two anchors), validated by `servo_config.py`; the basis is one
-  module shared with the fit script.
+  `down`), validated by `servo_config.py`; a top level `spring` section (the two anchors) is still accepted and
+  switches the spring term on, the yaml has none since 23 October. The basis is one module shared with the fit
+  script.
 - Clamping: `Servo.clamp_target_position` clamps the uncompensated position to the calibrated range and adds the
   compensation back, so the compensation is kept at the ends of the range and the goal may exceed the calibrated
   range by at most `max_positions`; `servo_handler` then clamps to 0-4095. The physical range has to allow that
@@ -274,7 +294,10 @@ Where it plugs into the code (implemented on 19 October, see the work list at th
 - Direction: keep the 2021 split as an option: fit up and down separately, use the mean for static targets and the
   direction of the last commanded change to pick the side (`ServoWithOffsetFunction` did this with
   `_last_commanded_angle`). The basis needs a constant term for that: Coulomb friction is a fixed number of
-  positions whose sign follows the direction, which no sin/cos term can carry.
+  positions whose sign follows the direction, which no sin/cos term can carry. On joint 2 this is not optional:
+  with friction at about two thirds of the gravity load (23 October), a mean fit leaves half the band, and a pose
+  approached from the wrong direction sits a whole band off. Use the split, or approach final poses from one
+  consistent direction, or both.
 - Safety: clamp the compensation magnitude (60 positions is 5 degrees), enable it one joint at a time with the arm
   supported, and check the sign by reading `present - target` before and after: the error has to shrink. A wrong sign
   doubles it.
@@ -306,8 +329,8 @@ data about 10 positions (0.9 degrees) on servo 3, as large as the sag it removes
 and its remaining error is measured.
 
 1. Identify friction per joint from slow constant velocity sweeps in both directions at several speeds: half the
-   up/down difference is the Coulomb term, the slope against velocity the viscous term. Joint 2 is probably the
-   largest.
+   up/down difference is the Coulomb term, the slope against velocity the viscous term. Joint 2 is the largest:
+   about 100 units of current (0.27 A) of Coulomb friction against 150 of gravity, measured at rest on 23 October.
 2. Feedforward `Fc tanh(v / v0) + b v`, in positions, added to the static term. Use the desired velocity (the
    difference of consecutive steps of a `PlannedMove` times `steps_per_second`), not the measured one; v0 a few
    degrees per second.
@@ -328,14 +351,54 @@ Information still needed:
 - [ ] Masses: `resources/weights.txt` is from 2021 with ambiguous names; re-weigh the lower arm, the upper arm with
   the wrist servos, and the gripper, or skip it: the regressor fits the first moments directly, masses are only
   needed for payloads.
-- [ ] Spring: the anchor points on the servo 2 and servo 3 housings, k and L0 (the attachment is known: both joints
-  stretch it).
+- [x] Spring: removed from the robot on 23 October 2026 (Step 3), nothing to measure.
 - [ ] Which joints sag most and the payload range: 2021 says servo 3, then 2; re-measure, the gearing changed.
 
-Work to do (the code of 19 October 2026 is in `src/robot_controllers/dynamixel_robot/static_compensation.py`,
-`calibration/record_static_load.py`, `calibration/fit_static_load.py` and the `compensation`/`spring` fields of
-`servo_config.yaml`; nothing has run on the robot yet):
+Gains first (21 October 2026, the full account is in `Tuning the servo gains.md`): the fit is in positions and
+every coefficient absorbs 1/K with K proportional to the
+P gain and the supply voltage, so the P gains have to be settled before the static load is recorded; a later P
+change rescales the coefficients by P_old / P_new (plus a check), a change of operating mode invalidates the fit.
+The friction band scales with 1/P too and the feedforward can't remove it, so P sets the floor of the result. The
+script `calibration/tune_servo_gains.py` (one joint per run, `--joint`) does that: at a few poses it records a
+baseline at rest, then trials at rising P (x1.3 from the yaml value up to 2x, or down when the yaml value fails):
+the rest ripple of the position and the pwm, small steps (sized to keep the pwm below a goal pwm clamp of 3 times
+the holding pwm, at least half the limit, applied before the gains are written) with the profile of the servo off
+so the loop itself is seen (overshoot, rings, settle time, steady state error per direction, the measured pwm per
+position of error against P / 128), and a streamed planned move with the production profile (tracking against the
+position trajectory of the servo). The first trial that overshoots more than 10 %, rings more than once, doesn't
+settle in 0.5 s or raises the ripple or pwm noise at rest (per unit of P) is the knee; it recommends 0.65 times
+the knee per pose. The smallest of the poses is the P of the joint; at that P it tries D = 0, P/8, P/4, P/2 at
+every pose where the step overshoots. Live abort rules (temperature, voltage drop, position jump, divergence,
+oscillation, pwm at the clamp) and Ctrl+C restore the yaml gains, profile and goal pwm at once; divergence,
+oscillation and pwm at the clamp count as the knee, the other three end the run with the finished poses kept;
+nothing touches the eeprom. Tested offline against a simulated second order servo with friction
+(`tests/servo_controller_tests/gain_tuning_tests.py`) and reviewed; joint 6 ran on 21-23 October without a
+false abort (the thresholds: 40 positions or 2.5 times the sag of divergence, 6 positions of oscillation, 90 % of
+the clamp, 50 C, 0.7 V).
+Order: the wrist first (6, 4, 5: the rolls carry no static load, so a mistake is cheap and the sampling, the abort
+rules and the restore get checked there), then 3, 1 and 2 last (the belt joints; 2 carries the arm). Distal first
+because the distal joints are the load of the proximal ones and have to hold stiffly with their final gains when
+those are tuned, while a proximal gain doesn't change a distal loop. I stays 0: the firmware's anti-windup only acts
+when the pwm saturates, there is no integrator clamp or deadband and the reset on a new goal is undocumented, so
+against the table or an object the integrator ramps to full duty (about 30 N.m at joint 2 through the belt); inside
+the friction band an integrator hunts or creeps; and the feedforward has the predictable part. A payload trim, if
+ever needed, belongs on the host with a deadband of half the band and a clamp. After the gains: add the gains to
+the csv of `record_static_load.py` (it doesn't log them, so a fit can't tell which P it belongs to), then record.
 
+Work to do (the code of 19 October 2026 is in `src/robot_controllers/dynamixel_robot/static_compensation.py`,
+`calibration/record_static_load.py`, `calibration/fit_static_load.py` and the `compensation` field of
+`servo_config.yaml`; the `spring` section stays supported but unused; the static load has not been recorded yet):
+
+- [x] 23 October: the spring removed, the spring term off by default in the code (`term_names(joint, spring=True)`
+  and a `spring` section in the yaml switch it on).
+- [x] `tune_servo_gains.py` ran on joint 6 on 21-23 October: the pwm per position of error matched P / 128, the pwm
+  noise criterion was fixed to ignore the pwm that follows an encoder flicker. Servo 3 overloaded in a static hold
+  after run `0039` (with the spring); the script checks the hardware error status before every trial but not after
+  the last one, see the open item in `Tuning the servo gains.md`.
+- [ ] Run `tune_servo_gains.py` on the other joints, 4, 5, 3, 1, 2 in that order, and put the recommended gains in
+  the yaml. The default poses keep the tip inside the workspace sphere (60 cm since 23 October); `--pose` for
+  others.
+- [ ] Log p, i, d per servo in the csv of `record_static_load.py`.
 - [x] Sync read of Present Current (joints 1-3, 7) and Present Load (4-6): `ServoHandler.read_present_current`,
   `DynamixelRobotController.get_present_currents`.
 - [x] Pose sampling and logging script: `python -m src.robot_controllers.dynamixel_robot.calibration.record_static_load`
