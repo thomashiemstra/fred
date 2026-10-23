@@ -43,7 +43,7 @@ class WorkSpaceLimits:
     itself checks nothing, so it stays fast.
     """
     radius_min = 10
-    radius_max = 57
+    radius_max = 60
     y_min = d6 + 0.1  # y=0 is bad for the IK calculation, so let's make sure that never happens
     z_min = -1  # the gripper tip, the fingers may rest on the table
     wrist_z_min = 1.5  # the wrist centre, just under the resting height of the wrist servo lying on the table
