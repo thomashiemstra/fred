@@ -1006,19 +1006,30 @@ class StickStepTests(unittest.TestCase):
         self.assertFalse(controller._step_skipped)
         np.testing.assert_allclose(before, controller._step_angles(), atol=1e-6)
 
-    def test_a_wrist_joint_at_the_end_of_its_range_holds_instead_of_turning_all_the_way_round(self):
-        # joint 6 just inside -pi, the sticks ask for a little further: the inverse kinematics gives almost +pi
+    def test_a_wrist_joint_at_the_end_of_its_range_turns_the_long_way_round_at_the_joint_speed_limit(self):
+        # joint 6 just inside -pi, the sticks ask for a little further: the inverse kinematics gives almost +pi, the
+        # same angle a full turn away; the joint turns there the long way round, through the middle of its range,
+        # while the gamepad waits
         angles = wrist_angles(0.3)
         angles[6] = -pi + 0.01
         controller = self.controller_at(pose_of_angles(angles))
         further = angles.copy()
         further[6] = -pi - 0.01
+        target = pose_of_angles(further, flip=False)
+        sent_angles = [controller._step_angles()]
 
-        for _ in range(5):
-            with self.assertLogs(xbox_robot_controller.logger, 'DEBUG'):
-                controller._take_step(pose_of_angles(further, flip=False), 0.01)
-            self.assertTrue(controller._step_skipped)
-            np.testing.assert_allclose(angles, controller._step_angles(), atol=1e-9)
+        for _ in range(250):
+            controller._take_step(copy(target), 0.01)
+            sent_angles.append(controller._step_angles())
+            self.assertFalse(controller._step_skipped)
+
+        for before, after in zip(sent_angles, sent_angles[1:]):
+            self.assertLessEqual(largest_change(before, after), global_constants.recommended_max_servo_speed * 0.01)
+        self.assertAlmostEqual(pi - 0.01, sent_angles[-1][6], places=6)
+        self.assertTrue(all(-pi <= a[6] <= pi for a in sent_angles), 'never past the end of the range')
+        self.assertTrue(any(abs(a[6]) < 0.1 for a in sent_angles), 'through the middle, where the cable is unwound')
+        self.assertGreater(sum(1 for before, after in zip(sent_angles, sent_angles[1:]) if after[6] != before[6]),
+                           100, 'about 6.3 rad at the speed limit takes well over a second of steps')
 
     def test_the_orientation_of_the_new_pose_is_kept(self):
         controller = self.controller_at(Pose(30, 22, 4, alpha=0.1, gamma=0.2))

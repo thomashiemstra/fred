@@ -297,20 +297,23 @@ class XboxRobotController:
         while they haven't reached them, the gamepad waits and the pose stays, so the arm finishes the move to the
         commanded pose first. That makes it slow down near a singularity instead of stopping, and when the wrist has to
         turn over (a straight wrist passed with the same flip, or the a button) joints 4 and 6 turn by pi at that speed,
-        to the other solution of the same pose. The step is refused when the position can't be reached (the inverse
+        to the other solution of the same pose. When a wrist roll reaches the seam of its one-turn range the same
+        walk turns it the long way round, almost a full turn, to the same angle at the other end: the angles of the
+        inverse kinematics are taken as they are, from -pi to pi, and a flip across the seam is just a big turn.
+        The step is refused when the position can't be reached (the inverse
         kinematics then gives the stretched arm), or the angles are outside the workspace limits or the ranges of the
         servos (the checks of check_move).
         :param step_time: the seconds the step takes
         :raises MovementException: if the step is not safe
         """
         current_angles = self._step_angles()
-        commanded_angles = self._angles_towards(self.current_pose, current_angles)
+        commanded_angles = self._angles_of(self.current_pose)
         if np.abs(commanded_angles[1:] - current_angles[1:]).max() > 1e-9:
             # still on the way to the commanded pose, the gamepad waits
             best_pose, best_angles = self.current_pose, commanded_angles
         else:
             best_pose = _with_flip(new_pose, self.current_pose.flip)
-            best_angles = self._angles_towards(best_pose, current_angles)
+            best_angles = self._angles_of(best_pose)
 
         # a step that would turn a joint faster than recommended_max_servo_speed goes part of the way, at that speed
         step_time = min(step_time, MAX_STEP_TIME)
@@ -327,19 +330,18 @@ class XboxRobotController:
         check_move(PlannedMove('step of the gamepad', step_angles, step_time), self.robot)
         return best_pose, best_angles
 
-    def _angles_towards(self, pose: Pose, current_angles: np.ndarray) -> np.ndarray:
+    def _angles_of(self, pose: Pose) -> np.ndarray:
         """
-        the angles of the pose, with each angle on the side of the current one
+        the angles of the pose from the inverse kinematics, from -pi to pi
         :raises MovementException: if the pose can't be reached
         """
         ik_angles = self.robot.pose_to_angles(pose)
         if not np.all(np.isfinite(ik_angles)):
             raise MovementException('the inverse kinematics gave no angles')
-        unwrapped_angles = unwrap_towards(ik_angles, current_angles)
-        reached = forward_position_kinematics(unwrapped_angles, self.robot.robot_config)[-1]
+        reached = forward_position_kinematics(ik_angles, self.robot.robot_config)[-1]
         if np.linalg.norm(reached - [pose.x, pose.y, pose.z]) > MAX_POSITION_ERROR:
             raise MovementException('position {} can not be reached'.format(np.round([pose.x, pose.y, pose.z], 1)))
-        return unwrapped_angles
+        return ik_angles
 
     def __handle_commands(self) -> None:
         while True:
@@ -604,17 +606,6 @@ class XboxRobotController:
             return reached_pose
 
         return recorded_moves[-1].poses[-1]
-
-
-def unwrap_towards(ik_angles: np.ndarray, current_angles: np.ndarray) -> np.ndarray:
-    """
-    The inverse kinematics gives angles from -pi to pi, so a turn of almost 2 pi is the same angle just past the end
-    of the range: this takes that one, the range check then holds the joint at its end instead of turning it all the
-    way round. A turn of about pi is the wrist turning over to the other solution, that one stays.
-    """
-    turn = ik_angles - current_angles
-    unwrapped: np.ndarray = np.where(np.abs(turn) > 1.5 * np.pi, ik_angles - np.sign(turn) * 2 * np.pi, ik_angles)
-    return unwrapped
 
 
 def _with_flip(pose: Pose, flip: bool) -> Pose:
