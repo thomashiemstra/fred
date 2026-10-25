@@ -78,6 +78,10 @@ class AbstractRobotController(ABC):
         could not be read"""
         return {}
 
+    def get_servo_temperatures(self) -> dict[int, int] | None:
+        """returns a mapping of servo id to temperature of the servos, or None if the temperatures could not be read"""
+        return {}
+
     def get_hardware_errors(self) -> dict[int, list[str]] | None:
         """returns a mapping of servo id to the names of its hardware errors for the servos that shut down, or None
         if the servos could not be read"""

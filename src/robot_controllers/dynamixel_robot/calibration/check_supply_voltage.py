@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -450,7 +451,13 @@ def main(argv: list[str] | None = None) -> int:
             print('skipping pose {} ({} degrees): {}'.format(name, pose_degrees(pose), refused))
     moving = (not args.no_hold and accepted) or (not args.no_motion and len(accepted) >= 2)
 
-    path = '{}/supply_voltage_{}.csv'.format(args.output_dir, datetime.now().strftime('%Y%m%d_%H%M'))
+    output_dir = os.path.abspath(args.output_dir)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as e:
+        print('can not create the output directory {}: {}'.format(output_dir, e))
+        return 1
+    path = os.path.join(output_dir, 'supply_voltage_{}.csv'.format(datetime.now().strftime('%Y%m%d_%H%M')))
     stop = StopFlag()
     stop.install()
     enabled = False

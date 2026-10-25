@@ -96,7 +96,9 @@ class Criteria(NamedTuple):
 
 class AbortLimits(NamedTuple):
     """the live limits, a sample beyond one aborts the trial and restores the gains at once"""
-    max_temperature: float = 50.0  # degrees, at the 50 C shutoff temp of the robot, the winding is warmer than the sensor
+    # degrees, the winding is warmer than the sensor; tune_servo_gains sets it to the temperature_limit of
+    # servo_config.yaml, this default is for the tests
+    max_temperature: float = 50.0
     max_voltage_drop: float = 1.5  # volts below the voltage at the start of the trial
     max_jump: int = 50  # positions between two samples, an encoder glitch or a slipped belt
     divergence_factor: float = 3.0  # times the step, or

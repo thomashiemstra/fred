@@ -232,6 +232,9 @@ class DynamixelRobotController(AbstractRobotController):
             logger.error('servo %d is too warm: %dC, the limit is %dC', servo_id, temperature, limit)
         return overheating
 
+    def get_servo_temperatures(self) -> dict[int, int] | None:
+        return self.servo_handler.read_temperatures()
+
     def get_servos_outside_calibrated_range(self, margin_degrees: float = 0.0
                                             ) -> dict[int, tuple[int, tuple[int, int]]] | None:
         """

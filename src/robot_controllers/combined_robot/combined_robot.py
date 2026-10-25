@@ -67,6 +67,9 @@ class CombinedRobot(AbstractRobotController):
     def get_overheating_servos(self) -> dict[int, int] | None:
         return self.dynamixel_robot.get_overheating_servos()
 
+    def get_servo_temperatures(self) -> dict[int, int] | None:
+        return self.dynamixel_robot.get_servo_temperatures()
+
     def pose_to_angles(self, pose: Pose) -> np.ndarray:
         return inverse_kinematics(pose, self.dynamixel_robot.robot_config)
 

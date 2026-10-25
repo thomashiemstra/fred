@@ -37,6 +37,7 @@ import argparse
 import csv
 import logging
 import math
+import os
 import signal
 import sys
 import time
@@ -837,8 +838,9 @@ def main(argv: list[str] | None = None) -> int:
                         help='goal pwm during the trials (885 is 100%%), default 3 times the holding pwm, at least '
                              'half the limit, and the limit on joints {}'.format(
                                  ', '.join(str(j) for j in UNLOADED_JOINTS)))
-    parser.add_argument('--max-temperature', type=float, default=AbortLimits().max_temperature,
-                        help='abort a trial when the servo reaches this temperature')
+    parser.add_argument('--max-temperature', type=float, default=None,
+                        help='abort a trial when the servo reaches this temperature, default the temperature_limit '
+                             'of servo_config.yaml')
     parser.add_argument('--floor', type=float, default=None,
                         help='cm above the table the wrist and gripper tip stay, default WorkSpaceLimits.z_min ({})'
                         .format(WorkSpaceLimits.z_min))
@@ -857,11 +859,6 @@ def main(argv: list[str] | None = None) -> int:
     except (argparse.ArgumentTypeError, ValueError) as e:
         print(e)
         return 1
-    settings = Settings(factor=args.factor, max_factor=args.max_factor, tune_d=not args.no_d,
-                        d_fractions=fractions, repeats=args.repeats, hold=args.hold, rest=args.rest,
-                        baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
-                        clamp=args.pwm_clamp, limits=AbortLimits(max_temperature=args.max_temperature))
-
     try:
         robot = get_robot()
     except DynamixelError as e:
@@ -870,6 +867,12 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(robot, CombinedRobot):
         print('the gains can only be tuned on the real robot, use_simulation is set')
         return 1
+    max_temperature = args.max_temperature if args.max_temperature is not None \
+        else robot.servo_config.temperature_limit
+    settings = Settings(factor=args.factor, max_factor=args.max_factor, tune_d=not args.no_d,
+                        d_fractions=fractions, repeats=args.repeats, hold=args.hold, rest=args.rest,
+                        baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
+                        clamp=args.pwm_clamp, limits=AbortLimits(max_temperature=max_temperature))
     if args.floor is not None:
         robot.workspace_limits = record_static_load.limits_with_floor(args.floor, robot.workspace_limits)
     excursion = np.radians(max(args.move_degrees, 6.0))
@@ -885,9 +888,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     servo = robot.servo_handler.get_servo(args.joint)
 
+    # before the servos are enabled, so a bad directory doesn't leave the arm under torque; relative to the working
+    # directory, which a PyCharm run configuration may set to this file's folder
+    output_dir = os.path.abspath(args.output_dir)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError as e:
+        print('can not create the output directory {}: {}'.format(output_dir, e))
+        return 1
     stamp = datetime.now().strftime('%Y%m%d_%H%M')
-    samples_path = '{}/tune_joint{}_{}_samples.csv'.format(args.output_dir, args.joint, stamp)
-    trials_path = '{}/tune_joint{}_{}_trials.csv'.format(args.output_dir, args.joint, stamp)
+    samples_path = os.path.join(output_dir, 'tune_joint{}_{}_samples.csv'.format(args.joint, stamp))
+    trials_path = os.path.join(output_dir, 'tune_joint{}_{}_trials.csv'.format(args.joint, stamp))
     print('joint {} (yaml p={} d={}), poses {}, P from {} to {} in steps of {}, D {}, {} repeats, output {}'.format(
         args.joint, servo.p, servo.d, ', '.join(pose_degrees(pose) for pose in accepted),
         servo.p, round(servo.p * args.max_factor), args.factor, 'off' if args.no_d else fractions, args.repeats,
@@ -906,12 +917,14 @@ def main(argv: list[str] | None = None) -> int:
     stopped = False
     try:
         with open(samples_path, 'w', newline='') as samples_file, open(trials_path, 'w', newline='') as trials_file:
+            print('temperatures: {}'.format(robot.get_servo_temperatures()))
             sample_writer = csv.DictWriter(samples_file, fieldnames=SAMPLE_FIELDS)
             sample_writer.writeheader()
             trial_writer = csv.DictWriter(trials_file, fieldnames=TRIAL_FIELDS)
             trial_writer.writeheader()
             session = TuningSession(robot, args.joint, settings, sample_writer, trial_writer, stop=stop)
             session.run(accepted)
+            print('temperatures: {}'.format(robot.get_servo_temperatures()))
     except Stop as e:
         print('\nstopped: {}'.format(e))
         stopped = True
