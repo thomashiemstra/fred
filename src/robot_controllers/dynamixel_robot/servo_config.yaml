@@ -33,8 +33,8 @@
 # logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure
 # their temperature inside, the plastic around them is cooler. The servos shut down by themselves at their hardware
 # temperature limit, 80C (70C for the gripper), and then just go limp.
-temperature_warning: 45  # degrees celsius
-temperature_limit: 50  # degrees celsius
+temperature_warning: 50  # degrees celsius
+temperature_limit: 55  # degrees celsius
 
 servos:
   1:
@@ -65,7 +65,7 @@ servos:
     positions: [3072, 1024]
     angles: [-90, 90]
     profile: {velocity: 150, acceleration: 50}
-    pid: {p: 1500, i: 0, d: 0}
+    pid: {p: 3000, i: 0, d: 350}
   4:
     name: wrist 1
     model: XC430-W240
@@ -75,7 +75,7 @@ servos:
     angles: [-180, 180]
     offset: 3  # measured in the jig at 0 degrees, raw 2051
     profile: {velocity: 300, acceleration: 100}
-    pid: {p: 1000, i: 0, d: 0}
+    pid: {p: 1100, i: 0, d: 550}
   5:
     name: wrist 2
     model: XC430-W240
@@ -85,7 +85,7 @@ servos:
     angles: [-180, 180]
     offset: 55  # measured in the jig at 0 degrees, raw 2103
     profile: {velocity: 300, acceleration: 100}
-    pid: {p: 2000, i: 0, d: 0}
+    pid: {p: 3300, i: 0, d: 500}
   6:
     name: wrist 3
     model: XC430-W150
@@ -94,7 +94,7 @@ servos:
     positions: [0, 4096]
     angles: [-180, 180]
     profile: {velocity: 300, acceleration: 100}
-    pid: {p: 2250, i: 0, d: 0}
+    pid: {p: 2750, i: 0, d: 1350}
   # 0 is open and 100 is closed, it closes freely all the way. When an object blocks the gripper, it squeezes with
   # about 2mA per position the target is beyond the object (with p=500), up to the goal current. Squeezing a pen was
   # tested without hardware errors and without heating up up to about 580mA, the most it reaches with the target at
