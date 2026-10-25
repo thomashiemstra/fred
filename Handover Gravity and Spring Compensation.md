@@ -45,15 +45,14 @@ path.
   servo 3 up `29.6 cos(q2 + q3 - pi/2)`, down `9.75 cos(q2 + q3 - pi/2)`.
   `cos(q2 + q3 - pi/2)` is `sin(q2 + q3)`: this is the rigid body model below without the perpendicular and wrist
   terms.
-- The recording tools: `calibration/gravity_compensation.py` (`Servo2Manager`, keyboard driven: step servo 2 or 3,
-  wait, record `present - target`), `record_going_up.py`, `record_going_down.py` and the `_servo3` variants (scripted
-  sweeps, 3 s settle per point; the four `record_going_*` scripts were deleted on 23 October 2026,
-  `record_static_load.py` replaces them), the raw data in `calibration/results` (servo 2 over a grid of q2 and q3, servo 3 over
-  q2 + q3, going up and going down, in positions), the fits in `gravity_compensation_with_math_angle2.py` and
-  `_angle3.py` (`scipy.optimize.curve_fit`, offline). They need the `keyboard` package (not in the venv) and an
-  Arduino angle sensor on COM5 (`arduino/ArduinoAngleReader.py`, an external reference for joint 2). They still call
-  the current API (`robot.servo2`, `move_servo`, `get_current_positions`, `Servo.target_position`) but move the arm
-  without asking, and the grid is in the 2021 units (angles as fractions of pi, q3 shifted by 0.5).
+- The recording tools of 2021 are deleted: `calibration/gravity_compensation.py` (`Servo2Manager`, keyboard driven:
+  step servo 2 or 3, wait, record `present - target`) and the fits `gravity_compensation_with_math_angle2.py` and
+  `_angle3.py` (`scipy.optimize.curve_fit`, offline) on 25 October 2026, the four `record_going_*` scripts (scripted
+  sweeps, 3 s settle per point) on 23 October; `record_static_load.py` and `fit_static_load.py` replace them. They
+  needed the `keyboard` package and an Arduino angle sensor on COM5 (`arduino/ArduinoAngleReader.py`, still there,
+  an external reference for joint 2), moved the arm without asking, and used the 2021 units (angles as fractions of
+  pi, q3 shifted by 0.5). The raw data stays in `calibration/results` (servo 2 over a grid of q2 and q3, servo 3 over
+  q2 + q3, going up and going down, in positions).
 - The 2021 numbers (servo 2 still had its encoder on the motor side then, 6144 positions per 180 degrees of the
   joint; servo 3 direct, 4096 per 360): servo 3 error up to 30 positions going up and 10 going down (2.6 and 0.9
   degrees), the difference of about 20 positions (1.8 degrees) is the friction and backlash deadband. Servo 2: -17
@@ -202,7 +201,7 @@ term with `c = d6`; this needs K.
 - Warm up with a few minutes of slow sweeps but stay below the 45 C warning (the robot stops at 50 C), and log the
   temperatures.
 - Moving: `plan_move_to_pose`/`execute_move` for checked moves, or `move_servo` for one joint at a time (unchecked,
-  small steps). Write a new script for this instead of reviving `calibration/gravity_compensation.py`.
+  small steps). `record_static_load.py` is that script; the 2021 `calibration/gravity_compensation.py` is deleted.
 
 ## Step 2: fit the gravity model
 

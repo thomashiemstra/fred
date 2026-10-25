@@ -331,10 +331,11 @@ Other scripts in `src/robot_controllers/dynamixel_robot/`, none asks before movi
 and `gui_test.py` run at import, call `get_robot()`, enable the servos and
 move them. They use the debug API that still exists (`robot.servoN`,
 `move_servo`, `move_servos`, `get_current_positions`, `set_pid_single_servo`, `set_servo_position`,
-`get_servo_position`, `Servo.target_position`, `Servo.constant_offset`). `calibration/gravity_compensation.py`
-needs the `keyboard` package (not installed) and an Arduino on COM5 (`ArduinoAngleReader` opens it in `__init__`);
-the four `record_going_*.py` scripts of 2021 were deleted on 23 October 2026, `record_static_load.py` replaces them.
-`gravity_compensation_with_math_angle2/3.py` are offline curve fits of the 2021 data in `calibration/results`.
+`get_servo_position`, `Servo.target_position`, `Servo.constant_offset`). The 2021 gravity scripts are gone: the
+four `record_going_*.py` scripts (deleted 23 October 2026), `calibration/gravity_compensation.py` (keyboard driven,
+needed the `keyboard` package and the Arduino on COM5) and the offline fits `gravity_compensation_with_math_angle2/3.py`
+(deleted 25 October); `record_static_load.py` and `fit_static_load.py` replace them, the 2021 data stays in
+`calibration/results`.
 `arduino/arduino_experiment.py` needs `Arduino` (arduino-python3), not installed. `position_recorder.py` records and writes
 the servo positions (fixed 20 October), nothing calls `set_recorder`.
 
