@@ -47,6 +47,7 @@ CURRENT_UNITS = {
     'XM430-W350': ('mA', 2.69),
     'XM540-W270': ('mA', 2.69),
     'XL330-M288': ('mA', 1.0),
+    'XC330-T288-T': ('mA', 1.0),
     'XC430-W240': ('load_0.1%', 1.0),  # no current sensor, the register is the present load
     'XC430-W150': ('load_0.1%', 1.0),
 }

@@ -33,8 +33,8 @@
 # logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure
 # their temperature inside, the plastic around them is cooler. The servos shut down by themselves at their hardware
 # temperature limit, 80C (70C for the gripper), and then just go limp.
-temperature_warning: 50  # degrees celsius
-temperature_limit: 55  # degrees celsius
+temperature_warning: 55  # degrees celsius
+temperature_limit: 60  # degrees celsius
 
 servos:
   1:
@@ -46,7 +46,7 @@ servos:
     angles: [0, 180]
     offset: 346  # measured in the jig at 90 degrees, raw 2394
     profile: {velocity: 250, acceleration: 100}
-    pid: {p: 1500, i: 0, d: 500}
+    pid: {p: 1500, i: 0, d: 0}
   2:
     name: shoulder
     model: XM540-W270
@@ -56,7 +56,7 @@ servos:
     angles: [0, 180]
     offset: -550  # measured in the jig at 0 degrees, raw 474
     profile: {velocity: 500, acceleration: 500}
-    pid: {p: 1000, i: 0, d: 0}
+    pid: {p: 1400, i: 0, d: 250}
   3:
     name: elbow
     model: XM430-W350
@@ -86,27 +86,38 @@ servos:
     offset: 55  # measured in the jig at 0 degrees, raw 2103
     profile: {velocity: 300, acceleration: 100}
     pid: {p: 3300, i: 0, d: 500}
+  # an XC330-T288-T on the 12 V bus since 11 November 2026 (rated 6.5-12 V, current limit 910 mA, 1 mA per unit,
+  # 1.0 N.m at 12 V), bolted to servo 5. Before it an XL330-M288 on a 5 V step-down converter, which switched off when
+  # the servo braked (its energy pushed the 5 V line up) and later got 11.7 V from a mis-set converter, which broke its
+  # motor driver. Current-based position mode, so it never draws more than the goal current; the goal current and the
+  # profile are those of the XL330 until calibration/wrist_roll_limits.py has measured the XC330. The gains: with the
+  # P of 1200 it came with and D 0 it swung +-115 positions around every target without stopping (11 November); without
+  # D it already oscillates from P 600, with D 400 it rests within 3 positions of the target up to P 800 at 5 mA.
+  # The positions have to be calibrated for the new mounting
   6:
     name: wrist 3
-    model: XC430-W150
+    model: XC330-T288-T
     bus: ttl
-    mode: position
+    mode: current_based_position
     positions: [0, 4096]
     angles: [-180, 180]
-    profile: {velocity: 300, acceleration: 100}
-    pid: {p: 2750, i: 0, d: 1350}
-  # 0 is open and 100 is closed, it closes freely all the way. When an object blocks the gripper, it squeezes with
-  # about 2mA per position the target is beyond the object (with p=500), up to the goal current. Squeezing a pen was
-  # tested without hardware errors and without heating up up to about 580mA, the most it reaches with the target at
-  # the closed end. To squeeze harder, raise the goal current together with GRIPPER_MAX_LEAD of the xbox controller,
-  # it needs about goal current / 20 states (1 state is 10 positions). The current limit of the XL330-M288 is 1750mA
+    goal_current: 300
+    profile: {velocity: 200, acceleration: 50}
+    pid: {p: 600, i: 0, d: 400}
+  # an XC330-T288-T on the 12 V bus since 11 November 2026, before it an XL330-M288.
+  # NOT CALIBRATED: the positions are still those of the XL330 and the new servo sits far outside them (3999 on 11
+  # November), so don't open or close the gripper until its open and closed positions are measured.
+  # 0 is open and 100 is closed. The XC330 makes about 3 times the torque of the XL330 per mA (1.136 against 0.354
+  # N.m/A), so 150 mA squeezes about as hard as the 400 mA of the XL330 did (0.17 against 0.14 N.m); its current
+  # limit is 910 mA. With the XL330: when an object blocked the gripper it squeezed with about 2 mA per position the
+  # target was beyond the object (with p=500), up to the goal current, see GRIPPER_MAX_LEAD of the xbox controller
   7:
     name: gripper
-    model: XL330-M288
+    model: XC330-T288-T
     bus: ttl
     mode: current_based_position
     positions: [1024, 2048]
     states: [0, 100]
-    goal_current: 400
+    goal_current: 150
     profile: {velocity: 50, acceleration: 50}
-    pid: {p: 500, i: 0, d: 0}
+    pid: {p: 600, i: 0, d: 400}  # those of servo 6, see there

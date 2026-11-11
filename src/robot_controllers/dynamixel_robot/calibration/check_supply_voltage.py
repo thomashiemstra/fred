@@ -67,6 +67,7 @@ RATED_RANGES = {
     'XC430-W240': (6.5, 12.0),
     'XC430-W150': (6.5, 12.0),
     'XL330-M288': (3.7, 6.0),
+    'XC330-T288-T': (6.5, 12.0),
 }
 CHAIN = (1, 2, 3, 4, 5, 6)  # the 12 V servos in the order of the chain, the gripper has its own 5 V rail
 FIELDS = ('phase', 'pose', 'time', 'servo', 'voltage', 'current_raw', 'current', 'current_unit', 'temperature')
