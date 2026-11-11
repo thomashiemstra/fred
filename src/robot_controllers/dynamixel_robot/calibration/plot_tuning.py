@@ -2,17 +2,21 @@
 Plots the recordings of tune_servo_gains.py so the knee of a sweep can be seen: no robot, only the csv files.
     python -m src.robot_controllers.dynamixel_robot.calibration.plot_tuning tune_joint6_20261023_1822_trials.csv [more ...]
 
-Every trials csv is read with the samples csv next to it (the same name with _samples). Three figures per joint:
-1. The knee: every metric of the P sweep against P on a log axis, one panel per metric, with the limit of the
-   acceptance criterion drawn in the same panel (overshoot against its limit of max(2 positions, 10 % of the
-   step), rings, settle time, rest ripple, pwm noise per unit of P, and the resting error band, the mean |error|
-   after the steps). Failed trials have hollow markers, the knee of every pose is a vertical line and the
-   recommended P a dotted one. Poses are colours, runs (csv files) are marker shapes.
-2. The D sweep at the P of the joint: overshoot and the resting error band against D, per pose.
-3. The step responses: the first step up of every P trial per pose, as a fraction of the step against time,
-   darker blue for higher P, so overshoot and ringing can be seen directly.
+Every trials csv is read with the samples csv next to it (the same name with _samples). The figures of a joint:
+1. The grid: the knee and the recommended P of every pose against the D they were swept at, with the P of the
+   joint (the smallest recommendation of the poses), so the D with the most margin can be seen.
+2. The knee, one figure per D: every metric of the P sweep at that D against P on a log axis, one panel per
+   metric, with the limit of the acceptance criterion drawn in the same panel (overshoot against its limit of
+   max(2 positions, 10 % of the step), rings, settle time, rest ripple, pwm noise per unit of P, and the resting
+   error band, the mean |error| after the steps). Failed trials have hollow markers, the knee of every pose is a
+   vertical line and the recommended P a dotted one. Poses are colours, runs (csv files) are marker shapes.
+3. The comparison of the D candidates at one P: overshoot and the resting error band against D, per pose.
+4. The step responses, per run and D: the first step up of every P trial per pose, as a fraction of the step against
+   time, darker blue for higher P, so overshoot and ringing can be seen directly.
 
---save <dir> writes png files instead of opening windows.
+Runs from before 25 October 2026 swept P at the yaml D only and tried D afterwards at the P of the joint; they read
+the same way, with a single D in the grid. --d limits the per D figures to some D gains, --save <dir> writes png
+files instead of opening windows.
 """
 from __future__ import annotations
 
@@ -123,14 +127,21 @@ def read_run(trials_path: str) -> Run:
     return Run(name, joint, yaml_p, trials, baselines, steps, poses)
 
 
-def knees(run: Run, factor: float = 1.3) -> dict[int, tuple[int | None, int | None]]:
-    """pose to (knee P, recommended P) of the P sweep of the run"""
+def sweep_d_values(run: Run) -> list[int]:
+    """the D gains P was swept at in the run, in the order they ran"""
+    return list(dict.fromkeys(t.d for t in run.trials if t.phase in ('p', 'p_down')))
+
+
+def knees(run: Run, factor: float = 1.3) -> dict[tuple[int, int], tuple[int | None, int | None]]:
+    """(pose, D) to (knee P, recommended P) of the P sweeps of the run"""
     result = {}
-    for pose in sorted(run.poses):
-        sweep = [(t.p, t.passed) for t in run.trials if t.pose == pose and t.phase in ('p', 'p_down')]
-        if sweep:
-            recommended, knee = choose_p(sweep, factor)
-            result[pose] = (knee, recommended)
+    for d in sweep_d_values(run):
+        for pose in sorted(run.poses):
+            sweep = [(t.p, t.passed) for t in run.trials
+                     if t.pose == pose and t.d == d and t.phase in ('p', 'p_down')]
+            if sweep:
+                recommended, knee = choose_p(sweep, factor)
+                result[(pose, d)] = (knee, recommended)
     return result
 
 
@@ -141,10 +152,72 @@ def _style(axis: Any) -> None:
         axis.spines[side].set_visible(False)
 
 
-def plot_knee(runs: Sequence[Run], criteria: Criteria = Criteria()) -> Any:
-    """the metrics of the P sweeps against P, with their limits, per pose"""
+def plot_grid(runs: Sequence[Run]) -> Any | None:
+    """the knee and the recommended P of every pose against D, with the P of the joint; None without P sweeps"""
+    import matplotlib.pyplot as plt
+    if not any(sweep_d_values(run) for run in runs):
+        return None
+    figure, (left, right) = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
+    poses = sorted({pose for run in runs for pose in run.poses})
+    for run_index, run in enumerate(runs):
+        marker = RUN_MARKERS[run_index % len(RUN_MARKERS)]
+        run_knees = knees(run)
+        d_values = sweep_d_values(run)
+        suffix = ' ' + run.name if len(runs) > 1 else ''
+        for pose in poses:
+            colour = POSE_COLOURS[(pose - 1) % len(POSE_COLOURS)]
+            swept = [d for d in d_values if (pose, d) in run_knees]
+            if not swept:
+                continue
+            label = 'pose {} ({}){}'.format(pose, run.poses[pose], suffix)
+            # a sweep without a knee passed up to its highest P: drawn there with a hollow marker
+            knee_points = []
+            for d in swept:
+                knee = run_knees[(pose, d)][0]
+                highest = max((t.p for t in run.trials if t.pose == pose and t.d == d and t.passed
+                               and t.phase in ('p', 'p_down')), default=None)
+                knee_points.append((d, knee if knee is not None else highest, knee is None))
+            left.plot([k[0] for k in knee_points], [k[1] for k in knee_points], color=colour, linewidth=2,
+                      marker=marker, markersize=7, label=label)
+            open_points = [k for k in knee_points if k[2] and k[1] is not None]
+            if open_points:
+                left.plot([k[0] for k in open_points], [k[1] for k in open_points], linestyle='none', marker=marker,
+                          markersize=9, markerfacecolor='white', markeredgecolor=colour, markeredgewidth=2)
+            recommended = [(d, run_knees[(pose, d)][1]) for d in swept if run_knees[(pose, d)][1] is not None]
+            right.plot([r[0] for r in recommended], [r[1] for r in recommended], color=colour, linewidth=2,
+                       marker=marker, markersize=7, label=label)
+        joint = []
+        for d in d_values:
+            values = [value[1] for (_, swept_d), value in run_knees.items() if swept_d == d]
+            if len(values) == len(run.poses) and all(v is not None for v in values):
+                joint.append((d, min(v for v in values if v is not None)))
+        if joint:
+            right.plot([j[0] for j in joint], [j[1] for j in joint], color=LIMIT_COLOUR, linewidth=1.5,
+                       linestyle='--', marker=marker, markersize=5, label='P of the joint' + suffix)
+    left.set_title('knee P (hollow: no knee, the highest P that passed)', fontsize=10, loc='left')
+    right.set_title('recommended P (dashed: the P of the joint, the smallest of the poses)', fontsize=10, loc='left')
+    left.set_ylabel('P gain')
+    for axis in (left, right):
+        axis.set_xlabel('D gain')
+        _style(axis)
+    left.legend(fontsize=8, frameon=False)
+    right.legend(fontsize=8, frameon=False)
+    figure.suptitle('joint {}: the P sweeps against D'.format(runs[0].joint))
+    figure.tight_layout()
+    return figure
+
+
+def plot_knee(runs: Sequence[Run], d: int | None = None, criteria: Criteria = Criteria()) -> Any | None:
+    """the metrics of the P sweeps at the D against P, with their limits, per pose; d None takes every P sweep
+    trial; None when there are none"""
     import matplotlib.pyplot as plt
     joint = runs[0].joint
+
+    def in_sweep(t: Trial) -> bool:
+        return t.phase in ('p', 'p_down') and (d is None or t.d == d)
+
+    if not any(in_sweep(t) for run in runs for t in run.trials):
+        return None
     figure, axes = plt.subplots(3, 2, figsize=(12, 9), sharex=True)
     panels = {
         'overshoot': (axes[0][0], 'overshoot, positions (dashed: its limit)'),
@@ -159,8 +232,7 @@ def plot_knee(runs: Sequence[Run], criteria: Criteria = Criteria()) -> Any:
         marker = RUN_MARKERS[run_index % len(RUN_MARKERS)]
         for pose in poses:
             colour = POSE_COLOURS[(pose - 1) % len(POSE_COLOURS)]
-            trials = sorted((t for t in run.trials if t.pose == pose and t.phase in ('p', 'p_down')),
-                            key=lambda t: t.p)
+            trials = sorted((t for t in run.trials if t.pose == pose and in_sweep(t)), key=lambda t: t.p)
             if not trials:
                 continue
             p = [t.p for t in trials]
@@ -191,7 +263,7 @@ def plot_knee(runs: Sequence[Run], criteria: Criteria = Criteria()) -> Any:
                               markersize=9, markerfacecolor='white', markeredgecolor=colour, markeredgewidth=2)
                 if key in limits:
                     axis.plot(p, limits[key], color=LIMIT_COLOUR, linewidth=1.2, linestyle='--')
-            knee, recommended = knees(run).get(pose, (None, None))
+            knee, recommended = knees(run).get((pose, d), (None, None)) if d is not None else (None, None)
             for key, (axis, _) in panels.items():
                 if knee is not None:
                     axis.axvline(knee, color=colour, linewidth=1, alpha=0.6)
@@ -204,13 +276,13 @@ def plot_knee(runs: Sequence[Run], criteria: Criteria = Criteria()) -> Any:
     for axis in axes[2]:
         axis.set_xlabel('P gain (log scale); solid line: knee, dotted: recommended, hollow marker: failed')
     axes[0][0].legend(fontsize=8, frameon=False)
-    figure.suptitle('joint {}: the P sweep'.format(joint))
+    figure.suptitle('joint {}: the P sweep{}'.format(joint, ' at D {}'.format(d) if d is not None else ''))
     figure.tight_layout()
     return figure
 
 
 def plot_d(runs: Sequence[Run]) -> Any | None:
-    """overshoot and the resting error band against D at the P of the joint, per pose; None without D trials"""
+    """overshoot and the resting error band against D of the comparison at one P, per pose; None without it"""
     import matplotlib.pyplot as plt
     d_trials = [(run_index, t) for run_index, run in enumerate(runs) for t in run.trials if t.phase == 'd']
     if not d_trials:
@@ -238,17 +310,19 @@ def plot_d(runs: Sequence[Run]) -> Any | None:
         axis.set_xlabel('D gain (hollow marker: failed)')
         _style(axis)
     left.legend(fontsize=8, frameon=False)
-    figure.suptitle('joint {}: the D sweep'.format(runs[0].joint))
+    figure.suptitle('joint {}: the D gains compared at one P'.format(runs[0].joint))
     figure.tight_layout()
     return figure
 
 
-def plot_steps(run: Run) -> Any | None:
-    """the first step up of every P trial per pose as a fraction of the step, darker for a higher P"""
+def plot_steps(run: Run, d: int | None = None) -> Any | None:
+    """the first step up of every P trial at the D per pose as a fraction of the step, darker for a higher P; d None
+    takes every P trial"""
     import matplotlib.pyplot as plt
     poses = sorted(run.poses)
-    keys = [key for key in run.steps if any(t.pose == key[0] and t.p == key[1] and t.d == key[2]
-                                            and t.phase in ('p', 'p_down') for t in run.trials)]
+    keys = [key for key in run.steps if (d is None or key[2] == d)
+            and any(t.pose == key[0] and t.p == key[1] and t.d == key[2] and t.phase in ('p', 'p_down')
+                    for t in run.trials)]
     if not keys:
         return None
     figure, axes = plt.subplots(1, len(poses), figsize=(6 * len(poses), 4), squeeze=False)
@@ -275,7 +349,8 @@ def plot_steps(run: Run) -> Any | None:
         axis.set_ylabel('fraction of the step (dashed: the goal)')
         axis.legend(fontsize=8, frameon=False)
         _style(axis)
-    figure.suptitle('joint {}: step responses of {}'.format(run.joint, run.name))
+    figure.suptitle('joint {}: step responses of {}{}'.format(run.joint, run.name,
+                                                              ' at D {}'.format(d) if d is not None else ''))
     figure.tight_layout()
     return figure
 
@@ -283,15 +358,18 @@ def plot_steps(run: Run) -> Any | None:
 def print_knees(runs: Iterable[Run]) -> None:
     for run in runs:
         print('{} (joint {}, yaml P {}):'.format(run.name, run.joint, run.yaml_p))
-        for pose, (knee, recommended) in knees(run).items():
-            print('  pose {} ({}): knee {}, recommended {}'.format(pose, run.poses[pose], knee, recommended))
+        for (pose, d), (knee, recommended) in knees(run).items():
+            print('  pose {} ({}) at D {}: knee {}, recommended {}'.format(pose, run.poses[pose], d, knee,
+                                                                         recommended))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='plot the recordings of tune_servo_gains.py')
     parser.add_argument('trials', nargs='+', help='the _trials.csv files of one joint, the _samples.csv next to them')
     parser.add_argument('--save', default=None, help='write png files to this directory instead of showing them')
-    parser.add_argument('--no-steps', action='store_true', help='skip the step response figure')
+    parser.add_argument('--no-steps', action='store_true', help='skip the step response figures')
+    parser.add_argument('--d', type=int, nargs='+', default=None,
+                        help='the D gains to draw the knee and step figures of, default every D of the grid')
     args = parser.parse_args(argv)
     import matplotlib
     if args.save:
@@ -304,10 +382,15 @@ def main(argv: list[str] | None = None) -> int:
         print('the files are of different joints: {}'.format(sorted(joints)))
         return 1
     print_knees(runs)
-    figures = {'knee': plot_knee(runs), 'd': plot_d(runs)}
+    d_values = args.d if args.d is not None else list(dict.fromkeys(d for run in runs for d in sweep_d_values(run)))
+    figures = {'grid': plot_grid(runs)}
+    for d in d_values:
+        figures['knee_d{}'.format(d)] = plot_knee(runs, d)
+    figures['d'] = plot_d(runs)
     if not args.no_steps:
         for run in runs:
-            figures['steps_' + run.name] = plot_steps(run)
+            for d in d_values:
+                figures['steps_{}_d{}'.format(run.name, d)] = plot_steps(run, d)
     if args.save:
         os.makedirs(args.save, exist_ok=True)
         for name, figure in figures.items():

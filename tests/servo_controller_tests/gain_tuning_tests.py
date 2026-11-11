@@ -12,11 +12,12 @@ from src.robot_controllers.dynamixel_robot.calibration import gain_tuning, tune_
 import math
 
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    AbortLimits, Criteria, RestMetrics, Sample, StepMetrics, abort_reason, choose_d, choose_p, d_values,
+    AbortLimits, Criteria, RestMetrics, Sample, StepMetrics, abort_reason, choose_d, choose_p, d_ladder,
     environmental_abort, evaluate, p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics, step_metrics,
     step_size, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import (
-    SAMPLE_FIELDS, TRIAL_FIELDS, Settings, StopFlag, TuningSession, joint_p_of, parse_pose, recommend)
+    SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep, TuningSession, compared_d, d_candidates,
+    d_grid, grid_is_done, joint_p_at, parse_pose, recommend, swept_d_values)
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
 from tests.servo_controller_tests.static_load_scripts_tests import FakeRobot
@@ -61,7 +62,12 @@ class StepSizingTests(unittest.TestCase):
         self.assertEqual([16000], p_values(16000, 1.3, 2.0), 'capped at the firmware range')
         self.assertEqual([1150, 890, 680], p_values_down(1500, 1.3))
         self.assertEqual([], p_values_down(100, 1.3))
-        self.assertEqual([0, 200, 400, 800], d_values(1600))
+        self.assertEqual([0, 250, 400, 640, 1020], d_ladder(250, 1.6, 1500))
+        self.assertEqual([0, 300, 600], d_ladder(300, 2.0, 1000), 'up to the maximum')
+        with self.assertRaises(ValueError):
+            d_ladder(0, 1.6)
+        with self.assertRaises(ValueError):
+            d_ladder(250, 1.0)
         with self.assertRaises(ValueError):
             p_values(1500, 1.0, 2.0)
 
@@ -347,6 +353,65 @@ class ChoiceTests(unittest.TestCase):
         self.assertEqual(650, choose_d(failed_at_0))
         self.assertEqual(320, choose_d(failed_at_0, min_improvement=1.5))
 
+    def test_grid_is_done(self):
+        self.assertFalse(grid_is_done([1650], 2))
+        self.assertFalse(grid_is_done([1650, None], 2))
+        self.assertTrue(grid_is_done([1650, None, None], 2))
+        self.assertTrue(grid_is_done([1650, 1950, 1650, 1270], 2), 'lower than the best, not than the previous')
+        self.assertFalse(grid_is_done([1650, 1270, 1950], 2), 'a better D starts over')
+        self.assertFalse(grid_is_done([1650, 1650], 2))
+        self.assertTrue(grid_is_done([1650, 1650, 1650], 2), 'the same P twice gains nothing either')
+        # joint 2 on 25 October: nothing passed at D 0, then 1430 from D 250 on
+        self.assertFalse(grid_is_done([None, 1430], 2))
+        self.assertFalse(grid_is_done([None, 1430, 1430], 2))
+        self.assertTrue(grid_is_done([None, 1430, 1430, 1430], 2))
+        self.assertTrue(grid_is_done([None, None], 2), 'nothing passes at the first two D gains either')
+        self.assertFalse(grid_is_done([1650, None, None], 3))
+
+    @staticmethod
+    def trial(flags=(), aborted=None, p=1000):
+        return tune_servo_gains.TrialResult(
+            phase='p', p=p, d=0, clamp=442, step=10, step_limited=False, rest=None, steps=(), tracking=(),
+            pwm_slope=None, flags=tuple(flags), warnings=(), aborted=aborted, temperature_start=30, temperature_end=30,
+            voltage_min=11.8)
+
+    def test_a_trial_that_only_settles_too_slowly_is_sluggish(self):
+        self.assertTrue(self.trial(['settle']).sluggish)
+        self.assertTrue(self.trial(['stuck']).sluggish)
+        self.assertFalse(self.trial(['overshoot', 'settle']).sluggish, 'it overshoots as well')
+        self.assertFalse(self.trial(['aborted'], aborted='oscillation, 8 positions peak to peak at rest').sluggish)
+        self.assertFalse(self.trial().sluggish, 'it passed')
+
+    def test_d_grid(self):
+        settings = Settings(d_start=250, d_factor=1.6, d_max=1500)
+        self.assertEqual([0, 250, 400, 500, 640, 1020], d_grid(settings, 500), 'the yaml D joins the ladder')
+        self.assertEqual([0, 250, 400, 640, 1020], d_grid(settings, 0))
+        self.assertEqual([500], d_grid(settings._replace(tune_d=False), 500))
+        self.assertEqual([400, 0], d_grid(settings._replace(d_values=(400, 0, 400)), 500), 'as given, in order')
+
+    @staticmethod
+    def pose_result(number, recommended_by_d):
+        sweeps = {d: Sweep(None if p is None else round(p / 0.65), p, p) for d, p in recommended_by_d.items()}
+        return PoseResult(number, None, None, [], sweeps, None, False)
+
+    def test_the_d_with_the_highest_p_of_the_joint_wins(self):
+        results = [self.pose_result(1, {0: 1650, 250: 1950, 400: 1950, 640: 1950}),
+                   self.pose_result(2, {0: 1650, 250: 1650, 400: 1950})]  # the run stopped at pose 2 of D 640
+        self.assertEqual([0, 250, 400], swept_d_values(results))
+        self.assertEqual([1650, 1650, 1950, None], [joint_p_at(results, d) for d in (0, 250, 400, 640)])
+        self.assertEqual([400], d_candidates(results), 'one step of the sweep higher counts')
+        self.assertIsNone(compared_d(results))
+        self.assertEqual((1950, 400), recommend(results))
+
+    def test_d_gains_that_share_the_best_p_without_a_comparison(self):
+        results = [self.pose_result(1, {0: 1270, 250: 1950, 400: 1950}),
+                   self.pose_result(2, {0: None, 250: 1950, 400: 1950})]
+        self.assertEqual([None, 1950, 1950], [joint_p_at(results, d) for d in (0, 250, 400)])
+        self.assertEqual([250, 400], d_candidates(results))
+        self.assertEqual((1950, 250), recommend(results), 'not compared (the run stopped): the smallest')
+        self.assertEqual((None, None), recommend([self.pose_result(1, {0: None})]))
+        self.assertEqual((None, None), recommend([]))
+
     def test_parse_pose(self):
         pose = parse_pose('elbow_out')
         self.assertEqual(0, pose[0])
@@ -526,7 +591,9 @@ def session_for(joint=3, resonance_above=None, resonance_slope=0.1, settings=Non
     servo = robot.servo_handler.get_servo(joint)
     servo.set_target_position_from_angle(pose[joint], pose)
     sim.position = sim.goal = servo.target_position
-    settings = settings or Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0)
+    # the yaml D only, unless the test is about the D grid
+    settings = settings or Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0,
+                                    tune_d=False)
     sample_file, trial_file = io.StringIO(), io.StringIO()
     sample_writer = trial_writer = None
     if writers:
@@ -563,24 +630,13 @@ class SessionTests(unittest.TestCase):
         self.assertEqual([1500, 1950, 2540], [t.p for t in p_trials])
         self.assertEqual([True, True, False], [t.passed for t in p_trials])
         self.assertIn('overshoot', p_trials[-1].flags)
-        self.assertEqual(2540, extended.knee_p)
-        self.assertEqual(1650, extended.recommended_p)
+        self.assertEqual({0: Sweep(2540, 1650, 1950)}, extended.sweeps, 'swept at the yaml D only')
         # the sag of the simulated load is 20 positions at P 1500 and the slope is P / 128
         self.assertAlmostEqual(-20, p_trials[0].steps[0].error, delta=2)
         self.assertAlmostEqual(1500 / 128, p_trials[0].pwm_slope, delta=1.0)
         self.assertTrue(all(m.moved for t in p_trials for m in t.steps))
-        # D: the whole grid at the P of the joint, though d=0 doesn't overshoot; the larger ones add pwm noise and
-        # nothing else, the sag of the load sets the resting error
-        d_trials = [t for t in extended.trials if t.phase == 'd']
-        self.assertEqual([0, 210, 410, 820], [t.d for t in d_trials])
-        self.assertEqual({1650}, {t.p for t in d_trials})
-        self.assertLessEqual(d_trials[0].max_overshoot, Criteria().min_overshoot_positions)
-        self.assertEqual(0, extended.recommended_d)
-        self.assertEqual((1650, 0), recommend(results, servo.d))
-        # the trials ran in two phases: the P sweeps of both poses, then the D sweeps
-        phases = [(t.phase, r.number) for r in results for t in r.trials]
-        self.assertEqual(('p', 1), phases[0])
-        self.assertEqual(('d', 2), phases[-1])
+        self.assertEqual({0}, {t.d for r in results for t in r.trials})
+        self.assertEqual((1650, 0), recommend(results))
         # the servo is back at the yaml gains, profile and goal pwm
         self.assertEqual((servo.p, servo.i, servo.d), robot.servo_handler.gains[3])
         self.assertEqual((servo.profile_velocity, servo.profile_acceleration), robot.servo_handler.profiles[3])
@@ -603,8 +659,8 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(1, len(aborted))
         self.assertEqual(1950, aborted[0].p)
         self.assertEqual('aborted', aborted[0].flags[0])
-        self.assertEqual(1950, results[0].knee_p)
-        self.assertEqual(1270, results[0].recommended_p)
+        self.assertEqual(1950, results[0].sweeps[0].knee_p)
+        self.assertEqual(1270, results[0].sweeps[0].recommended_p)
         # the gains went back to the yaml right after the abort, before anything else was written
         writes = robot.servo_handler.gain_writes
         index = writes.index((3, 1950, 0, 0))
@@ -617,13 +673,27 @@ class SessionTests(unittest.TestCase):
     def test_a_failing_yaml_gain_is_swept_down(self):
         session, robot, sim, sample_file, _ = self.session(resonance_above=1300, resonance_slope=0.25, writers=True)
         results = session.run([parse_pose('elbow_out')])
-        phases = [(t.phase, t.p, t.passed) for t in results[0].trials if t.phase != 'd']
+        phases = [(t.phase, t.p, t.passed) for t in results[0].trials]
         self.assertEqual(('p', 1500, False), phases[0])
         self.assertEqual(('p_down', 1150, True), phases[1])
-        self.assertEqual(1500, results[0].knee_p)
-        self.assertEqual(980, results[0].recommended_p)
+        self.assertEqual(Sweep(1500, 980, 1150), results[0].sweeps[0])
         rows = list(csv.DictReader(io.StringIO(sample_file.getvalue()), fieldnames=SAMPLE_FIELDS))
         self.assertEqual({'baseline', 'rest', 'step'}, {row['segment'] for row in rows})
+
+    def test_a_sluggish_start_is_not_swept_down(self):
+        # joint 2 at the low pose on 25 October: P 1000 at D 0 didn't settle, and every lower P oscillated
+        session, robot, sim, _, _ = self.session()
+        scripted = {1000: ChoiceTests.trial(['settle'], p=1000)}
+        with mock.patch.object(session, 'run_trial', side_effect=lambda pose, phase, p, d, baseline: scripted[p]):
+            trials, sweep = session.run_sweep(parse_pose('low'), 0, 1000, None)
+        self.assertEqual([1000], [t.p for t in trials])
+        self.assertEqual(tune_servo_gains.Sweep(1000, None, None), sweep)
+        # a start that overshoots is too stiff: down from there
+        scripted = {1000: ChoiceTests.trial(['overshoot'], p=1000), 770: ChoiceTests.trial(p=770)}
+        with mock.patch.object(session, 'run_trial', side_effect=lambda pose, phase, p, d, baseline: scripted[p]):
+            trials, sweep = session.run_sweep(parse_pose('low'), 0, 1000, None)
+        self.assertEqual([1000, 770], [t.p for t in trials])
+        self.assertEqual(tune_servo_gains.Sweep(1000, 650, 770), sweep)
 
     def test_the_move_test_streams_a_planned_move(self):
         settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=8.0, max_factor=1.0,
@@ -651,34 +721,74 @@ class SessionTests(unittest.TestCase):
             session.run([parse_pose('elbow_out')])
         self.assertFalse(session.restore(), 'the restore reports that it could not verify')
 
-    def test_the_d_sweep_runs_at_the_p_of_the_joint(self):
+    def test_the_p_of_the_joint_is_the_smallest_of_the_poses(self):
         # the 'low' pose resonates earlier than 'elbow_out', so its knee and recommendation are lower
         session, robot, sim, _, _ = self.session(
             resonance_by_pose=lambda angles: 2000 if angles[2] > np.radians(75) else 1600)
         results = session.run([parse_pose('elbow_out'), parse_pose('low')])
-        self.assertEqual(1650, results[0].recommended_p)
-        self.assertEqual(1270, results[1].recommended_p)
-        self.assertEqual(1270, joint_p_of(results))
+        self.assertEqual(1650, results[0].sweeps[0].recommended_p)
+        self.assertEqual(1270, results[1].sweeps[0].recommended_p)
+        self.assertEqual(1270, joint_p_at(results, 0))
+        self.assertEqual((1270, 0), recommend(results))
+
+    def grid_settings(self, **kwargs):
+        return Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, **kwargs)
+
+    def test_damping_that_raises_the_knee_wins(self):
+        # D adds damping to the simulated loop, so the knee of 2540 at D 0 moves above the top of the sweep
+        session, robot, sim, _, trial_file = self.session(resonance_above=2000, writers=True,
+                                                          settings=self.grid_settings(d_values=(0, 400, 800)))
+        sim.NOISE_PER_D = 0.003  # quiet enough for D 800
+        results = session.run([parse_pose('elbow_out'), parse_pose('low')])
         for r in results:
-            d_trials = [t for t in r.trials if t.phase == 'd']
-            self.assertTrue(d_trials)
-            self.assertEqual({1270}, {t.p for t in d_trials}, 'D is tried at the P of the joint at every pose')
-        self.assertEqual((1270, 0), recommend(results, 0))
+            self.assertEqual({0: Sweep(2540, 1650, 1950), 400: Sweep(None, 1950, 2540),
+                              800: Sweep(None, 1950, 2540)}, r.sweeps)
+            # the sweep at D 400 starts at the P that passed last at D 0
+            self.assertEqual(('p', 1950, 400), next((t.phase, t.p, t.d) for t in r.trials if t.d == 400))
+        self.assertEqual([0, 400, 800], swept_d_values(results))
+        self.assertEqual({0: 1650, 400: 1950, 800: 1950}, {d: joint_p_at(results, d) for d in (0, 400, 800)})
+        # 400 and 800 share the best P: compared at it, the smaller one wins as 800 is no better
+        self.assertEqual([400, 800], d_candidates(results))
+        for r in results:
+            compared = [(t.p, t.d) for t in r.trials if t.phase == 'd']
+            self.assertEqual([(1950, 400), (1950, 800)], compared)
+            self.assertEqual(400, r.recommended_d)
+        self.assertEqual((1950, 400), recommend(results))
+        # D by D: every pose at D 0 before any at D 400, so a run that stops keeps whole D gains
+        rows = list(csv.DictReader(io.StringIO(trial_file.getvalue()), fieldnames=TRIAL_FIELDS))
+        order = [(int(row['d']), int(row['pose'])) for row in rows if row['phase'] != 'd']
+        self.assertEqual([(0, 1), (0, 2), (400, 1), (400, 2), (800, 1), (800, 2)], list(dict.fromkeys(order)))
+
+    def test_d_that_adds_pwm_noise_ends_the_grid(self):
+        session, robot, sim, _, _ = self.session(resonance_above=2000, settings=self.grid_settings())
+        sim.NOISE_PER_D = 0.05  # D 250 is already noisy at every P
+        results = session.run([parse_pose('elbow_out'), parse_pose('low')])
+        # the ladder goes on to 640, but two D gains in a row without a passing P end it
+        self.assertEqual([0, 250, 400], swept_d_values(results))
+        self.assertEqual([1650, None, None], [joint_p_at(results, d) for d in (0, 250, 400)])
+        for r in results:
+            self.assertTrue(all('pwm_noise' in t.flags for t in r.trials if t.d > 0))
+            self.assertFalse(r.d_tested, 'a single candidate is not compared')
+        self.assertEqual((1650, 0), recommend(results))
 
     def test_damping_is_chosen_for_the_friction_band_it_lands_in(self):
-        # an unloaded roll like joint 6: nothing overshoots, but D narrows the band the steps come to rest in
-        session, robot, sim, _, trial_file = self.session(joint=6, load=0.0, writers=True)
+        # an unloaded roll like joint 6: nothing overshoots and every D passes up to the top of the sweep, so the
+        # D gains share the P of the joint; D narrows the band the steps come to rest in
+        session, robot, sim, _, trial_file = self.session(joint=6, load=0.0, writers=True,
+                                                          settings=self.grid_settings(d_values=(0, 200, 400)))
         sim.NOISE_PER_D = 0.005  # so the largest D of the grid passes the pwm noise rule as well
         results = session.run([parse_pose('elbow_out'), parse_pose('low')])
-        self.assertEqual(780, joint_p_of(results))
+        self.assertEqual([0, 200, 400], d_candidates(results))
         for r in results:
+            self.assertEqual({Sweep(None, 780, 1010)}, set(r.sweeps.values()))
             d_trials = [t for t in r.trials if t.phase == 'd']
-            self.assertEqual([0, 100, 200, 390], [t.d for t in d_trials])
+            self.assertEqual([0, 200, 400], [t.d for t in d_trials])
+            self.assertEqual({780}, {t.p for t in d_trials})
             self.assertTrue(all(t.passed for t in d_trials))
             self.assertLessEqual(max(t.max_overshoot for t in d_trials), 1.0, 'no D wins on overshoot')
             self.assertGreaterEqual(d_trials[0].mean_abs_error - d_trials[-1].mean_abs_error, 1.5)
-            self.assertEqual(390, r.recommended_d)
-        self.assertEqual((780, 390), recommend(results, 0))
+            self.assertEqual(400, r.recommended_d)
+        self.assertEqual((780, 400), recommend(results))
         rows = list(csv.DictReader(io.StringIO(trial_file.getvalue()), fieldnames=TRIAL_FIELDS))
         self.assertEqual('{:.1f}'.format(results[-1].trials[-1].mean_abs_error), rows[-1]['mean_abs_error'])
 

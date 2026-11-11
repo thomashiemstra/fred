@@ -3,20 +3,32 @@ Tunes the position P and D gains of one arm servo. Run it from the project root 
 nothing in its way and a hand near the power switch; one joint per run, the wrist first (6, 4, 5), then 3, 1 and 2:
     python -m src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains --joint 6
 
-For every pose (--pose, a few named poses per joint by default) the script moves there with the planner at the yaml
-gains, records a baseline at rest, and then runs trials at increasing P (--factor steps from the yaml value up to
---max-factor times it, or down from it when the yaml value itself fails). A trial clamps the goal pwm of the servo
+The P and D gains are tuned together, because damping raises the P at which a loop starts to overshoot: for every D
+of a grid (0, then --d-start and steps of --d-factor, plus the yaml D) the script sweeps P at every pose. At every
+pose (--pose, a few named poses per joint by default) it moves there with the planner at the yaml gains, records a
+baseline at rest, and then runs trials at increasing P (--factor steps up to --max-factor times the yaml value, from
+the yaml value at the first D and from the highest P that passed at the previous D after that; down from the start
+when the start itself fails). A trial clamps the goal pwm of the servo
 under test (a multiple of the pwm it needs to hold the pose, the only torque limit the XC430 wrist servos have; the
 full 885 on joints 1, 4 and 6, which carry no static load), writes the gains to that servo only, records the rest
 (ripple of the position and the pwm), steps the goal a few positions up and down with the profile of the servo
 switched off (the response of the position loop itself: overshoot, rings, settle time, steady state error per
 direction), and streams a short planned move with the production profile (the tracking of the trajectory). The step
 is sized so the pwm stays below the clamp. A trial that overshoots, rings, doesn't settle, or raises the ripple or
-the pwm noise at rest is the knee of the sweep; the recommended P is 0.65 times the knee. When every pose has a
-recommendation, the smallest is the P of the joint, and the D gains 0, P/8, P/4, P/2 and the yaml D are tried at
-that P at every pose. A larger D than the smallest that passed is recommended only when it lowers the overshoot or
+the pwm noise at rest is the knee of the sweep; the recommended P is 0.65 times the knee. The smallest
+recommendation of the poses is the P of the joint at that D. D is raised until --d-patience D gains in a row don't
+raise the P of the joint above the best before them (the same P, a lower one, or none: too much D shows as pwm
+noise, a slow settle, or on the belt joints as oscillation); there is no fixed maximum below --d-max. A start that
+fails only on its settle time (or doesn't move) is sluggish rather than too stiff, and lowering P would only make it
+more so (joint 2 at the low pose oscillated in its backlash below P 1000 at D 0): the sweep doesn't go down then. The D with the highest P of the joint wins. D
+gains that share it (their knees lie in the same step of the sweep, so their margins can't be told apart) are
+compared at that P at every pose, and a larger D than the smallest is chosen only when it lowers the overshoot or
 the resting error after the steps (the friction band the joint lands in) by a position or removes a ring, without
-adding pwm noise. The other joints hold their position at their yaml gains throughout.
+adding pwm noise. The recommendation is that D with the P of the joint at it. The other joints hold their position
+at their yaml gains throughout.
+
+A run that stops keeps the D gains swept at every pose so far: the grid goes D by D, every pose at a D before the
+next D, so the summary can still recommend from them.
 
 Safety: every sample is checked live (temperature, voltage drop, position jumps, divergence from the trajectory,
 oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the profile and the goal pwm
@@ -56,7 +68,7 @@ from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.calibration import record_static_load
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
     AbortLimits, Criteria, RestMetrics, Sample, StepMetrics, TrackingMetrics, abort_reason, choose_d, choose_p,
-    d_values, environmental_abort, evaluate, p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics,
+    d_ladder, environmental_abort, evaluate, p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics,
     step_metrics, step_size, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
@@ -101,6 +113,9 @@ READ_ATTEMPTS = 3  # reads of the servo before a failure stops the run
 # the base yaw and the two wrist rolls carry no static load: a clamp of 3 times their holding pwm would sit at the
 # floor of pwm_clamp and starve the steps, so they run at the full MAX_PWM unless --pwm-clamp is given
 UNLOADED_JOINTS = (1, 4, 6)
+# the flags of a trial that is too slow rather than too stiff: the P sweep doesn't go down from a start that fails
+# on these alone
+SLUGGISH_FLAGS = frozenset({'settle', 'stuck'})
 
 
 class Stop(Exception):
@@ -139,8 +154,12 @@ class StopFlag:
 class Settings(NamedTuple):
     factor: float = 1.3
     max_factor: float = 2.0
-    tune_d: bool = True
-    d_fractions: tuple[float, ...] = (0.0, 0.125, 0.25, 0.5)
+    tune_d: bool = True  # False sweeps P at the yaml D only
+    d_start: int = 250  # the first D above 0 of the grid
+    d_factor: float = 1.6  # between the D gains of the grid
+    d_max: int = cfg.MAX_GAIN
+    d_values: tuple[int, ...] | None = None  # the D gains of the grid instead of the ladder, in this order
+    d_patience: int = 2  # D gains in a row that don't raise the P of the joint above the best end the grid
     repeats: int = 2
     hold: float = 0.8  # seconds after every step
     rest: float = 3.0  # seconds of rest per trial
@@ -175,6 +194,12 @@ class TrialResult(NamedTuple):
         return not self.flags and self.aborted is None
 
     @property
+    def sluggish(self) -> bool:
+        """failed only for being slow: a step that didn't settle in time, or nothing moved. A lower P makes that
+        worse, it is not a sign of too much gain"""
+        return self.aborted is None and bool(self.flags) and set(self.flags) <= SLUGGISH_FLAGS
+
+    @property
     def environmental(self) -> bool:
         """aborted for a reason that says nothing about the gains"""
         return self.aborted is not None and environmental_abort(self.aborted)
@@ -193,15 +218,21 @@ class TrialResult(NamedTuple):
         return float(np.mean([abs(m.error) for m in self.steps])) if self.steps else 0.0
 
 
+class Sweep(NamedTuple):
+    """the P sweep at one D at one pose"""
+    knee_p: int | None  # the first P that failed, None when every P passed
+    recommended_p: int | None  # None when nothing passed below the knee
+    highest_passed: int | None
+
+
 class PoseResult(NamedTuple):
     number: int  # the number of the pose in the run, as in the csv files
     pose: np.ndarray
-    baseline: RestMetrics
-    trials: list[TrialResult]
-    recommended_p: int | None
-    knee_p: int | None
-    recommended_d: int | None
-    d_tested: bool
+    baseline: RestMetrics  # at the first arrival
+    trials: list[TrialResult]  # every trial at the pose, in the order they ran
+    sweeps: dict[int, Sweep]  # the P sweep per D, in the order the D gains ran
+    recommended_d: int | None  # of the comparison of the D candidates at this pose
+    d_tested: bool  # the D candidates were compared at this pose
 
 
 def parse_pose(value: str) -> np.ndarray:
@@ -238,11 +269,57 @@ def pose_degrees(pose: np.ndarray) -> str:
     return ' '.join('{:.0f}'.format(value) for value in np.degrees(pose[1:]))
 
 
-def joint_p_of(results: Sequence[PoseResult]) -> int | None:
-    """the P gain of the joint: the smallest recommendation of the poses, None when a pose has none"""
-    if not results or any(r.recommended_p is None for r in results):
+def d_grid(settings: Settings, yaml_d: int) -> list[int]:
+    """the D gains to sweep P at, in order: the ladder with the yaml D added, or settings.d_values as given; only the
+    yaml D without tune_d"""
+    if not settings.tune_d:
+        return [yaml_d]
+    if settings.d_values is not None:
+        return list(dict.fromkeys(settings.d_values))
+    return sorted(set(d_ladder(settings.d_start, settings.d_factor, settings.d_max)) | {yaml_d})
+
+
+def swept_d_values(results: Sequence[PoseResult]) -> list[int]:
+    """the D gains P was swept at at every pose, in the order they ran"""
+    if not results:
+        return []
+    return [d for d in results[0].sweeps if all(d in r.sweeps for r in results)]
+
+
+def joint_p_at(results: Sequence[PoseResult], d: int) -> int | None:
+    """the P gain of the joint at the D: the smallest recommendation of the poses, None when a pose has none or was
+    not swept at the D"""
+    recommended = [r.sweeps[d].recommended_p if d in r.sweeps else None for r in results]
+    if not recommended or any(p is None for p in recommended):
         return None
-    return min(r.recommended_p for r in results if r.recommended_p is not None)
+    return min(p for p in recommended if p is not None)
+
+
+def d_candidates(results: Sequence[PoseResult]) -> list[int]:
+    """the D gains with the best P of the joint, smallest first. The sweeps step P by a factor, so D gains with the
+    same P of the joint have their knee in the same step and can't be told apart by their margin; one step more is
+    the resolution of the sweep and counts"""
+    joint_ps = {d: joint_p_at(results, d) for d in swept_d_values(results)}
+    passed = {d: p for d, p in joint_ps.items() if p is not None}
+    if not passed:
+        return []
+    best = max(passed.values())
+    # 2 % for the rounding of the gains to tens
+    return sorted(d for d, p in passed.items() if p >= 0.98 * best)
+
+
+def grid_is_done(joint_ps: Sequence[int | None], patience: int) -> bool:
+    """whether the last patience D gains of the grid all failed to raise the P of the joint above the best before
+    them: the same P, a lower one, or none. More D than that only adds pwm noise (joint 2 on 25 October: the same P
+    of the joint from D 250 to 2620)"""
+    best: int | None = None
+    without_gain = 0
+    for p in joint_ps:
+        if p is not None and (best is None or p > best):
+            best, without_gain = p, 0
+        else:
+            without_gain += 1
+    return without_gain >= patience
 
 
 class TuningSession:
@@ -675,104 +752,155 @@ class TuningSession:
                                             1000 * baseline.period))
         return baseline
 
-    def run_p_phase(self, index: int, pose: np.ndarray) -> PoseResult | None:
-        """the P sweep at one pose, None when the planner refuses the pose"""
+    def run_sweep(self, pose: np.ndarray, d: int, start: int, baseline: RestMetrics
+                  ) -> tuple[list[TrialResult], Sweep]:
+        """the P sweep at the D: up from start until the first trial that fails, down from start when start itself
+        fails for too much gain (not when it is only sluggish); never above max_factor times the yaml P"""
         settings = self.settings
-        print('pose {}: {} degrees'.format(index, pose_degrees(pose)))
-        baseline = self.arrive(index, pose)
-        if baseline is None:
-            return None
+        top = self.servo.p * settings.max_factor
         trials: list[TrialResult] = []
-        for p in p_values(self.servo.p, settings.factor, settings.max_factor):
-            result = self.run_trial(pose, 'p', p, self.servo.d, baseline)
+        for p in p_values(start, settings.factor, max(1.0, top / start)):
+            result = self.run_trial(pose, 'p', p, d, baseline)
             self.record(trials, result)
             if not result.passed:
                 break
-        if not trials[0].passed:
-            for p in p_values_down(self.servo.p, settings.factor):
-                result = self.run_trial(pose, 'p_down', p, self.servo.d, baseline)
+        if trials[0].sluggish:
+            print('  p={} is too slow rather than too stiff ({}), not sweeping down'.format(
+                trials[0].p, ' '.join(trials[0].flags)))
+        elif not trials[0].passed:
+            for p in p_values_down(start, settings.factor):
+                result = self.run_trial(pose, 'p_down', p, d, baseline)
                 self.record(trials, result)
                 if result.passed:
                     break
         recommended_p, knee_p = choose_p([(t.p, t.passed) for t in trials], settings.factor)
-        print('  P: knee {}, recommended {}'.format(knee_p, recommended_p))
-        return PoseResult(index, pose, baseline, trials, recommended_p, knee_p, None, False)
+        passed = [t.p for t in trials if t.passed]
+        print('  D {}: P knee {}, recommended {}'.format(d, knee_p, recommended_p))
+        return trials, Sweep(knee_p, recommended_p, max(passed) if passed else None)
 
-    def run_d_phase(self, result: PoseResult, joint_p: int) -> PoseResult:
-        """the D sweep at the P of the joint, back at the pose of the result"""
-        settings = self.settings
-        print('pose {} again for D at p={}'.format(result.number, joint_p))
-        baseline = self.arrive(result.number, result.pose)
+    def sweep_pose(self, index: int, pose: np.ndarray, d: int) -> bool:
+        """the P sweep at the D at the pose, added to self.results; False when the planner refuses the pose"""
+        print('pose {}: {} degrees, D {}'.format(index, pose_degrees(pose), d))
+        baseline = self.arrive(index, pose)
         if baseline is None:
-            return result
-        values = d_values(joint_p, settings.d_fractions)
-        if self.servo.d not in values:
-            values.append(self.servo.d)
-        trials: list[TrialResult] = []
-        for d in sorted(set(values)):
-            trial = self.run_trial(result.pose, 'd', joint_p, d, baseline)
-            self.record(trials, trial)
-        recommended_d = choose_d([(t.d, t.passed, t.max_overshoot, t.max_ring_count, t.rest.pwm_residual_std,
-                                   t.mean_abs_error) for t in trials], settings.criteria.pwm_std_factor,
-                                 settings.criteria.pwm_std_floor)
-        print('  D: recommended {}'.format(recommended_d))
-        return result._replace(baseline=baseline, trials=result.trials + trials, recommended_d=recommended_d,
-                               d_tested=True)
+            return False
+        position = next((i for i, r in enumerate(self.results) if r.number == index), None)
+        previous = self.results[position] if position is not None else None
+        # the P that passed at the previous D is where this D starts: more damping rarely lowers the knee, and when
+        # it does the start fails and the sweep goes down from there
+        start = self.servo.p
+        if previous is not None and previous.sweeps:
+            last = list(previous.sweeps.values())[-1]
+            if last.highest_passed is not None:
+                start = last.highest_passed
+        trials, sweep = self.run_sweep(pose, d, start, baseline)
+        if previous is None or position is None:
+            self.results.append(PoseResult(index, pose, baseline, trials, {d: sweep}, None, False))
+        else:
+            self.results[position] = previous._replace(trials=previous.trials + trials,
+                                                       sweeps={**previous.sweeps, d: sweep})
+        return True
+
+    def compare_d(self, candidates: Sequence[int], p: int) -> None:
+        """the candidate D gains at one P at every pose, so their overshoot and resting error can be compared"""
+        settings = self.settings
+        for position, result in enumerate(self.results):
+            print('pose {} again, D {} at p={}'.format(result.number, ', '.join(str(d) for d in candidates), p))
+            baseline = self.arrive(result.number, result.pose)
+            if baseline is None:
+                continue
+            trials: list[TrialResult] = []
+            for d in candidates:
+                trial = self.run_trial(result.pose, 'd', p, d, baseline)
+                self.record(trials, trial)
+            recommended_d = choose_d([(t.d, t.passed, t.max_overshoot, t.max_ring_count, t.rest.pwm_residual_std,
+                                       t.mean_abs_error) for t in trials], settings.criteria.pwm_std_factor,
+                                     settings.criteria.pwm_std_floor)
+            print('  D: recommended {}'.format(recommended_d))
+            self.results[position] = result._replace(trials=result.trials + trials, recommended_d=recommended_d,
+                                                     d_tested=True)
 
     def run(self, poses: Sequence[np.ndarray]) -> list[PoseResult]:
-        """the P sweep at every pose, then the D sweep at the P of the joint at every pose; the results so far
-        stay in self.results when a Stop ends the run"""
+        """the P sweep at every pose for every D of the grid, one D at a time, until the grid is done; then the
+        candidates are compared at one P. The results so far stay in self.results when a Stop ends the run"""
         self.snapshot()
-        for index, pose in enumerate(poses, start=1):
-            result = self.run_p_phase(index, pose)
-            if result is not None:
-                self.results.append(result)
-        if self.settings.tune_d:
-            joint_p = joint_p_of(self.results)
-            if joint_p is None:
-                print('no D sweep: a pose has no P recommendation')
+        settings = self.settings
+        joint_ps: list[int | None] = []
+        for d in d_grid(settings, self.servo.d):
+            if not self.results:
+                # the first D: the poses the planner refuses are left out of the run
+                for index, pose in enumerate(poses, start=1):
+                    self.sweep_pose(index, pose, d)
+                if not self.results:
+                    return self.results
             else:
-                for position, result in enumerate(self.results):
-                    self.results[position] = self.run_d_phase(result, joint_p)
+                refused = [r.number for r in list(self.results) if not self.sweep_pose(r.number, r.pose, d)]
+                if refused:
+                    print('the planner refused pose {} at D {}, the grid stops'.format(refused, d))
+                    break
+            joint_ps.append(joint_p_at(self.results, d))
+            print('D {}: P of the joint {}'.format(d, joint_ps[-1] if joint_ps[-1] is not None
+                                                   else 'none, a pose has no passing P'))
+            if grid_is_done(joint_ps, settings.d_patience):
+                print("the last {} D gains didn't raise the P of the joint: the grid stops"
+                      .format(settings.d_patience))
+                break
+        candidates = d_candidates(self.results)
+        if len(candidates) > 1:
+            p = min(p for p in (joint_p_at(self.results, d) for d in candidates) if p is not None)
+            print('D {} share the best P of the joint, comparing them at p={}'.format(
+                ', '.join(str(d) for d in candidates), p))
+            self.compare_d(candidates, p)
         return self.results
 
 
-def recommend(results: Sequence[PoseResult], yaml_d: int,
-              criteria: Criteria = Criteria()) -> tuple[int | None, int | None]:
-    """
-    the gains for the joint from the poses: the smallest recommended P (None when a pose has none), and the D of
-    choose_d over the poses, judged per D on its worst pose: the largest overshoot, ring count, pwm noise and resting
-    error, passed only when it passed at every pose where it was tried (the yaml D when D was not tried, None when no
-    D passed)
-    """
-    p = joint_p_of(results)
-    if p is None:
-        return None, None
-    tested = [r for r in results if r.d_tested]
-    if not tested:
-        return p, yaml_d
+def compared_d(results: Sequence[PoseResult], criteria: Criteria = Criteria()) -> int | None:
+    """the D of choose_d over the comparison of the candidates, judged per D on its worst pose: the largest
+    overshoot, ring count, pwm noise and resting error, passed only when it passed at every pose; None when the
+    candidates were not compared or none passed"""
     by_d: dict[int, list[TrialResult]] = {}
-    for r in tested:
-        for t in r.trials:
-            if t.phase == 'd':
-                by_d.setdefault(t.d, []).append(t)
+    for r in results:
+        if r.d_tested:
+            for t in r.trials:
+                if t.phase == 'd':
+                    by_d.setdefault(t.d, []).append(t)
+    if not by_d:
+        return None
     candidates = [(d, all(t.passed for t in trials), max(t.max_overshoot for t in trials),
                    max(t.max_ring_count for t in trials), max(t.rest.pwm_residual_std for t in trials),
                    max(t.mean_abs_error for t in trials))
                   for d, trials in by_d.items()]
-    return p, choose_d(candidates, criteria.pwm_std_factor, criteria.pwm_std_floor)
+    return choose_d(candidates, criteria.pwm_std_factor, criteria.pwm_std_floor)
+
+
+def recommend(results: Sequence[PoseResult], criteria: Criteria = Criteria()) -> tuple[int | None, int | None]:
+    """
+    the gains for the joint: the D of the comparison of the candidates (compared_d), or without one the candidate
+    with the highest P of the joint (the smallest D on a tie), and the P of the joint at that D; (None, None) when no
+    D gave a passing P at every pose
+    """
+    candidates = d_candidates(results)
+    if not candidates:
+        return None, None
+    d = compared_d(results, criteria)
+    if d is None or d not in candidates:
+        d = max(candidates, key=lambda c: (joint_p_at(results, c) or 0, -c))
+    return joint_p_at(results, d), d
 
 
 def print_summary(joint: int, results: Sequence[PoseResult], servo_p: int, servo_d: int,
                   stopped: bool = False) -> None:
     print('\nsummary of joint {} (yaml p={} d={}):'.format(joint, servo_p, servo_d))
     if stopped:
-        print('  the run stopped early: the poses below are the ones that were finished, a pose that was not '
-              'done may have a lower knee')
+        print('  the run stopped early: only the D gains swept at every pose count, a D that was not tried may have '
+              'given a higher P')
     for r in results:
-        print('  pose {} ({} degrees): P knee {}, recommended {}, D {}'.format(
-            r.number, pose_degrees(r.pose), r.knee_p, r.recommended_p,
-            r.recommended_d if r.d_tested else 'not tried'))
+        print('  pose {} ({} degrees):'.format(r.number, pose_degrees(r.pose)))
+        for sweep_d, sweep in r.sweeps.items():
+            knee = sweep.knee_p if sweep.knee_p is not None else 'none up to {}'.format(sweep.highest_passed)
+            print('    D {:5d}: P knee {}, recommended {}'.format(sweep_d, knee, sweep.recommended_p))
+        if r.d_tested:
+            print('    the candidates compared at one P: D {}'.format(r.recommended_d))
         for t in r.trials:
             print('    {:7s} p={:5d} d={:4d} step {:3d}: overshoot {:5.1f} rings {} mean |error| {:4.1f} rest pp {} '
                   'pwm residual {:5.1f} slope {} {}{}'.format(t.phase, t.p, t.d, t.step, t.max_overshoot,
@@ -781,14 +909,24 @@ def print_summary(joint: int, results: Sequence[PoseResult], servo_p: int, servo
                                          '?' if t.pwm_slope is None else '{:.1f}'.format(t.pwm_slope),
                                          t.aborted or ' '.join(t.flags) or 'passed',
                                          ' (warnings: {})'.format(' '.join(t.warnings)) if t.warnings else ''))
-    p, d = recommend(results, servo_d)
-    if p is None:
-        print('no recommendation: a pose had no passing P gain below its knee, look at the trials')
+    swept = swept_d_values(results)
+    if swept:
+        print('  P of the joint per D (the smallest recommendation of the poses): {}'.format(', '.join(
+            'D {} {}'.format(d, joint_p_at(results, d) or 'none') for d in swept)))
+    p, d = recommend(results)
+    if p is None or d is None:
+        print('no recommendation: no D gave a passing P at every pose, look at the trials')
         return
-    if d is None:
-        print('no D passed at every pose where it was tried, keeping the yaml d={} (not confirmed at this P, look '
-              'at the D trials)'.format(servo_d))
-        d = servo_d
+    candidates = d_candidates(results)
+    if len(candidates) > 1:
+        print('  D {} share the best P of the joint'.format(', '.join(str(c) for c in candidates)))
+        if compared_d(results) is not None:
+            print('  their comparison at one P chose D {}'.format(d))
+        elif any(r.d_tested for r in results):
+            print('  none of them passed the comparison at every pose, D {} has the highest P of the joint (look at '
+                  'the d trials)'.format(d))
+        else:
+            print('  they were not compared, the run stopped first: D {} has the highest P of the joint'.format(d))
     print('recommended for servo_config.yaml (record the static load again after changing P):')
     print('    pid: {{p: {}, i: 0, d: {}}}'.format(p, d))
 
@@ -828,8 +966,14 @@ def main(argv: list[str] | None = None) -> int:
                             ', '.join(POSES)))
     parser.add_argument('--factor', type=float, default=1.3, help='the factor between the P gains of the sweep')
     parser.add_argument('--max-factor', type=float, default=2.0, help='sweep P up to this times the yaml value')
-    parser.add_argument('--no-d', action='store_true', help='only tune P')
-    parser.add_argument('--d-fractions', default='0,0.125,0.25,0.5', help='the D gains to try as fractions of P')
+    parser.add_argument('--no-d', action='store_true', help='only tune P, at the yaml D')
+    parser.add_argument('--d-start', type=int, default=250, help='the first D above 0 of the grid')
+    parser.add_argument('--d-factor', type=float, default=1.6, help='the factor between the D gains of the grid')
+    parser.add_argument('--d-max', type=int, default=cfg.MAX_GAIN, help='the largest D of the grid')
+    parser.add_argument('--d-values', default=None,
+                        help='comma separated D gains to sweep P at, in this order, instead of the grid')
+    parser.add_argument('--d-patience', type=int, default=2,
+                        help="D gains in a row that don't raise the P of the joint above the best, that end the grid")
     parser.add_argument('--repeats', type=int, default=2, help='how often the steps are repeated per trial')
     parser.add_argument('--hold', type=float, default=0.8, help='seconds after every step')
     parser.add_argument('--rest', type=float, default=3.0, help='seconds of rest per trial')
@@ -857,7 +1001,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         poses = [parse_pose(value) for value in (args.pose or DEFAULT_POSES[args.joint])]
-        fractions = tuple(float(part) for part in args.d_fractions.split(','))
+        d_values = tuple(int(part) for part in args.d_values.split(',')) if args.d_values else None
+        if d_values is not None and any(not 0 <= d <= cfg.MAX_GAIN for d in d_values):
+            raise ValueError('the D gains have to be between 0 and {}'.format(cfg.MAX_GAIN))
+        d_ladder(args.d_start, args.d_factor, args.d_max)  # raises on a bad start or factor
     except (argparse.ArgumentTypeError, ValueError) as e:
         print(e)
         return 1
@@ -872,7 +1019,8 @@ def main(argv: list[str] | None = None) -> int:
     max_temperature = args.max_temperature if args.max_temperature is not None \
         else robot.servo_config.temperature_limit
     settings = Settings(factor=args.factor, max_factor=args.max_factor, tune_d=not args.no_d,
-                        d_fractions=fractions, repeats=args.repeats, hold=args.hold, rest=args.rest,
+                        d_start=args.d_start, d_factor=args.d_factor, d_max=args.d_max, d_values=d_values,
+                        d_patience=args.d_patience, repeats=args.repeats, hold=args.hold, rest=args.rest,
                         baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
                         clamp=args.pwm_clamp, limits=AbortLimits(max_temperature=max_temperature))
     if args.floor is not None:
@@ -901,10 +1049,11 @@ def main(argv: list[str] | None = None) -> int:
     stamp = datetime.now().strftime('%Y%m%d_%H%M')
     samples_path = os.path.join(output_dir, 'tune_joint{}_{}_samples.csv'.format(args.joint, stamp))
     trials_path = os.path.join(output_dir, 'tune_joint{}_{}_trials.csv'.format(args.joint, stamp))
-    print('joint {} (yaml p={} d={}), poses {}, P from {} to {} in steps of {}, D {}, {} repeats, output {}'.format(
-        args.joint, servo.p, servo.d, ', '.join(pose_degrees(pose) for pose in accepted),
-        servo.p, round(servo.p * args.max_factor), args.factor, 'off' if args.no_d else fractions, args.repeats,
-        trials_path))
+    print("joint {} (yaml p={} d={}), poses {}, P up to {} in steps of {}, at D {} until {} D gains in a row don't "
+          "raise the P of the joint, {} repeats, output {}".format(
+              args.joint, servo.p, servo.d, ', '.join(pose_degrees(pose) for pose in accepted),
+              round(servo.p * args.max_factor), args.factor, ' '.join(str(d) for d in d_grid(settings, servo.d)),
+              args.d_patience, args.repeats, trials_path))
     print('the arm moves to these poses and steps joint {} by up to 5 degrees there, nothing may be in its way; '
           'the other joints hold their position'.format(args.joint))
     if not args.yes and input('type yes to enable the servos and start: ').strip().lower() != 'yes':

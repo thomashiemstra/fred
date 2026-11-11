@@ -378,10 +378,17 @@ def p_values_down(start: int, factor: float, steps: int = 3, minimum: int = 100)
     return values
 
 
-def d_values(p: int, fractions: Sequence[float] = (0.0, 0.125, 0.25, 0.5), cap: int = cfg.MAX_GAIN) -> list[int]:
-    """the D gains to try at a P gain, as fractions of it"""
-    values = sorted({min(cap, round_gain(p * fraction)) for fraction in fractions})
-    return values
+def d_ladder(start: int, factor: float, maximum: int = cfg.MAX_GAIN) -> list[int]:
+    """the D gains of the grid: 0, then start, start * factor, ... up to the maximum. Near critical damping the D a
+    loop needs grows with the square root of its P, so the steps are a factor apart rather than fractions of a P"""
+    if start <= 0 or factor <= 1.0:
+        raise ValueError('the D ladder needs a start above 0 and a factor above 1')
+    values = [0]
+    d = float(start)
+    while d <= maximum + 1e-9:
+        values.append(min(maximum, round_gain(d)))
+        d *= factor
+    return sorted(set(values))
 
 
 def choose_p(results: Sequence[tuple[int, bool]], factor: float, margin: float = 0.65) -> tuple[int | None, int | None]:

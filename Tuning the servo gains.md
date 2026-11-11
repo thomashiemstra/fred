@@ -104,12 +104,33 @@ temperature); it was tested on the fake bus only, the robot was off by then.
 
 ## The method
 
-One joint per run. The other joints hold their position at their yaml gains throughout. Per pose:
+One joint per run. The other joints hold their position at their yaml gains throughout. P and D are tuned
+together (since 25 October 2026): damping adds phase margin, so it raises the P where a loop starts to overshoot,
+and a P sweep at one fixed D only measures the knee at that D. Joint 2 showed it on 25 October: at the `elbow_out`
+pose the knee was 2000 with D = 0 and 2600 with D = 500. So P is swept at every D of a grid, D by D: 0, then
+250 and steps of 1.6 (400, 640, 1020, 1640, ...; `--d-start`, `--d-factor`), with the yaml D added, every pose at a
+D before the next D. The steps are a factor apart rather than fractions of P because near critical damping the D a
+loop needs grows with the square root of its P (Spong, Hutchinson and Vidyasagar, *Robot Modeling and Control*,
+independent joint control: P = ω²J/K, D = (2ζωJ - B)/K). There is no fixed maximum D (`--d-max` defaults to the
+register's 16383): too much D shows in the trials themselves, as pwm noise (D multiplies the encoder's one-count
+flicker), a slow settle (overdamped), or, on the belt joints 1 and 2, where the encoder sits on the joint shaft
+behind the belt, as oscillation (the belt delays what the encoder sees, and at its resonance D can feed the
+oscillation instead of damping it). The grid stops when 2 D gains in a row (`--d-patience`) don't raise the P of
+the joint above the best before them: the same P, a lower one, or no passing P at all. The first grid run only
+stopped on a lower P: joint 2 had the same P of the joint from D 250 to 2620, so it walked on until servo 3 (holding
+the upper arm) passed its temperature warning after 13 minutes (`tune_joint2_20261025_1509`). `--d-values` sweeps a
+given list instead, `--no-d` the yaml D only (the method before 25 October).
+
+Per pose and D:
 
 1. Move there with the planner at the yaml gains, and record a baseline at rest for 5 s: the holding pwm, the
    ripple of the position and the pwm, the sag (`position trajectory - position`).
-2. Trials at P = yaml P times 1.3^k up to twice the yaml P (`--factor`, `--max-factor`), or downwards from the
-   yaml P when that one fails. A trial:
+2. Trials at P times 1.3^k up to twice the yaml P (`--factor`, `--max-factor`), starting at the yaml P at the
+   first D and at the highest P that passed at the previous D after that, or downwards from the start when that
+   one fails for too much gain. A start that only fails `settle` (or `stuck`) is too slow, not too stiff, and the
+   sweep doesn't go down from it: at the low pose joint 2 failed `settle` at P 1000 and D 0 on 25 October, and
+   P 770, 590 and 460 all oscillated 8 to 10 positions in the play of the belt and gears, which the small gravity
+   load there doesn't take up. A trial:
    - sets the goal pwm clamp of the servo: 3 times the holding pwm, at least half of 885, never above 885,
      written and read back before the gains change, so the output is bounded from that moment. Joints 1, 4 and 6
      (the base yaw and the two wrist rolls) carry no static load and run at the full 885 by default since 23
@@ -128,14 +149,18 @@ One joint per run. The other joints hold their position at their yaml gains thro
      production profile, sampling the tracking against the position trajectory of the servo;
    - restores the yaml gains and reads everything back.
 3. The first trial that violates a criterion is the knee; 0.65 times the knee is the recommended P of the pose.
-4. When every pose has a recommendation, the smallest is the P of the joint. At that P, at every pose, D = 0,
-   P/8, P/4, P/2 and the yaml D are all tried, also where the step at D = 0 doesn't overshoot (until 23 October
-   the grid stopped there). A D counts when it passed and its pwm noise stays below 1.5 times that of the smallest D
-   tried (at least 5 units). The reference is D = 0, or the smallest D that passed when 0 failed; a larger D
-   replaces it only when it lowers the overshoot or the mean resting error after the steps (`mean_abs_error`, the
-   mean of |final - goal|) by at least a position, or removes a ring, without being a position worse in the other;
-   of those the one with the least resting error wins, then the least overshoot, rings, and the smaller D. Per
-   joint a D is judged on its worst pose. The resting error is what tells the D values apart on a joint that
+4. The smallest recommendation of the poses at a D is the P of the joint at that D. The D with the highest P of
+   the joint wins: the most margin to the knee. One step of the sweep (a factor 1.3) is its resolution and counts.
+   D gains that share the highest P of the joint have their knees in the same step and can't be told apart by
+   margin, typically an unloaded joint that passes up to the top of the sweep at every D; they are compared at that
+   P at every pose. A D counts there when it passed and its pwm noise stays below 1.5 times that of the smallest D
+   compared (at least 5 units). The reference is the smallest D, or the smallest that passed when it failed; a
+   larger D replaces it only when it lowers the overshoot or the mean resting error after the steps
+   (`mean_abs_error`, the mean of |final - goal|) by at least a position, or removes a ring, without being a
+   position worse in the other; of those the one with the least resting error wins, then the least overshoot,
+   rings, and the smaller D. Per joint a D is judged on its worst pose. Until 25 October 2026 P was swept at the
+   yaml D only and D = 0, P/8, P/4, P/2 and the yaml D were then tried at the resulting P, so the D in the yaml
+   decided how far P got, and a run that stopped before the end of the P phase tried no D at all. The resting error is what tells the D values apart on a joint that
    doesn't overshoot: joint 6 at P 2600 on 23 October (`tune_joint6_20261023_1822`) passed with D 0, 320, 650, 1100
    and 1300, all with an overshoot of a position or less, and the old rule picked 1100 on a 0.3 position
    difference. What really differed was where the steps came to rest: D 0 at +4 +5 +3 +5 after the steps up and
@@ -222,7 +247,8 @@ python -m src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains --j
 
 With the arm powered, its torque off, nothing in its way, foam under the elbow and the wrist for the first runs, and a
 hand near the power switch. It prints the plan and asks before enabling the servos (`--yes` skips the question).
-Options: `--pose`, `--factor` 1.3, `--max-factor` 2.0, `--no-d`, `--d-fractions 0,0.125,0.25,0.5`, `--repeats` 2,
+Options: `--pose`, `--factor` 1.3, `--max-factor` 2.0, `--no-d`, `--d-start` 250, `--d-factor` 1.6, `--d-max`
+16383, `--d-values` (e.g. `0,250,500`), `--d-patience` 2, `--repeats` 2,
 `--hold` 0.8 s, `--rest` 3 s, `--baseline-rest` 5 s, `--move-degrees` 8 (0 disables the streamed move), `--speed`
 0.5 rad/s, `--pwm-clamp` (overrides the clamp on every joint, refused below 1.5 times the holding pwm; by default
 3 times the holding pwm, at least 442, and the full 885 on joints 1, 4 and 6, which carry no static load),
@@ -254,10 +280,17 @@ again.
 
 - `src/robot_controllers/dynamixel_robot/calibration/gain_tuning.py`: the arithmetic, pure functions on lists of
   samples: `pwm_clamp`, `step_size`, `rest_metrics`, `step_metrics`, `tracking_metrics`, `pwm_per_position`,
-  `evaluate`, `abort_reason`, `environmental_abort`, the sweep values and `choose_p`, `choose_d`.
+  `evaluate`, `abort_reason`, `environmental_abort`, the sweep values (`p_values`, `p_values_down`, `d_ladder`) and
+  `choose_p`, `choose_d`.
 - `src/robot_controllers/dynamixel_robot/calibration/tune_servo_gains.py`: `TuningSession` (snapshot, restore,
-  the planned moves through `record_static_load.move_to`, sampling with the abort rules, the trial, the P phase per
-  pose, the D phase at the joint P), `recommend`, `print_summary`, `plot_results`, `main`.
+  the planned moves through `record_static_load.move_to`, sampling with the abort rules, the trial, `run_sweep` and
+  `sweep_pose` for the P sweep at a D, `compare_d` for the D gains that share the best P, `run` for the grid),
+  the grid functions `d_grid`, `swept_d_values`, `joint_p_at`, `d_candidates`, `grid_is_done`, `compared_d`, and
+  `recommend`, `print_summary`, `plot_results`, `main`. `PoseResult.sweeps` holds a `Sweep` (knee, recommended P,
+  highest P that passed) per D.
+- `src/robot_controllers/dynamixel_robot/calibration/plot_tuning.py`: the figures from the csv files: the knee and
+  the recommended P against D (`plot_grid`), the metrics of the P sweep per D (`plot_knee`), the comparison of the
+  D gains (`plot_d`), the step responses per D (`plot_steps`).
 - `ServoHandler` (`servo_handler.py`): `read_state` (one 27 byte packet per bus, addresses 120-146, a `ServoState`
   per servo), `read_pid`, `read_profile`, `read_goal_pwm`, `set_profile(servo_id, velocity, acceleration)`,
   `set_goal_pwm`; the gain range check in `__write_pid`; `read_temperature_and_voltage` in one packet per bus;
@@ -268,8 +301,8 @@ again.
 - Tests: `tests/servo_controller_tests/gain_tuning_tests.py` (the metrics on synthetic traces, every abort rule,
   the choices, and the whole session on a simulated second order servo with coulomb friction, a damping that drops
   above a P threshold so it rings and, with a steep enough drop, oscillates with a bounded amplitude, and a friction
-  band that narrows with D; the knee, the abort, the sweep downwards, the D phase at the joint P, a D chosen for the
-  band it rests in, the full clamp of an unloaded joint, an environmental stop, a warm servo, a leftover clamp, a
+  band that narrows with D; the knee, the abort, the sweep downwards, a D that raises the knee winning, a noisy D
+  ending the grid, D gains that share the best P compared and chosen for the band they rest in, the full clamp of an unloaded joint, an environmental stop, a warm servo, a leftover clamp, a
   flaky read, a refused pose) and the block read tests at the end of `servo_handler_tests.py`.
 - Removed: `calibration/pid_test.py` (2021: a quarter turn step of servo 1 at import, torque left on).
 
