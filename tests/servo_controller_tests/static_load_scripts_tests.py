@@ -257,6 +257,23 @@ class RecordTests(unittest.TestCase):
             self.record(robot, [np.array([0, pi / 2, 0.8, 0.0, 0, 0, 0])])
         self.assertEqual(2, len(checks), 'checked before the first and the second approach')
 
+    def test_a_failed_status_read_is_tried_again(self):
+        robot = FakeRobot([0, pi / 2, 0.4, 0.8, 0, 0, 0])
+        original = robot.get_temperatures_and_voltages
+        results = [None, None]  # two corrupt status packets, then the read works
+
+        def flaky():
+            return results.pop(0) if results else original()
+        robot.get_temperatures_and_voltages = flaky
+        record_static_load.check_servos(robot, 45)
+        self.assertEqual([], results)
+
+        robot.get_temperatures_and_voltages = lambda: None
+        with self.assertRaisesRegex(record_static_load.StopRecording,
+                                    'failed to read the temperatures {} times in a row'
+                                    .format(record_static_load.READ_ATTEMPTS)):
+            record_static_load.check_servos(robot, 45)
+
     def test_moves_are_checked_against_the_floor(self):
         robot = FakeRobot([0, pi / 2, 0.4, 0.8, 0, 0, 0], gravity_sag)
         low_pose = np.array([0, pi / 2, 0.0, 1.2, 0, 0, 0])  # the gripper tip 3.4 cm up, its lower overshoot 0.7

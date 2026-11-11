@@ -356,9 +356,11 @@ class TuningSession:
             record_static_load.check_servos(self.robot, self.robot.servo_config.temperature_warning)
         except record_static_load.StopRecording as e:
             raise Stop(str(e))
-        temperatures = self.handler.read_temperatures([self.joint])
-        if temperatures is None:
-            raise Stop('failed to read the temperature of servo {}'.format(self.joint))
+        try:
+            temperatures = record_static_load.read_status(lambda: self.handler.read_temperatures([self.joint]),
+                                                          'the temperature of servo {}'.format(self.joint))
+        except record_static_load.StopRecording as e:
+            raise Stop(str(e))
         limit = self.settings.limits.max_temperature - self.settings.criteria.max_temperature_rise
         if temperatures[self.joint] >= limit:
             raise Stop('servo {} is at {}C, let it cool below {:.0f}C before a trial'.format(

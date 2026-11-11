@@ -29,7 +29,7 @@ import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 
@@ -58,6 +58,10 @@ DEFAULT_JOINTS = (2, 3, 4, 5)
 DEFAULT_RANGES = {4: (np.radians(-90), np.radians(90)), 5: (np.radians(-90), np.radians(90))}
 # how many random poses are tried for every pose the planner accepts, before giving up
 SAMPLING_ATTEMPTS = 50
+# reads of the servo status before a failure stops the run: a corrupt status packet now and then happens on the bus
+READ_ATTEMPTS = 3
+
+T = TypeVar('T')
 
 
 class StopRecording(Exception):
@@ -184,16 +188,21 @@ def readings(robot: DynamixelRobotController | CombinedRobot, models: dict[int, 
     return rows
 
 
+def read_status(read: Callable[[], T | None], what: str) -> T:
+    """the result of the read, tried up to READ_ATTEMPTS times; raises StopRecording when every attempt failed"""
+    for _ in range(READ_ATTEMPTS):
+        value = read()
+        if value is not None:
+            return value
+    raise StopRecording('failed to read {} {} times in a row'.format(what, READ_ATTEMPTS))
+
+
 def check_servos(robot: DynamixelRobotController | CombinedRobot, temperature_warning: float) -> None:
     """raises StopRecording when a servo has a hardware error or is warmer than the warning temperature"""
-    errors = robot.get_hardware_errors()
-    if errors is None:
-        raise StopRecording('failed to read the hardware errors')
+    errors = read_status(robot.get_hardware_errors, 'the hardware errors')
     if errors:
         raise StopRecording('servos {} have a hardware error'.format(sorted(errors)))
-    status = robot.get_temperatures_and_voltages()
-    if status is None:
-        raise StopRecording('failed to read the temperatures')
+    status = read_status(robot.get_temperatures_and_voltages, 'the temperatures')
     warm = {servo_id: temperature for servo_id, (temperature, _) in status.items()
             if temperature > temperature_warning}
     if warm:
