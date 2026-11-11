@@ -1097,6 +1097,14 @@ def main(argv: list[str] | None = None) -> int:
         print_summary(args.joint, results, servo.p, servo.d, stopped)
     if session is not None and session.read_failures:
         print('{} reads of the servo failed and were retried'.format(session.read_failures))
+    handler = robot.servo_handler
+    if handler.failed_reads:
+        print('{} sync reads of a bus failed and were tried again ({}); {} at the packet timeout (no reply, or not '
+              'all of it, in time: the request or the reply lost on the wire, or the pc or usb late) and {} before '
+              'it (a reply with wrong bytes: the wire, the ground or the adapter)'.format(
+                  handler.failed_reads, ', '.join('servos {}: {}'.format(list(bus), count)
+                                                  for bus, count in handler.failed_reads_by_bus.items()),
+                  handler.late_reads, handler.failed_reads - handler.late_reads))
     print('samples in {}, trials in {}'.format(samples_path, trials_path))
     if args.plot and results:
         plot_results(args.joint, results, samples_path)

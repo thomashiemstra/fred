@@ -107,6 +107,7 @@ class BlockingPortHandler(dynamixel.PortHandler):
         """
         super().__init__(port_name)
         self.latency_timer = latency_timer
+        self.last_packet_timeout = 0.0  # milliseconds, the timeout of the last packet as it was set
 
     def setupPort(self, cflag_baud: int) -> bool:
         result = super().setupPort(cflag_baud)
@@ -118,6 +119,12 @@ class BlockingPortHandler(dynamixel.PortHandler):
         self.packet_start_time = self.getCurrentTime()
         self.packet_timeout = max((self.tx_time_per_byte * packet_length) + (self.latency_timer * 2.0) + 2.0,
                                   self.MIN_PACKET_TIMEOUT)
+        # the sdk sets packet_timeout to 0 when a packet times out, this keeps what it was
+        self.last_packet_timeout = self.packet_timeout
+
+    def setPacketTimeoutMillis(self, msec: float) -> None:
+        super().setPacketTimeoutMillis(msec)
+        self.last_packet_timeout = self.packet_timeout
 
     def getCurrentTime(self) -> float:
         """the current time in milliseconds

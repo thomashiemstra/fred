@@ -153,6 +153,45 @@ class TestServoHandlerCommunication(unittest.TestCase):
             self.assertIsNone(self.handler.read_hardware_errors())
             self.assertIsNone(self.handler.read_profile_velocity())
 
+    def test_a_corrupt_status_packet_is_read_again(self):
+        original = dxl.GroupSyncRead.txRxPacket
+        results = [dxl.COMM_RX_CORRUPT, dxl.COMM_RX_CORRUPT]  # two bad packets, then the read works
+
+        def flaky(group_sync_read):
+            return results.pop(0) if results else original(group_sync_read)
+        with mock.patch.object(dxl.GroupSyncRead, 'txRxPacket', flaky), self.assertLogs(level='WARNING'):
+            self.assertIsNotNone(self.handler.read_temperatures())
+        self.assertEqual([], results)
+        self.assertEqual(2, self.handler.failed_reads)
+        # every attempt failing still fails the read
+        with mock.patch.object(dxl.GroupSyncRead, 'txRxPacket', return_value=dxl.COMM_RX_CORRUPT) as packet, \
+                self.assertLogs(level='WARNING'):
+            self.assertIsNone(self.handler.read_temperatures())
+        self.assertEqual(servo_handler_module.SYNC_READ_ATTEMPTS, packet.call_count,
+                         'the first bus, attempted to the end')
+
+    def test_a_failed_read_says_whether_it_ran_into_the_timeout(self):
+        # the sdk zeroes packet_timeout when it runs out, the port handler keeps the value it was set to
+        self.handler.port_handler.packet_timeout = 0.0
+        self.handler.port_handler.last_packet_timeout = 10.0
+        clock = mock.Mock()
+        with mock.patch.object(servo_handler_module, 'time', clock), \
+                mock.patch.object(dxl.GroupSyncRead, 'txRxPacket', return_value=dxl.COMM_RX_CORRUPT):
+            # every attempt: 10.5 ms, the reply was cut off by the timeout
+            clock.perf_counter.side_effect = [0.0, 0.0105] * servo_handler_module.SYNC_READ_ATTEMPTS
+            with self.assertLogs(servo_handler_module.logger, 'WARNING') as logs:
+                self.assertIsNone(self.handler.read_temperatures())
+            self.assertIn('failed after 10.5 ms, at the timeout of 10.0 ms', logs.output[0])
+            self.assertEqual((3, 3), (self.handler.failed_reads, self.handler.late_reads))
+            # 1.2 ms: the reply was there but its bytes were wrong
+            clock.perf_counter.side_effect = [0.0, 0.0012] * servo_handler_module.SYNC_READ_ATTEMPTS
+            with self.assertLogs(servo_handler_module.logger, 'WARNING') as logs:
+                self.assertIsNone(self.handler.read_temperatures())
+            self.assertIn('failed after 1.2 ms, before the timeout of 10.0 ms', logs.output[0])
+            self.assertEqual((6, 3), (self.handler.failed_reads, self.handler.late_reads))
+        # read_temperatures reads the first bus first and gives up there
+        self.assertEqual({(1, 2): 6}, self.handler.failed_reads_by_bus)
+
     def test_hardware_error_bits(self):
         self.bus.memory[1][cfg.ADDR_HARDWARE_ERROR_STATUS] = 0
         self.bus.memory[2][cfg.ADDR_HARDWARE_ERROR_STATUS] = 1 << 3

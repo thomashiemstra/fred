@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 # a field of a block read: address, length and whether the value is signed
 Field = tuple[int, int, bool]
 
+# attempts of a sync read of one bus before it fails: a corrupt or missing status packet now and then happens on
+# both buses (several per run of the gain tuning on 25 October 2026), the sdk clears the port before every packet so
+# a failure doesn't spill into the next attempt; a read is harmless to repeat
+SYNC_READ_ATTEMPTS = 3
+# a failed read that took at least this fraction of the packet timeout ran into the timeout
+LATE_FRACTION = 0.9
+
 
 class ServoState(NamedTuple):
     """the registers of the control loop of a servo, read in one packet by ServoHandler.read_state"""
@@ -80,6 +87,11 @@ class ServoHandler(object):
             raise ValueError("the state block in the config doesn't cover the tick to the temperature")
         # guards the usb connection, all communication with the servos goes through this lock
         self.bus_lock = threading.RLock()
+        # sync reads of a bus that failed and were tried again, a measure of the health of the bus, and how many of
+        # those ran into the packet timeout (the reply came late or not at all, rather than with wrong bytes)
+        self.failed_reads = 0
+        self.late_reads = 0
+        self.failed_reads_by_bus: dict[tuple[int, ...], int] = {}  # the bus (its servo ids) to its failed reads
 
     def get_servo(self, servo_id: int) -> Servo:
         """return the servo object corresponding to the id"""
@@ -493,16 +505,45 @@ class ServoHandler(object):
 
     def __sync_read_bus(self, address: int, length: int, fields: Sequence[Field],
                         servo_ids: list[int]) -> dict[int, tuple[int, ...]] | None:
-        """read a block of registers of servos that are on the same bus in a single packet, see __sync_read_fields"""
+        """read a block of registers of servos that are on the same bus in a single packet, see __sync_read_fields;
+        up to SYNC_READ_ATTEMPTS times"""
+        for attempt in range(1, SYNC_READ_ATTEMPTS + 1):
+            values = self.__sync_read_bus_once(address, length, fields, servo_ids)
+            if values is not None:
+                return values
+            self.failed_reads += 1
+            bus = next((bus for bus in self.buses if servo_ids[0] in bus), tuple(servo_ids))
+            self.failed_reads_by_bus[bus] = self.failed_reads_by_bus.get(bus, 0) + 1
+            if attempt < SYNC_READ_ATTEMPTS:
+                logger.warning("trying the read of address %d from servos %s again", address, servo_ids)
+        return None
+
+    def __sync_read_bus_once(self, address: int, length: int, fields: Sequence[Field],
+                             servo_ids: list[int]) -> dict[int, tuple[int, ...]] | None:
         group_sync_read = dynamixel.GroupSyncRead(self.port_handler, self.packet_handler, address, length)
         for servo_id in servo_ids:
             if not group_sync_read.addParam(servo_id):
                 raise utils.DynamixelError("[ID:%03d] groupSyncRead addparam failed" % servo_id)
 
+        start = time.perf_counter()
         comm_result = group_sync_read.txRxPacket()
         if comm_result != dynamixel.COMM_SUCCESS:
-            logger.warning("sync read of address %d from servos %s failed: %s", address, servo_ids,
-                           self.packet_handler.getTxRxResult(comm_result))
+            elapsed = (time.perf_counter() - start) * 1000.0
+            # the sdk reports a reply that is cut off by the packet timeout as corrupt too, like one with a bad
+            # checksum: the time it took tells them apart. At the timeout the reply didn't arrive (in full) in time:
+            # the servos didn't hear the request, the reply was lost on the wire, or the pc or usb was late; well
+            # before it the reply arrived with wrong bytes (the wire, the ground, the adapter). The sdk zeroes
+            # packet_timeout when it runs out, BlockingPortHandler keeps the value it had
+            timeout = getattr(self.port_handler, 'last_packet_timeout', None)
+            if not isinstance(timeout, (int, float)):
+                timeout = getattr(self.port_handler, 'packet_timeout', None)
+            when = ''
+            if isinstance(timeout, (int, float)):
+                late = elapsed >= LATE_FRACTION * timeout
+                self.late_reads += late
+                when = ', {} the timeout of {:.1f} ms'.format('at' if late else 'before', timeout)
+            logger.warning("sync read of address %d from servos %s failed after %.1f ms%s: %s", address, servo_ids,
+                           elapsed, when, self.packet_handler.getTxRxResult(comm_result))
             return None
 
         values = {}

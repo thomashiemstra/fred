@@ -98,6 +98,16 @@ class TestBlockingPortHandler(unittest.TestCase):
         port_handler.setPacketTimeout(100)
         self.assertAlmostEqual(0.01 * 100 + 16 * 2.0 + 2.0, port_handler.packet_timeout)
 
+    def test_the_timeout_is_kept_when_the_sdk_zeroes_it(self):
+        port_handler = BlockingPortHandler('COM1', latency_timer=1)
+        port_handler.setPacketTimeout(100)
+        port_handler.packet_start_time -= 1000  # a second ago: timed out
+        self.assertTrue(port_handler.isPacketTimeout())
+        self.assertEqual(0, port_handler.packet_timeout, 'the sdk zeroes it')
+        self.assertAlmostEqual(BlockingPortHandler.MIN_PACKET_TIMEOUT, port_handler.last_packet_timeout)
+        port_handler.setPacketTimeoutMillis(25.0)
+        self.assertEqual(25.0, port_handler.last_packet_timeout)
+
     def test_packet_timeout_clock_has_sub_millisecond_resolution(self):
         # time.monotonic only has a resolution of 15.6ms on windows, which made packets time out too early
         port_handler = BlockingPortHandler('COM1', latency_timer=1)
