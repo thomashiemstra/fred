@@ -31,11 +31,21 @@ sac_network_weights = os.path.expanduser(os.path.dirname(get_project_root()) +
 
 class WorkSpaceLimits:
     """
-    Where the arm may go, in cm from the origin on the ground under the base. The gripper tip has to stay between
-    radius_min and radius_max from the origin, at y >= y_min and at z >= z_min. The wrist centre (the axis of joint 5)
-    has to stay at z >= wrist_z_min: when the gripper points up the wrist servo body hangs about 1.8cm below the
-    wrist centre, so this keeps it off the table while the tip may come down to the table. It can't be higher than
-    the wrist centre of the arm resting on the table (the wrist servo lies on it), or no move can start from rest.
+    Where the arm may go, in cm from the origin on the ground under the base. The gripper tip has to stay at least
+    radius_min from the origin, at y >= y_min and at z >= z_min. The wrist centre (the axis of joint 5) has to stay
+    within wrist_reach_max of the shoulder (the axis of joint 2, d1 above the origin) and at z >= wrist_z_min: when the
+    gripper points up the wrist servo body hangs about 1.8cm below the wrist centre, so this keeps it off the table
+    while the tip may come down to the table. Neither can be higher than where the arm comes to rest when the torque
+    goes off, or no move can start from rest: on its fingertips (the tip at -1.3cm by the kinematics) or with the
+    wrist servo lying on the table (wrist_z_min).
+
+    The reach is measured from the shoulder because that is where the arm reaches from: the wrist centre can get at
+    most a2 + d4 = 42cm from it, with the elbow straight. wrist_reach_max keeps the elbow bent at least about 11
+    degrees, away from the straight elbow where the two solutions of the inverse kinematics meet and a straight line
+    needs unbounded joint speed (check_move's speed check refuses those moves too). Near the straight elbow the reach
+    hardly changes with the bend, 40cm would already keep it bent 35 degrees and refuse the poses of the gain tuning.
+    There is no maximum height, nothing hangs above the robot. Until October 2026 the tip had to stay within a sphere
+    around the origin on the ground instead, see "Workspace limits.md".
 
     The check is one place, AbstractRobotController.check_workspace(angles) (src/utils/workspace.py): whoever moves
     the robot runs it before executing a move. The planner (src/utils/movement.py) checks every step of a planned move,
@@ -43,7 +53,9 @@ class WorkSpaceLimits:
     itself checks nothing, so it stays fast.
     """
     radius_min = 10
-    radius_max = 60
+    wrist_reach_max = 41.8  # the wrist centre from the shoulder, the elbow bent at least about 11 degrees
     y_min = d6 + 0.1  # y=0 is bad for the IK calculation, so let's make sure that never happens
-    z_min = -1  # the gripper tip, the fingers may rest on the table
+    # the gripper tip, the fingers may rest on the table: the arm dropped onto its fingertips puts the tip at -1.3
+    # (measured 25 October 2026), so moves can start from there
+    z_min = -2
     wrist_z_min = 1.5  # the wrist centre, just under the resting height of the wrist servo lying on the table

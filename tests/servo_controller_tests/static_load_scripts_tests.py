@@ -23,7 +23,7 @@ angle_limits = {1: (0, pi), 2: (0, pi), 3: (-pi / 2, pi / 2), 4: (-pi, pi), 5: (
 class TestLimits:
     """workspace limits of these tests, independent of global_constants.WorkSpaceLimits"""
     radius_min = 10
-    radius_max = 57
+    wrist_reach_max = 41.8
     y_min = 12.1
     z_min = -5
     wrist_z_min = -5
@@ -137,7 +137,7 @@ class RecordTests(unittest.TestCase):
         limits = record_static_load.limits_with_floor(3.0, TestLimits)
         self.assertEqual(3.0, limits.z_min)
         self.assertEqual(3.0, limits.wrist_z_min, 'the wrist floor is raised along')
-        self.assertEqual(TestLimits.radius_max, limits.radius_max)
+        self.assertEqual(TestLimits.wrist_reach_max, limits.wrist_reach_max)
 
         class HighWrist(TestLimits):
             wrist_z_min = 6
@@ -161,7 +161,8 @@ class RecordTests(unittest.TestCase):
         # the upper arm folded back puts the gripper behind the base
         self.assertFalse(accepted([0, pi / 2, -0.3, -1.2, 0, 0, 0]))
         # a pose at the end of a joint range is refused for the overshoot that leaves the workspace, not for the
-        # overshoot that is clipped to the range (the arm stretched out towards 90 degrees is outside the radius)
+        # overshoot that is clipped to the range (the elbow straightened towards 90 degrees takes the wrist past its
+        # reach)
         self.assertFalse(accepted([0, pi / 2, 0.8, pi / 2 - np.radians(2), 0, 0, 0]))
 
     def test_range_arguments(self):

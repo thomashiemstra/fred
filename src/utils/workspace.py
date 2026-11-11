@@ -31,12 +31,16 @@ def workspace_violation(angles: np.ndarray, robot_config: RobotConfig,
     """
     if limits is None:
         return None
-    _, _, _, wrist, end_effector = forward_position_kinematics(angles, robot_config)
+    shoulder, _, _, wrist, end_effector = forward_position_kinematics(angles, robot_config)
 
+    reach = np.linalg.norm(wrist - shoulder)
+    if reach > limits.wrist_reach_max + TOLERANCE:
+        return 'the wrist would move to {}, {:.1f}cm from the shoulder, farther than {}'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f
+            np.round(wrist, 1), reach, limits.wrist_reach_max)
     radius = np.linalg.norm(end_effector)
-    if radius < limits.radius_min - TOLERANCE or radius > limits.radius_max + TOLERANCE:
-        return 'the end effector would move to {}, {:.1f}cm from the base, outside of [{}, {}]'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f
-            np.round(end_effector, 1), radius, limits.radius_min, limits.radius_max)
+    if radius < limits.radius_min - TOLERANCE:
+        return 'the end effector would move to {}, {:.1f}cm from the base, closer than {}'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f
+            np.round(end_effector, 1), radius, limits.radius_min)
     if end_effector[2] < limits.z_min - TOLERANCE:
         return 'the end effector would move to {}, below the minimum height of {}'.format(
             np.round(end_effector, 1), limits.z_min)

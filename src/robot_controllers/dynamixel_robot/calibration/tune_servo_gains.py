@@ -66,9 +66,9 @@ from src.utils.movement_exception import MovementException
 logger = logging.getLogger(__name__)
 
 # named poses in degrees of joints 1 to 6 (joint 1: 90 is straight ahead; joint 2: 0 is the lower arm horizontal,
-# 90 vertical; joint 2 + 3 = 90 is the upper arm horizontal, 0 is hanging down). The workspace limits are a sphere
-# of 60 cm around the base (57 until 23 October 2026), so an arm stretched out horizontally is near its edge; the
-# poses below keep 8 degrees of margin on every joint for the test moves.
+# 90 vertical; joint 2 + 3 = 90 is the upper arm horizontal, 0 is hanging down). The workspace limits keep the wrist
+# within 41.8 cm of the shoulder, the elbow bent at least about 11 degrees; the poses below keep 8 degrees of margin
+# on every joint for the test moves ('reach' has its elbow bent 25 degrees, 17 with joint 3 moved towards straight).
 POSES: dict[str, tuple[float, ...]] = {
     'elbow_out': (90, 90, 0, 0, 0, 0),  # lower arm vertical, upper arm and gripper horizontal: the largest load on
     #                                     joints 3 and 5, joint 2 carries the upper arm's moment without a lever

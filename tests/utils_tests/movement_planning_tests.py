@@ -21,7 +21,7 @@ start_pose = Pose(30, 22.0, 4)
 
 class TestWorkspaceLimits:
     radius_min = 10
-    radius_max = 57
+    wrist_reach_max = 41.8
     y_min = 12.1
     z_min = -5
     wrist_z_min = -5
@@ -252,17 +252,19 @@ class CheckMoveTests(unittest.TestCase):
         angles[1] = -1.0
         check_move(standing_still(angles), unchecked_robot)
 
-    def test_end_effector_too_far_from_the_base_is_refused(self):
-        # reachable, but 58.3cm from the base
-        with self.assertRaisesRegex(MovementException, 'the end effector .* from the base, outside of'):
-            check_move(single_step_move(Pose(0, 50, 30)), robot_without_angle_limits)
+    def test_wrist_too_far_from_the_shoulder_is_refused(self):
+        # reachable, but the wrist is 41.9cm from the shoulder: the elbow is nearly straight
+        with self.assertRaisesRegex(MovementException, 'the wrist would move .* from the shoulder, farther than'):
+            check_move(single_step_move(Pose(0, 53.5, 20)), robot_without_angle_limits)
+        # the wrist 41.3cm from the shoulder, the tip 58.3cm from the base
+        check_move(single_step_move(Pose(0, 50, 30)), robot_without_angle_limits)
 
     def test_end_effector_too_close_to_the_base_is_refused(self):
         class LargeMinimumRadius(TestWorkspaceLimits):
             radius_min = 40
 
         # 37.4cm from the base
-        with self.assertRaisesRegex(MovementException, 'the end effector .* from the base, outside of'):
+        with self.assertRaisesRegex(MovementException, 'the end effector .* from the base, closer than'):
             check_move(single_step_move(start_pose), TestRobot(LargeMinimumRadius, None))
 
     def test_end_effector_below_the_workspace_is_refused(self):
@@ -291,7 +293,7 @@ class CheckMoveTests(unittest.TestCase):
     def test_limits_without_a_wrist_height_use_the_end_effector_height_for_the_wrist(self):
         class OldStyleLimits:
             radius_min = 10
-            radius_max = 57
+            wrist_reach_max = 41.8
             y_min = 12.1
             z_min = 5
 

@@ -23,7 +23,7 @@ test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
 
 class DummyWorkspaceLimits:
     radius_min = 15
-    radius_max = 40
+    wrist_reach_max = 30
     y_min = 16
     z_min = 5
 
@@ -65,7 +65,7 @@ def limited_controller(current_pose=None):
 
 
 poses = [Pose(-20, 20, 5), Pose(0, 30, 10), Pose(20, 20, 5)]
-# the curve through these bulges out to more than 40cm from the base
+# the curve through these takes the wrist more than 30cm from the shoulder
 outside = [Pose(-20, 20, 5), Pose(0, 45, 10), Pose(20, 20, 5)]
 
 
@@ -180,7 +180,7 @@ class SplineTests(unittest.TestCase):
             plan_spline(limited_controller(), [Pose(0, 0, 0), Pose(100, 100, 100)], 2)
 
     def test_curve_leaving_the_workspace_between_the_poses_is_refused(self):
-        # the start and stop pose are within the limits, the curve bulges out to more than 40cm from the base
+        # the start and stop pose are within the limits, the curve takes the wrist more than 30cm from the shoulder
         with self.assertRaises(MovementException):
             plan_spline(limited_controller(), outside, 2)
 
@@ -189,12 +189,19 @@ class SplineTests(unittest.TestCase):
         self.assertIsNotNone(move)
 
     def test_the_orientation_counts_for_the_wrist(self):
-        # the gripper points up along the whole curve, so the wrist is 12cm below the tip: below z_min = 5
+        # the gripper points up along the whole curve, so the wrist is 12cm below the tip: below z_min = 5; the
+        # wrist down there is more than 30cm from the shoulder, so the reach is widened to see the height refused
+        class LongReach(DummyWorkspaceLimits):
+            wrist_reach_max = 40
+
+        robot = FakeServoController(workspace_limits=LongReach)
         up = [Pose(-20, 20, 10, gamma=pi / 2), Pose(0, 30, 12, gamma=pi / 2), Pose(20, 20, 10, gamma=pi / 2)]
-        with self.assertRaisesRegex(MovementException, 'the wrist would move'):
-            plan_spline(limited_controller(), up, 2)
+        with self.assertRaisesRegex(MovementException, 'the wrist would move .* below the minimum height'):
+            plan_spline(robot, up, 2)
         # the same curve with the gripper level keeps the wrist at the height of the tip
         level = [Pose(-20, 20, 10), Pose(0, 30, 12), Pose(20, 20, 10)]
+        move, _ = plan_spline(robot, level, 2)
+        self.assertIsNotNone(move)
         move, _ = plan_spline(limited_controller(), level, 2)
         self.assertIsNotNone(move)
 

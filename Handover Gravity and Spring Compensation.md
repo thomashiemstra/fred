@@ -398,8 +398,8 @@ Work to do (the code of 19 October 2026 is in `src/robot_controllers/dynamixel_r
   after run `0039` (with the spring); the script checks the hardware error status before every trial but not after
   the last one, see the open item in `Tuning the servo gains.md`.
 - [ ] Run `tune_servo_gains.py` on the other joints, 4, 5, 3, 1, 2 in that order, and put the recommended gains in
-  the yaml. The default poses keep the tip inside the workspace sphere (60 cm since 23 October); `--pose` for
-  others.
+  the yaml. The default poses and their test moves stay inside the workspace limits (the wrist within 41.8 cm
+  of the shoulder since 25 October); `--pose` for others.
 - [ ] Log p, i, d per servo in the csv of `record_static_load.py`.
 - [x] Sync read of Present Current (joints 1-3, 7) and Present Load (4-6): `ServoHandler.read_present_current`,
   `DynamixelRobotController.get_present_currents`.

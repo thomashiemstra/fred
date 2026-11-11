@@ -194,9 +194,10 @@ as the script does, and expect the up and down steady state errors to differ by 
 
 ## Poses
 
-The workspace limits are a sphere of 60 cm around the base (57 until 23 October 2026), so an arm stretched out
-horizontally sits near its edge (an upper arm horizontal with the lower arm at 45 degrees puts the tip at 56.6 cm).
-The named poses keep 8 degrees of margin on every joint for the test moves, in degrees of joints 1-6:
+The workspace limits keep the wrist centre within 41.8 cm of the shoulder (since 25 October 2026, a sphere of 57,
+later 60 cm around the base before that), which keeps the elbow bent at least about 11 degrees. The named poses
+keep 8 degrees of margin on every joint for the test moves, in degrees of joints 1-6; the closest to the limit is
+`reach` with joint 3 moved 8 degrees towards straight, the wrist 41.5 cm from the shoulder:
 
 | Name | Pose | Why |
 |---|---|---|
@@ -209,9 +210,9 @@ elbow_out, reach. Both elbow_out and reach hold the upper arm horizontal, the la
 that at about 280 units of present current (0.75 A) and tripped its overload protection there in a static hold on
 23 October while the spring was still on (300-320 units); the spring is gone since, and the same hold then ran for
 minutes. Keep the holds at these poses short between runs. `--pose` takes names or 6 comma separated degrees; a pose the planner refuses (the pose itself or
-the joint moved 8 degrees either way) is skipped with the reason. A truly retracted pose doesn't exist inside the
-limits: the arm folded upwards is 70 cm tall. The sphere is measured from the ground rather than the shoulder, which
-is why it cuts tall poses and not much else; that is parked in `Workspace limits.md`.
+the joint moved 8 degrees either way) is skipped with the reason. There is no height limit any more: tall poses
+are allowed as long as the elbow stays bent, only the arm stretched straight up (70 cm tall) is refused, for its
+straight elbow; `Workspace limits.md` has why the sphere went.
 
 ## Running it
 

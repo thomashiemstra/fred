@@ -32,8 +32,9 @@ def apply_workspace_limits(old_x: float, old_y: float, old_z: float, new_x: floa
 
     x, y, z = new_x, new_y, new_z
 
+    # the reach of the wrist depends on the orientation too, the robot's workspace_violation in the loop checks it
     radius = np.linalg.norm([new_x, new_y])
-    if radius > limits.radius_max or radius < limits.radius_min:
+    if radius < limits.radius_min:
         x, y = old_x, old_y
 
     if new_y < limits.y_min:

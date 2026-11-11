@@ -46,7 +46,7 @@ class UtilsTests(unittest.TestCase):
 
     class MockWorkSpaceLimits:
         radius_min = 15
-        radius_max = 40
+        wrist_reach_max = 30
         y_min = 16
         z_min = 5
 
@@ -61,7 +61,7 @@ class UtilsTests(unittest.TestCase):
         self.assertIsInstance(move, SplineMovement)
 
     def test_not_in_workspace_limits(self):
-        # the curve bulges out to more than 40cm from the base
+        # the curve takes the wrist more than 30cm from the shoulder
         poses = [Pose(-20, 20, 5), Pose(0, 45, 10), Pose(20, 20, 5)]
         move = create_move(self.robot_with_limits(self.MockWorkSpaceLimits), poses, 1, None)
         self.assertIsNone(move)
@@ -84,7 +84,7 @@ class UtilsTests(unittest.TestCase):
 class TestWorkspaceLimits:
     """the limits of these tests: the resting angles above put the wrist of the test config below the table"""
     radius_min = 10
-    radius_max = 57
+    wrist_reach_max = 41.8
     y_min = 12.1
     z_min = -5
     wrist_z_min = -5
@@ -1060,18 +1060,18 @@ class StickStepTests(unittest.TestCase):
 
     def test_a_step_outside_the_workspace_limits_is_not_taken(self):
         robot = FakeRobot()
-        robot.workspace_limits = type('Limits', (), dict(radius_min=10, radius_max=37.45, y_min=12, z_min=-5,
+        robot.workspace_limits = type('Limits', (), dict(radius_min=10, wrist_reach_max=33.17, y_min=12, z_min=-5,
                                                          wrist_z_min=-5))
         controller = self.controller_at(Pose(30, 22, 4), robot)
         pose = controller.current_pose
 
-        # the limit is 37.45cm from the base, the new poses are 37.48 and 37.54cm away
+        # the limit is 33.17cm from the shoulder, the wrist of the new poses is 33.20 and 33.26cm away
         with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
             controller._take_step(Pose(30.05, 22.05, 4), 0.01)
             controller._take_step(Pose(30.1, 22.1, 4), 0.01)
 
         self.assertIs(pose, controller.current_pose)
-        self.assertIn('base', logs.output[0])
+        self.assertIn('shoulder', logs.output[0])
 
         # moving back inside is possible
         controller._take_step(Pose(29.95, 21.95, 4), 0.01)

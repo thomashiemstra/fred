@@ -166,11 +166,15 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - `inverse_kinematics` never fails: for an unreachable position it clamps the elbow (`d = 1`, `kinematics.py:33-34`)
   and returns the stretched arm pointing at the target. Check the result with `forward_position_kinematics`, as
   `plan_straight_line` does (`MAX_POSITION_ERROR` = 0.1 cm).
-- `WorkSpaceLimits` (`src/global_constants.py`): the gripper tip stays 10-57 cm from the origin on the ground under
-  the base, at `y_min` = d6 + 0.1 = 12.1 (keeps the wrist at y > 0.1, y = 0 breaks the IK) and at `z_min` = -1
-  (the fingers may rest on the table); the wrist centre stays at `wrist_z_min` = 1.5, which keeps the wrist servo
-  body (about 1.8 cm around its axis) off the table while the gripper points up. The arm starts from rest with the
-  wrist servo lying on the table, so `wrist_z_min` can't be higher than that resting height.
+- `WorkSpaceLimits` (`src/global_constants.py`): the gripper tip stays at least `radius_min` = 10 cm from the origin
+  on the ground under the base, at `y_min` = d6 + 0.1 = 12.1 (keeps the wrist at y > 0.1, y = 0 breaks the IK) and
+  at `z_min` = -2 (the fingers may rest on the table; the arm dropped onto its fingertips puts the tip at -1.3 by
+  the kinematics, measured 25 October 2026, so moves can start from there; -1 until then); the wrist centre stays within `wrist_reach_max` = 41.8 cm of
+  the shoulder (the elbow bent at least about 11 degrees, away from the straight elbow) and at `wrist_z_min` = 1.5,
+  which keeps the wrist servo body (about 1.8 cm around its axis) off the table while the gripper points up. The arm
+  starts from rest with the wrist servo lying on the table, so `wrist_z_min` can't be higher than that resting
+  height. There is no maximum height; until 25 October 2026 a sphere of 57, later 60 cm around the origin on the
+  ground limited the tip instead, see `Workspace limits.md`.
 - The check is one place: `robot.check_workspace(angles)` (`AbstractRobotController`, `src/utils/workspace.py`),
   with `robot.workspace_limits` (the class above by default, a robot can be given other limits) and the robot's
   link lengths. `move_servos` checks nothing, so it stays fast; whoever moves the robot checks first. The planner

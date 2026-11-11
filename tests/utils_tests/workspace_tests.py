@@ -12,7 +12,7 @@ test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
 
 class DummyWorkspaceLimits:
     radius_min = 15
-    radius_max = 40
+    wrist_reach_max = 30
     y_min = 16
     z_min = 5
 
@@ -31,10 +31,18 @@ class WorkspaceViolationTests(unittest.TestCase):
         self.assertIsNone(self.violation(0, 30, 5))
 
     def test_point_too_far_away(self):
-        self.assertIn('from the base, outside of', self.violation(0, 40, 10))
+        # the wrist at (0, 33, 10), 33.2cm from the shoulder at (0, 0, 13.92)
+        self.assertIn('the wrist would move to [ 0. 33. 10.], 33.2cm from the shoulder, farther than 30',
+                      self.violation(0, 45, 10))
+
+    def test_reach_is_measured_from_the_shoulder(self):
+        # the tip 41.2cm from the ground under the base, the wrist 28.3cm from the shoulder
+        self.assertIsNone(self.violation(0, 40, 10))
+        # with the gripper pointing down the tip is closer, but the wrist above it is 31.1cm from the shoulder
+        self.assertIn('from the shoulder', self.violation(0, 30, 10, gamma=-pi / 2))
 
     def test_point_too_close(self):
-        self.assertIn('from the base, outside of', self.violation(0, 10, 10))
+        self.assertIn('from the base, closer than 15', self.violation(0, 10, 10))
 
     def test_point_too_low(self):
         self.assertIn('below the minimum height', self.violation(0, 30, 4))
@@ -44,13 +52,14 @@ class WorkspaceViolationTests(unittest.TestCase):
 
     def test_wrist_too_low(self):
         # the gripper points up, the wrist is 12cm below the tip; without wrist_z_min the limits use z_min for it
-        self.assertIn('the wrist would move', self.violation(0, 30, 10, gamma=pi / 2))
+        self.assertIn('the wrist would move to [ 0. 25. -2.], below the minimum height',
+                      self.violation(0, 25, 10, gamma=pi / 2))
 
     def test_wrist_has_its_own_minimum(self):
         class LowWrist(DummyWorkspaceLimits):
             wrist_z_min = -5
 
-        self.assertIsNone(self.violation(0, 30, 10, gamma=pi / 2, limits=LowWrist))
+        self.assertIsNone(self.violation(0, 25, 10, gamma=pi / 2, limits=LowWrist))
 
     def test_check_raises(self):
         angles = inverse_kinematics(Pose(0, 30, 4), test_config)
