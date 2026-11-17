@@ -9,10 +9,11 @@
 dynamixel_robot:
   d1: 15.7
   a2: 20
-  d4: 22
-  d6: 12
+  d4: 21
+  d6: 14
 simulated_robot:
   d1: 15.7
   a2: 20
-  d4: 22
-  d6: 12
+  d4: 21
+  d6: 14
+

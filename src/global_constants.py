@@ -58,4 +58,4 @@ class WorkSpaceLimits:
     # the gripper tip, the fingers may rest on the table: the arm dropped onto its fingertips puts the tip at -1.3
     # (measured 25 October 2026), so moves can start from there
     z_min = -2
-    wrist_z_min = 1.5  # the wrist centre, just under the resting height of the wrist servo lying on the table
+    wrist_z_min = 1  # the wrist centre, just under the resting height of the wrist servo lying on the table

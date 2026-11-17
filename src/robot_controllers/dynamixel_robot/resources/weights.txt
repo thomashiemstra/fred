@@ -1,4 +1,11 @@
-4 screws: 9 gr
-arm: 143 gr
-joint3: 1036 gr
-wrist: 360 gr
+big bearing on servo 3: 125gr
+small bearing in front of servo 4: 12gr
+servo 3 and servo 4 joint assembly: 434 gr
+
+servo 5 and 6 assembly: 118gr
+joint 4, just plactic and screws: 65gr
+
+gripper in total: 60gr
+
+arm connecting p2 and p3 160gr
+arm cover: 85gr
