@@ -321,6 +321,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 | Script | What it does |
 |---|---|
 | `python -m src.robot_controllers.dynamixel_robot.scan_servos` | lists the adapters and the servos that respond (read only) |
+| `python -m src.robot_controllers.dynamixel_robot.set_return_delay [--value N]` | sets the return delay time (eeprom address 9, 2 us per unit, factory default 250 = 500 us) of every servo that responds, default `--value 0`; lists the servos first, asks before writing (`--yes`, `--dry-run`), reads the value back; never touches the torque, only reads it, and skips (exit code 1) the servos with the torque on because the eeprom is locked then |
 | `python -m src.robot_controllers.dynamixel_robot.robot_move_test` | reads the pose and moves in a straight line to the xbox start pose `Pose(30, 22, 4)`, asks before moving |
 | `python -m src.robot_controllers.dynamixel_robot.gripper_test` | gripper range, squeeze sweep (goal currents up to 1500mA) and lead test, asks before moving, only the gripper is enabled and moves. The port is found by pinging servos 1-6, so the arm must be powered |
 | `python -m src.simulation.build_urdf` | rebuilds the urdf files from `fred.xacro` and `robot_config.yaml`, no robot involved |

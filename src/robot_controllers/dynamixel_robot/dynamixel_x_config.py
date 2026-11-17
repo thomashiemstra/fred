@@ -28,6 +28,7 @@ ADDR_PRESENT_PWM        = 124
 ADDR_PRESENT_VELOCITY   = 128
 ADDR_VELOCITY_TRAJECTORY = 136  # the velocity the profile of the servo asks for
 ADDR_POSITION_TRAJECTORY = 140  # the position the profile of the servo asks for, the setpoint of the position loop
+ADDR_RETURN_DELAY_TIME  = 9    # eeprom, 2 us per unit, 250 = 500 us by default, 0 = reply at once
 
 # Data Byte Length
 LEN_LED_RED             = 1
@@ -53,11 +54,13 @@ LEN_PRESENT_PWM         = 2
 LEN_PRESENT_VELOCITY    = 4
 LEN_VELOCITY_TRAJECTORY = 4
 LEN_POSITION_TRAJECTORY = 4
+LEN_RETURN_DELAY_TIME   = 1
 LEN_STATE_BLOCK         = 27  # addresses 120 to 146, read in one packet by ServoHandler.read_state
 
 # the position and feedforward gains are 0 to 16383, a servo drops a larger value silently in a sync write
 MAX_GAIN                = 16383
 MAX_PWM                 = 885  # 100% duty, 0.113% per unit
+MAX_RETURN_DELAY_TIME   = 254  # 2 us per unit
 # bits of the moving status register
 MOVING_STATUS_IN_POSITION = 1 << 0
 MOVING_STATUS_PROFILE_ONGOING = 1 << 1
