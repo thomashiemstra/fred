@@ -14,11 +14,15 @@ full 885 on joints 1, 4 and 6, which carry no static load), writes the gains to 
 (ripple of the position and the pwm), steps the goal a few positions up and down with the profile of the servo
 switched off (the response of the position loop itself: overshoot, rings, settle time, steady state error per
 direction), and streams a short planned move with the production profile (the tracking of the trajectory). The step
-is sized so the pwm stays below the clamp. A trial that overshoots, rings, doesn't settle, or raises the ripple or
-the pwm noise at rest is the knee of the sweep; the recommended P is 0.65 times the knee. The smallest
+is sized so the pwm stays below the clamp, and capped per joint (--max-step: 15 positions on joints 1 and 2, which
+swing the whole arm, 60 on the others). A trial that overshoots, rings, doesn't settle, or raises the ripple at
+rest is the knee of the sweep; the recommended P is 0.65 times the knee. The pwm noise at rest is reported as a
+warning only: it follows where the joint parks relative to an encoder edge rather than the gain (joint 3,
+13 November 2026), though a D that adds pwm noise is still held back when the candidates are compared. The smallest
 recommendation of the poses is the P of the joint at that D. D is raised until --d-patience D gains in a row don't
 raise the P of the joint above the best before them (the same P, a lower one, or none: too much D shows as pwm
-noise, a slow settle, or on the belt joints as oscillation); there is no fixed maximum below --d-max. A start that
+noise, a slow settle, or on the belt joints as oscillation); the grid stops at --d-max, 2000 by default (the
+largest D in servo_config.yaml is 550), and --d-max raises it up to 16383. A start that
 fails only on its settle time (or doesn't move) is sluggish rather than too stiff, and lowering P would only make it
 more so (joint 2 at the low pose oscillated in its backlash below P 1000 at D 0): the sweep doesn't go down then. The D with the highest P of the joint wins. D
 gains that share it (their knees lie in the same step of the sweep, so their margins can't be told apart) are
@@ -32,12 +36,19 @@ next D, so the summary can still recommend from them.
 
 Safety: every sample is checked live (temperature, voltage drop, position jumps, divergence from the trajectory,
 oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the profile and the goal pwm
-at once. Divergence, oscillation and a pwm stuck at the clamp count as the knee; a temperature, voltage or position
+at once, after which the run waits 1.5 s for the arm to move back to the pose. Oscillation is the position going both
+up and down by more than max(6 positions, 3 times the baseline ripple) within the last second, never counting the
+0.5 s after a goal write; a creep in one direction is the joint settling. Divergence, oscillation and a pwm stuck at the clamp count as the knee; a temperature, voltage or position
 jump abort says nothing about the gains and ends the run. Ctrl+C stops after the current read and restores the same;
 a second Ctrl+C kills the script, the trial gains and profile then stay in the servo until the robot is started
 again, a goal pwm clamp until the servos are rebooted or power cycled (the script resets a leftover clamp when it
 starts). Nothing is written to the eeprom. Every write is read back, the sync write of a gain isn't acknowledged by
 the servo.
+
+The run ends with the arm lowered to record_static_load.REST_POSE (where it lies on the table, a bit over 1 cm higher) at
+0.3 rad/s and the torque switched off there, before the plot. The prompt to support the arm and press enter is the
+fallback: when the servo under test doesn't have its yaml gains again, when a servo has a hardware error or the status
+can't be read, when the planner refuses the move, and on Ctrl+C during it (the servos then hold where they are).
 
 Output: a csv with every sample (<output-dir>/tune_joint<N>_<time>_samples.csv), a csv with the metrics of every
 trial (..._trials.csv) and the recommended yaml line per pose and for the joint. Record the static load again
@@ -109,13 +120,23 @@ STEP_SEQUENCE = ((1, 1), (-1, 0), (-1, -1), (1, 0))  # (direction, offset in ste
 MOVE_HOLD = 1.0  # seconds of hold after a streamed move
 GAIN_SETTLE = 0.3  # seconds between a gain write and the first measurement
 SAMPLES_PER_ABORT_CHECK = 5
+ABORT_SETTLE = 1.5  # seconds after an abort before the run goes on, the arm is still moving back to the pose
 READ_ATTEMPTS = 3  # reads of the servo before a failure stops the run
 # the base yaw and the two wrist rolls carry no static load: a clamp of 3 times their holding pwm would sit at the
 # floor of pwm_clamp and starve the steps, so they run at the full MAX_PWM unless --pwm-clamp is given
 UNLOADED_JOINTS = (1, 4, 6)
+# the largest step of the trials in positions per joint. The base and the shoulder swing the whole arm: a 60 position
+# step with the profile off shakes the structure (joint 1, 17 November 2026). A smaller step is a gentler but
+# coarser test: the overshoot criterion only counts above 2 positions.
+MAX_STEP: dict[int, int] = {1: 15, 2: 15}
+DEFAULT_MAX_STEP = 60  # the joints not in MAX_STEP
+MIN_STEP = 8  # the smallest step of step_size, a cap below it would not be kept
 # the flags of a trial that is too slow rather than too stiff: the P sweep doesn't go down from a start that fails
 # on these alone
 SLUGGISH_FLAGS = frozenset({'settle', 'stuck'})
+# the default largest D of the grid (0, 250, 400, 640, 1020, 1640): the largest D in servo_config.yaml is 550, the pwm
+# kick per encoder flip grows with D, and joint 2 gained nothing from D 250 to 2620 on 25 October 2026
+DEFAULT_D_MAX = 2000
 
 
 class Stop(Exception):
@@ -157,7 +178,7 @@ class Settings(NamedTuple):
     tune_d: bool = True  # False sweeps P at the yaml D only
     d_start: int = 250  # the first D above 0 of the grid
     d_factor: float = 1.6  # between the D gains of the grid
-    d_max: int = cfg.MAX_GAIN
+    d_max: int = DEFAULT_D_MAX
     d_values: tuple[int, ...] | None = None  # the D gains of the grid instead of the ladder, in this order
     d_patience: int = 2  # D gains in a row that don't raise the P of the joint above the best end the grid
     repeats: int = 2
@@ -167,6 +188,7 @@ class Settings(NamedTuple):
     move_degrees: float = 8.0  # the streamed move, 0 disables it
     speed: float = 0.5  # rad/s of the planned moves
     clamp: int | None = None  # goal pwm clamp, None computes it from the holding pwm
+    max_step: int | None = None  # the largest step of the trials in positions, None takes MAX_STEP of the joint
     criteria: Criteria = Criteria()
     limits: AbortLimits = AbortLimits()
 
@@ -334,6 +356,7 @@ class TuningSession:
         self.joint = joint
         self.servo = self.handler.get_servo(joint)
         self.settings = settings
+        self.max_step = settings.max_step if settings.max_step is not None else MAX_STEP.get(joint, DEFAULT_MAX_STEP)
         self.sample_writer = sample_writer
         self.trial_writer = trial_writer
         self.clock = clock
@@ -566,6 +589,7 @@ class TuningSession:
         print('  aborted: {}'.format(reason))
         ok = self.restore()
         self.write_goal(self.pose_goal)
+        self.sleep(ABORT_SETTLE)
         return ok
 
     def set_clamp(self, clamp: int) -> None:
@@ -621,7 +645,7 @@ class TuningSession:
             if settings.clamp is None and pwm_clamp(holding) > clamp:
                 clamp = pwm_clamp(holding)
                 self.set_clamp(clamp)
-            step, limited = step_size(p, holding, clamp)
+            step, limited = step_size(p, holding, clamp, maximum=self.max_step)
             if limited:
                 logger.warning('P %d leaves no room for a step below the clamp of %d at this pose, using %d '
                                'positions', p, clamp, step)
@@ -958,6 +982,19 @@ def plot_results(joint: int, results: Sequence[PoseResult], samples_path: str) -
     plt.show()
 
 
+def finish(robot: DynamixelRobotController | CombinedRobot, restored: bool) -> None:
+    """
+    end the run: lower the arm to the rest pose and switch the torque off, or ask first when that isn't safe
+    :param restored: whether the servo under test has its yaml gains again; with trial gains in it the arm is not
+        moved, only the prompt is shown
+    """
+    if restored:
+        record_static_load.lower_and_disable_torque(robot)
+    else:
+        print('the arm is not lowered: the servo does not have its yaml gains')
+        record_static_load.disable_torque_on_request(robot)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='tune the position P and D gains of one arm servo')
     parser.add_argument('--joint', type=int, required=True, help='the joint to tune, 1 to 6')
@@ -969,7 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--no-d', action='store_true', help='only tune P, at the yaml D')
     parser.add_argument('--d-start', type=int, default=250, help='the first D above 0 of the grid')
     parser.add_argument('--d-factor', type=float, default=1.6, help='the factor between the D gains of the grid')
-    parser.add_argument('--d-max', type=int, default=cfg.MAX_GAIN, help='the largest D of the grid')
+    parser.add_argument('--d-max', type=int, default=DEFAULT_D_MAX,
+                        help='the largest D of the grid, at most {} (default %(default)s)'.format(cfg.MAX_GAIN))
     parser.add_argument('--d-values', default=None,
                         help='comma separated D gains to sweep P at, in this order, instead of the grid')
     parser.add_argument('--d-patience', type=int, default=2,
@@ -984,6 +1022,9 @@ def main(argv: list[str] | None = None) -> int:
                         help='goal pwm during the trials (885 is 100%%), default 3 times the holding pwm, at least '
                              'half the limit, and the limit on joints {}'.format(
                                  ', '.join(str(j) for j in UNLOADED_JOINTS)))
+    parser.add_argument('--max-step', type=int, default=None,
+                        help='the largest step of the trials in positions, default {} for joints {} and {} for the '
+                             'others'.format(MAX_STEP[1], ' and '.join(str(j) for j in MAX_STEP), DEFAULT_MAX_STEP))
     parser.add_argument('--max-temperature', type=float, default=None,
                         help='abort a trial when the servo reaches this temperature, default the temperature_limit '
                              'of servo_config.yaml')
@@ -1005,6 +1046,9 @@ def main(argv: list[str] | None = None) -> int:
         if d_values is not None and any(not 0 <= d <= cfg.MAX_GAIN for d in d_values):
             raise ValueError('the D gains have to be between 0 and {}'.format(cfg.MAX_GAIN))
         d_ladder(args.d_start, args.d_factor, args.d_max)  # raises on a bad start or factor
+        if args.max_step is not None and args.max_step < MIN_STEP:
+            raise ValueError('--max-step has to be at least {} positions, the smallest step of a trial'.format(
+                MIN_STEP))
     except (argparse.ArgumentTypeError, ValueError) as e:
         print(e)
         return 1
@@ -1022,7 +1066,7 @@ def main(argv: list[str] | None = None) -> int:
                         d_start=args.d_start, d_factor=args.d_factor, d_max=args.d_max, d_values=d_values,
                         d_patience=args.d_patience, repeats=args.repeats, hold=args.hold, rest=args.rest,
                         baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
-                        clamp=args.pwm_clamp, limits=AbortLimits(max_temperature=max_temperature))
+                        clamp=args.pwm_clamp, max_step=args.max_step, limits=AbortLimits(max_temperature=max_temperature))
     if args.floor is not None:
         robot.workspace_limits = record_static_load.limits_with_floor(args.floor, robot.workspace_limits)
     excursion = np.radians(max(args.move_degrees, 6.0))
@@ -1050,10 +1094,12 @@ def main(argv: list[str] | None = None) -> int:
     samples_path = os.path.join(output_dir, 'tune_joint{}_{}_samples.csv'.format(args.joint, stamp))
     trials_path = os.path.join(output_dir, 'tune_joint{}_{}_trials.csv'.format(args.joint, stamp))
     print("joint {} (yaml p={} d={}), poses {}, P up to {} in steps of {}, at D {} until {} D gains in a row don't "
-          "raise the P of the joint, {} repeats, output {}".format(
+          "raise the P of the joint, {} repeats, steps of at most {} positions, output {}".format(
               args.joint, servo.p, servo.d, ', '.join(pose_degrees(pose) for pose in accepted),
               round(servo.p * args.max_factor), args.factor, ' '.join(str(d) for d in d_grid(settings, servo.d)),
-              args.d_patience, args.repeats, trials_path))
+              args.d_patience, args.repeats,
+              args.max_step if args.max_step is not None else MAX_STEP.get(args.joint, DEFAULT_MAX_STEP),
+              trials_path))
     print('the arm moves to these poses and steps joint {} by up to 5 degrees there, nothing may be in its way; '
           'the other joints hold their position'.format(args.joint))
     if not args.yes and input('type yes to enable the servos and start: ').strip().lower() != 'yes':
@@ -1066,6 +1112,7 @@ def main(argv: list[str] | None = None) -> int:
     stop.install()
     session: TuningSession | None = None
     stopped = False
+    restored = True  # without a session nothing was changed
     try:
         with open(samples_path, 'w', newline='') as samples_file, open(trials_path, 'w', newline='') as trials_file:
             print('temperatures: {}'.format(robot.get_servo_temperatures()))
@@ -1085,7 +1132,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if session is not None:
             stop.protected = True
-            if session.restore():
+            restored = session.restore()
+            if restored:
                 print('the yaml gains, profile and goal pwm of servo {} are back'.format(args.joint))
             else:
                 print('RESTORING SERVO {} FAILED: start the robot again for the gains and the profile, reboot or '
@@ -1106,9 +1154,9 @@ def main(argv: list[str] | None = None) -> int:
                                                   for bus, count in handler.failed_reads_by_bus.items()),
                   handler.late_reads, handler.failed_reads - handler.late_reads))
     print('samples in {}, trials in {}'.format(samples_path, trials_path))
+    finish(robot, restored)  # before the plot, which blocks until its windows are closed
     if args.plot and results:
         plot_results(args.joint, results, samples_path)
-    record_static_load.disable_torque_on_request(robot)
     return 0
 
 

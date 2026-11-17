@@ -9,7 +9,10 @@ pwm units (885 is 100 % duty) and the 0.229 rpm velocity unit.
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Sequence
+from itertools import accumulate
+from operator import sub
 from typing import NamedTuple
 
 import numpy as np
@@ -81,13 +84,16 @@ class TrackingMetrics(NamedTuple):
 
 
 class Criteria(NamedTuple):
-    """the acceptance criteria of a trial, a trial that violates one is the knee of the sweep"""
+    """the acceptance criteria of a trial, a trial that violates one is the knee of the sweep (except those
+    marked as warnings, which are only reported)"""
     max_overshoot_fraction: float = 0.10  # of the step
     min_overshoot_positions: float = 2.0  # an overshoot below this is quantization, never flagged
     max_ring_count: int = 1
     max_settle_time: float = 0.5  # seconds
     max_rest_pp: float = 2.0  # positions peak to peak at rest, or
     rest_pp_factor: float = 2.0  # this times the peak to peak of the baseline, whichever is larger
+    # pwm_std_factor and pwm_std_floor give a warning, not a flag: the pwm std at rest follows where the joint parks
+    # relative to an encoder edge rather than the gain (joint 3, 13 November 2026); choose_d still uses them
     pwm_std_factor: float = 1.5  # times the pwm std of the baseline
     pwm_std_floor: float = 5.0  # pwm units, a std below this is noise however it compares to the baseline
     max_saturated_fraction: float = 0.3  # of the samples of a step, a warning
@@ -105,9 +111,11 @@ class AbortLimits(NamedTuple):
     divergence_minimum: int = 40  # positions of error against the trajectory, or
     divergence_sag_factor: float = 2.5  # times the sag expected at these gains, whichever is the largest
     stream_divergence: int = 120  # positions behind the trajectory during a streamed move (plus the sag term)
-    oscillation_factor: float = 3.0  # times the baseline peak to peak, or
-    oscillation_minimum: float = 6.0  # positions peak to peak, whichever is larger
-    oscillation_window: float = 0.2  # seconds
+    oscillation_factor: float = 3.0  # times the baseline peak to peak, the rise and the fall have to exceed it, or
+    oscillation_minimum: float = 6.0  # positions the position has to go both up and down, whichever is larger
+    # seconds, how far back the rule looks at most, never further back than the end of the settle grace (so slow
+    # swings are seen as well as fast ones, and the step response itself is never inside the window)
+    oscillation_window: float = 1.0
     saturation_fraction: float = 0.9  # of the pwm clamp
     saturation_window: float = 0.1  # seconds the pwm has to sit at the clamp
     settle_grace: float = 0.5  # seconds after a goal change before the divergence and oscillation rules apply
@@ -279,7 +287,10 @@ def evaluate(rest: RestMetrics, steps: Sequence[StepMetrics], baseline: RestMetr
 
     The pwm noise is the residual the position doesn't explain (RestMetrics.pwm_residual_std): a joint resting on
     an encoder edge flickers between two counts and its pwm steps by P / 128 with it, which is the loop working;
-    the raw pwm std of that is half the step and would fail every stable joint at a high P.
+    the raw pwm std of that is half the step and would fail every stable joint at a high P. It is only a warning:
+    on joint 3 on 13 November 2026 the residual equalled the raw std and followed where the sag parks the joint
+    relative to an encoder edge, not the gain (the baseline at unchanged gains ranged from 1.3 to 5.3). Real
+    oscillation at rest is the ripple flag and the live oscillation abort.
     """
     flags, warnings = set(), set()
     for m in steps:
@@ -299,7 +310,7 @@ def evaluate(rest: RestMetrics, steps: Sequence[StepMetrics], baseline: RestMetr
         flags.add('ripple')
     if rest.pwm_residual_std / max(p_ratio, 1e-9) > max(criteria.pwm_std_floor,
                                                         criteria.pwm_std_factor * baseline.pwm_residual_std):
-        flags.add('pwm_noise')
+        warnings.add('pwm_noise')
     rise = rest.temperature_rise if temperature_rise is None else temperature_rise
     if rise > criteria.max_temperature_rise:
         warnings.add('heating')
@@ -339,12 +350,18 @@ def abort_reason(samples: Sequence[Sample], clamp: int, step: int, baseline_pp: 
         if abs(error) > max(limits.divergence_factor * abs(step), limits.divergence_minimum,
                             limits.divergence_sag_factor * sag):
             return 'divergence, {} positions from the trajectory'.format(error)
-        window = [x.position for x in samples if x.time > s.time - limits.oscillation_window]
-        pp = max(window) - min(window)
-        if pp > max(limits.oscillation_factor * baseline_pp, limits.oscillation_minimum):
-            return 'oscillation, {} positions peak to peak at rest'.format(pp)
+        # oscillation is the position going both ways: a creep towards the goal in one direction, even a long
+        # one, is the joint settling. The samples are the newest ones back to the bound, never from inside the
+        # grace, so the step response itself is not in the window.
+        bound = max(last_goal_time + limits.settle_grace, s.time - limits.oscillation_window)
+        start = bisect_right(samples, bound, key=lambda x: x.time)  # the samples are in time order
+        positions = [x.position for x in samples[start:]]  # never empty: the newest sample is after the bound
+        rise = max(map(sub, positions, accumulate(positions, min)))  # the most the position went up
+        fall = max(map(sub, accumulate(positions, max), positions))  # the most it went down
+        if min(rise, fall) > max(limits.oscillation_factor * baseline_pp, limits.oscillation_minimum):
+            return 'oscillation, {} positions back and forth at rest'.format(int(min(rise, fall)))
     if since_goal > limits.saturation_window:
-        recent = [x for x in samples if x.time > s.time - limits.saturation_window]
+        recent = samples[bisect_right(samples, s.time - limits.saturation_window, key=lambda x: x.time):]
         if recent and all(abs(x.pwm) >= limits.saturation_fraction * clamp for x in recent):
             return 'pwm at the clamp of {} for {} s'.format(clamp, limits.saturation_window)
     return None

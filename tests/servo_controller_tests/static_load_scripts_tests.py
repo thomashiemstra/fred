@@ -3,14 +3,19 @@ import io
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 import yaml
 from numpy import pi
 
+from src.global_constants import WorkSpaceLimits, dynamixel_robot_config
+from src.kinematics.kinematics import forward_position_kinematics, inverse_kinematics
 from src.kinematics.kinematics_utils import RobotConfig
-from src.robot_controllers.dynamixel_robot.calibration import record_static_load, fit_static_load
+from src.robot_controllers.dynamixel_robot.calibration import record_static_load, fit_static_load, tune_servo_gains
+from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import parse_pose
 from src.utils import workspace
+from src.utils.movement import MAX_POSITION_ERROR, plan_move_to_angles
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config, parse_servo_config
 from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names, SpringGeometry, \
     UP, DOWN, SPRING_TERMS
@@ -18,6 +23,10 @@ from src.robot_controllers.dynamixel_robot.static_compensation import regressor_
 TEST_SERVO_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_servo_config.yaml')
 test_config = RobotConfig(d1=15.7, a2=20, d4=22, d6=12)
 angle_limits = {1: (0, pi), 2: (0, pi), 3: (-pi / 2, pi / 2), 4: (-pi, pi), 5: (-pi, pi), 6: (-pi, pi)}
+
+
+# the angles of joints 1 to 6 of the arm lying on the table with the torque off (13 November 2026)
+RESTING_ANGLES = np.radians([0, 91.8, 19.1, -0.3, 1.4, 76.8, -8.7])
 
 
 class TestLimits:
@@ -281,6 +290,157 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(0, done)
         done, _ = self.record(robot, [low_pose], workspace_limits=record_static_load.limits_with_floor(0.0, TestLimits))
         self.assertEqual(1, done)
+
+
+class RestRobot(FakeRobot):
+    """the fake robot with the link lengths and the workspace limits of the real one, recording what it is told"""
+
+    def __init__(self, angles=RESTING_ANGLES, **kwargs):
+        super().__init__(angles, **kwargs)
+        self.robot_config = dynamixel_robot_config
+        self.workspace_limits = WorkSpaceLimits
+        self.events = []
+
+    def move_servos(self, angles):
+        super().move_servos(angles)
+        self.events.append('move')
+
+    def disable_servos(self):
+        super().disable_servos()
+        self.events.append('disable')
+
+
+class LowerToRestTests(unittest.TestCase):
+
+    def setUp(self):
+        patcher = mock.patch('src.utils.movement.sleep')  # the planned moves run at their real speed otherwise
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.rest_angles = inverse_kinematics(record_static_load.REST_POSE, dynamixel_robot_config)
+
+    def lower(self, robot, prompt=None):
+        """lower_and_disable_torque with the prompt answered by prompt (default enter); returns (result, prompts)"""
+        prompts = []
+
+        def answer(text):
+            prompts.append((text, robot.disabled))  # whether the torque was already off when the question came
+            if isinstance(prompt, BaseException):
+                raise prompt
+            return ''
+        with mock.patch('builtins.input', side_effect=answer), mock.patch('builtins.print'):
+            result = record_static_load.lower_and_disable_torque(
+                robot, sleep=lambda seconds: robot.events.append('settle'))
+        return result, prompts
+
+    def assertPrompted(self, result, prompts):
+        self.assertFalse(result)
+        self.assertEqual(1, len(prompts))
+        self.assertFalse(prompts[0][1], 'the torque was off before the prompt was answered')
+
+    def test_the_rest_pose_is_inside_the_limits_and_above_the_table(self):
+        robot = RestRobot()
+        robot.check_workspace(self.rest_angles)
+        _, _, _, wrist, tip = forward_position_kinematics(self.rest_angles, dynamixel_robot_config)
+        self.assertGreaterEqual(wrist[2], WorkSpaceLimits.wrist_z_min + 0.5)
+        self.assertGreaterEqual(tip[2], WorkSpaceLimits.z_min + 0.5)
+        rest = record_static_load.REST_POSE
+        np.testing.assert_allclose([rest.x, rest.y, rest.z], tip, atol=MAX_POSITION_ERROR)
+
+    def test_the_planner_accepts_the_move_to_the_rest_pose_from_the_tuning_poses_and_from_rest(self):
+        robot = RestRobot()
+        starts = {name: parse_pose(name) for name in tune_servo_gains.POSES}
+        starts['resting'] = np.radians(np.array([0, 91.8, 19.1, -0.3, 1.4, 76.8, -8.7]))
+        for name, start in starts.items():
+            with self.subTest(start=name):
+                move = plan_move_to_angles(robot, start, self.rest_angles, angular_speed=record_static_load.REST_SPEED)
+                np.testing.assert_allclose(self.rest_angles, move.angles[-1], atol=1e-9)
+
+    def test_the_arm_is_lowered_and_only_then_the_torque_goes_off(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        result, prompts = self.lower(robot)
+        self.assertTrue(result)
+        self.assertEqual([], prompts, 'input is not called')
+        self.assertTrue(robot.disabled)
+        self.assertGreater(len(robot.moves), 1)
+        self.assertEqual(['disable'], robot.events[-1:])
+        self.assertEqual(['settle'], robot.events[-2:-1], 'it settles before the torque goes off')
+        self.assertEqual({'move'}, set(robot.events[:-2]))
+        np.testing.assert_allclose(self.rest_angles, robot.moves[-1], atol=1e-6)
+
+    def test_a_servo_with_a_hardware_error_keeps_the_others_where_they_are(self):
+        robot = RestRobot()
+        robot.hardware_errors = {3: ['overload']}
+        result, prompts = self.lower(robot)
+        self.assertPrompted(result, prompts)
+        self.assertEqual([], robot.moves)
+        self.assertEqual(['disable'], robot.events, 'only after the prompt was answered')
+
+    def test_hardware_errors_that_can_not_be_read_do_not_move_the_arm(self):
+        robot = RestRobot()
+        robot.get_hardware_errors = lambda: None
+        result, prompts = self.lower(robot)
+        self.assertPrompted(result, prompts)
+        self.assertEqual([], robot.moves)
+
+    def test_a_move_the_planner_refuses_ends_at_the_prompt(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        robot.workspace_limits = record_static_load.limits_with_floor(10)  # the rest pose is below 10 cm
+        result, prompts = self.lower(robot)
+        self.assertPrompted(result, prompts)
+        self.assertEqual([], robot.moves)
+
+    def test_a_pose_the_arm_can_not_reach_ends_at_the_prompt(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        robot.robot_config = RobotConfig(d1=15.7, a2=5, d4=5, d6=14)
+        result, prompts = self.lower(robot)
+        self.assertPrompted(result, prompts)
+        self.assertEqual([], robot.moves)
+
+    def test_angles_that_can_not_be_read_end_at_the_prompt(self):
+        robot = RestRobot()
+        robot.get_current_angles = lambda: None
+        result, prompts = self.lower(robot)
+        self.assertPrompted(result, prompts)
+        self.assertEqual([], robot.moves)
+
+    def test_ctrl_c_during_the_move_ends_at_the_prompt_with_the_servos_holding(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        original = robot.move_servos
+
+        def interrupted(angles):
+            if len(robot.moves) == 20:
+                raise KeyboardInterrupt
+            original(angles)
+        robot.move_servos = interrupted
+        result, prompts = self.lower(robot)
+        self.assertPrompted(result, prompts)
+        self.assertEqual(20, len(robot.moves))
+
+    def test_ctrl_c_during_the_settle_ends_at_the_prompt(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+
+        def interrupted(seconds):
+            raise KeyboardInterrupt
+        prompts = []
+
+        def answer(text):
+            prompts.append(robot.disabled)
+            return ''
+        with mock.patch('builtins.input', side_effect=answer), mock.patch('builtins.print'):
+            result = record_static_load.lower_and_disable_torque(robot, sleep=interrupted)
+        self.assertFalse(result)
+        self.assertEqual([False], prompts, 'the torque was on when the prompt came')
+
+    def test_ctrl_c_at_the_prompt_leaves_the_torque_on(self):
+        robot = RestRobot()
+        robot.hardware_errors = {3: ['overload']}
+        result, prompts = self.lower(robot, prompt=KeyboardInterrupt())
+        self.assertPrompted(result, prompts)
+        self.assertFalse(robot.disabled)
+        robot = RestRobot()
+        with mock.patch('builtins.input', side_effect=KeyboardInterrupt), mock.patch('builtins.print'):
+            record_static_load.disable_torque_on_request(robot)
+        self.assertFalse(robot.disabled)
 
 
 class FitTests(unittest.TestCase):

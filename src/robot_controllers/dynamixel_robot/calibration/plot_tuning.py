@@ -9,7 +9,9 @@ Every trials csv is read with the samples csv next to it (the same name with _sa
    metric, with the limit of the acceptance criterion drawn in the same panel (overshoot against its limit of
    max(2 positions, 10 % of the step), rings, settle time, rest ripple, pwm noise per unit of P, and the resting
    error band, the mean |error| after the steps). Failed trials have hollow markers, the knee of every pose is a
-   vertical line and the recommended P a dotted one. Poses are colours, runs (csv files) are marker shapes.
+   vertical line and the recommended P a dotted one. Poses are colours, runs (csv files) are marker shapes. The
+   pwm noise limit is a warning level, not a criterion of the knee (a trial above it still passes; csv files from
+   before 13 November 2026 flagged it and show those trials as failed).
 3. The comparison of the D candidates at one P: overshoot and the resting error band against D, per pose.
 4. The step responses, per run and D: the first step up of every P trial per pose, as a fraction of the step against
    time, darker blue for higher P, so overshoot and ringing can be seen directly.
@@ -224,7 +226,7 @@ def plot_knee(runs: Sequence[Run], d: int | None = None, criteria: Criteria = Cr
         'rings': (axes[0][1], 'rings after the first crossing'),
         'settle': (axes[1][0], 'settle time, s'),
         'ripple': (axes[1][1], 'rest ripple, positions peak to peak'),
-        'noise': (axes[2][0], 'pwm noise per unit of P, pwm units'),
+        'noise': (axes[2][0], 'pwm noise per unit of P, pwm units (dashed: its warning level)'),
         'band': (axes[2][1], 'resting error band, mean |error| after a step'),
     }
     poses = sorted({pose for run in runs for pose in run.poses})

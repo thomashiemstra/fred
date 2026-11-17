@@ -16,8 +16,8 @@ decisions here come from a research and refutation pass over the plan and from a
   so against the table or an object it ramps to full duty, about 30 N.m at joint 2 through the belt, into PLA; inside
   the friction band an integrator hunts or creeps; and the feedforward already carries the predictable part.
 - `src/robot_controllers/dynamixel_robot/calibration/tune_servo_gains.py` tunes P and D of one joint per run: small
-  steps with the profile of the servo switched off under a goal pwm clamp, rising P until the first sign of ringing,
-  ripple or pwm noise, 0.65 times that knee as the recommendation, then the whole D grid at that P, a D above the
+  steps with the profile of the servo switched off under a goal pwm clamp, rising P until the first sign of ringing
+  or ripple, 0.65 times that knee as the recommendation, then the whole D grid at that P, a D above the
   smallest passing one only where it lowers the overshoot or the resting error after the steps by a position.
   Order: the wrist first (6, 4, 5), then 3, 1 and 2.
 - The script is tested against a simulated servo with friction and reviewed, not run on the robot. The abort
@@ -111,9 +111,11 @@ pose the knee was 2000 with D = 0 and 2600 with D = 500. So P is swept at every 
 250 and steps of 1.6 (400, 640, 1020, 1640, ...; `--d-start`, `--d-factor`), with the yaml D added, every pose at a
 D before the next D. The steps are a factor apart rather than fractions of P because near critical damping the D a
 loop needs grows with the square root of its P (Spong, Hutchinson and Vidyasagar, *Robot Modeling and Control*,
-independent joint control: P = ω²J/K, D = (2ζωJ - B)/K). There is no fixed maximum D (`--d-max` defaults to the
-register's 16383): too much D shows in the trials themselves, as pwm noise (D multiplies the encoder's one-count
-flicker), a slow settle (overdamped), or, on the belt joints 1 and 2, where the encoder sits on the joint shaft
+independent joint control: P = ω²J/K, D = (2ζωJ - B)/K). The grid stops at `--d-max`, 2000 by default (so 0, 250,
+400, 640, 1020, 1640; the largest D in `servo_config.yaml` is 550, the pwm kick per encoder flip grows with D, and
+joint 2 gained nothing from D 250 to 2620); `--d-max` raises it up to the register's 16383. Too much D shows in the
+trials themselves, as pwm noise (D multiplies the encoder's one-count flicker; reported as a warning, and a D that
+adds it is held back when the candidates are compared), a slow settle (overdamped), or, on the belt joints 1 and 2, where the encoder sits on the joint shaft
 behind the belt, as oscillation (the belt delays what the encoder sees, and at its resonance D can feed the
 oscillation instead of damping it). The grid stops when 2 D gains in a row (`--d-patience`) don't raise the P of
 the joint above the best before them: the same P, a lower one, or no passing P at all. The first grid run only
@@ -139,10 +141,10 @@ Per pose and D:
    - writes the gains to this servo only and reads them back (sync writes aren't acknowledged), re-sends the goal;
    - records 3 s of rest: ripple, pwm noise, sag. The holding pwm of this rest may exceed the baseline's, because
      the servo sits on the other side of the friction band; the clamp is widened then;
-   - sizes the step: `(0.8 * clamp - holding pwm) * 128 / P` positions, between 8 and 60, so the pwm stays below
-     the clamp if the servo really outputs P / 128 per position (the measured slope goes to the csv). At the full
-     clamp of joints 1, 4 and 6 that is 60 positions up to a P of about 1500 and 34 at 2600, twice what the floor
-     of 442 allowed;
+   - sizes the step: `(0.8 * clamp - holding pwm) * 128 / P` positions, between 8 and a cap of 60 (15 on joints 1 and
+     2, `--max-step`, see below), so the pwm stays below the clamp if the servo really outputs P / 128 per position
+     (the measured slope goes to the csv). At the full clamp of joints 4 and 6 that is 60 positions up to a P of
+     about 1500 and 34 at 2600, twice what the floor of 442 allowed;
    - switches the profile of the servo off (velocity and acceleration 0, a step instruction) and steps the goal:
      up, back, down, back, twice; each step is held 0.8 s;
    - restores the profile and the goal pwm and streams a planned 8 degree move of the joint away and back with the
@@ -179,23 +181,45 @@ The criteria of a trial (`Criteria` in `gain_tuning.py`):
 | ringing | more than one crossing of the final value after the first |
 | settle | not within max(2 positions, 5 % of the step) of the final value within 0.5 s |
 | ripple | position peak to peak at rest above max(2, twice the baseline) |
-| pwm_noise | the pwm std at rest that the position doesn't explain (the residual after fitting the pwm against the position error, P / 128 per count), divided by P / yaml P, above max(5 units, 1.5 times the baseline's residual). A joint resting on an encoder edge flickers between two counts and its pwm steps with it; the raw std of that is half a step and flagged every stable joint at high P (joint 6, 23 October) |
 | stuck | no step moved at least half its size, the trial says nothing |
 
+The pwm noise is reported as a warning (`pwm_noise`), not as a flag: the pwm std at rest that the position doesn't
+explain (the residual after fitting the pwm against the position error, P / 128 per count), divided by P / yaml P,
+above max(5 units, 1.5 times the baseline's residual). A trial with only this warning passes and is not the knee; the
+warning shows in the console line, the summary and the `warnings` column of the trials csv, and a D that adds it is
+still held back when the candidates are compared. A joint resting on an encoder edge flickers between two counts and
+its pwm steps with it; the raw std of that is half a step and flagged every stable joint at high P (joint 6,
+23 October). On 13 November 2026 (joint 3) the residual equalled the raw std in every trial, because the pwm and
+position readings of one packet don't line up at the time scale of the flicker, and it followed how long the joint
+sat on the neighbouring count, which depends on where the sag parks it relative to an encoder edge: the baseline at
+unchanged gains ranged from 1.3 to 5.3 over eight visits against the floor of 5.0, and one sweep got its knee at the
+yaml P from a reading of 5.23. Oscillation at rest is caught by the ripple flag and the live oscillation abort,
+instability by overshoot, ringing and settle.
+
 The division by P / yaml P matters: a dither of one position gives a pwm of P / 128 units, so a fixed dither would
-fail the noise rule at 1.69 times the yaml P and every sweep would end there.
+exceed the noise level at 1.69 times the yaml P and warn on every trial from there.
 
 The live abort rules (`AbortLimits`), checked every 5 samples; a violation restores the yaml gains, the profile
-and the goal pwm at once:
+and the goal pwm at once, and the run then waits 1.5 s (`ABORT_SETTLE`) for the arm to move back to the pose:
 
 | Reason | Rule | Counts as |
 |---|---|---|
 | divergence | after 0.5 s of grace, error against the trajectory above max(3 steps, 40 positions, 2.5 times the sag expected at these gains); during a streamed move above max(120, 2.5 times the sag) | the knee |
-| oscillation | after the grace, position peak to peak over 0.2 s above max(6, 3 times the baseline) | the knee |
+| oscillation | after the grace, the position goes both up and down by more than max(6, 3 times the baseline) within the last 1 s (the window never reaches back into the 0.5 s of grace); a creep in one direction is not oscillation | the knee |
 | pwm at the clamp | the pwm within 10 % of the clamp for 0.1 s | the knee |
 | temperature | the `temperature_limit` of `servo_config.yaml`, the stop limit of the robot (`--max-temperature` overrides it; a fixed 50 C until 23 October, which ignored the yaml); the `temperature_warning` check between trials stops the run earlier, and a servo is not tried within 3 C of the abort limit | ends the run |
 | voltage | 1.5 V below the voltage at the start of the trial (0.7 until 23 October, which the dips of the supply reached) | ends the run |
 | position jump | more than 50 positions between two samples (encoder glitch, slipped belt) | ends the run |
+
+The oscillation rule used to be the position's peak to peak over the last 0.2 s. On joint 1 on 17 November 2026
+(runs tune_joint1_20261117_2150 and _2156) a step of 60 positions with the arm stretched out left the joint creeping
+towards the goal in one direction 0.5 s later (8, 4 and 1 positions from it at 300, 350 and 400 ms, which is 7
+positions in 0.2 s), so the trial was aborted for 'oscillation' although nothing swung back and forth. The abort
+restored the gains and the next trial started while the arm was still settling from it, and was aborted in its
+rest phase for the same reason. Now the rule needs the position to go both ways by more than the threshold, over
+a longer window (1 s, so slow swings are seen as well as fast ones), the run waits 1.5 s after every abort, and
+the base and the shoulder step by at most 15 positions, since a 60 position step with the profile off shakes the
+whole structure.
 
 The sag expected at the gains of a trial is the sag of the baseline times yaml P / P; the baseline itself runs with
 the divergence rule off, since its sag isn't known yet. A run that ends keeps the results of the finished poses.
@@ -248,10 +272,13 @@ python -m src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains --j
 With the arm powered, its torque off, nothing in its way, foam under the elbow and the wrist for the first runs, and a
 hand near the power switch. It prints the plan and asks before enabling the servos (`--yes` skips the question).
 Options: `--pose`, `--factor` 1.3, `--max-factor` 2.0, `--no-d`, `--d-start` 250, `--d-factor` 1.6, `--d-max`
-16383, `--d-values` (e.g. `0,250,500`), `--d-patience` 2, `--repeats` 2,
+2000 (up to 16383), `--d-values` (e.g. `0,250,500`), `--d-patience` 2, `--repeats` 2,
 `--hold` 0.8 s, `--rest` 3 s, `--baseline-rest` 5 s, `--move-degrees` 8 (0 disables the streamed move), `--speed`
 0.5 rad/s, `--pwm-clamp` (overrides the clamp on every joint, refused below 1.5 times the holding pwm; by default
 3 times the holding pwm, at least 442, and the full 885 on joints 1, 4 and 6, which carry no static load),
+`--max-step` (the largest step of the trials in positions, at least 8; default 15 for joints 1 and 2, which swing
+the whole arm, and 60 for the others; a smaller step is a gentler but coarser test, the overshoot criterion only
+counts above 2 positions),
 `--max-temperature` (default the yaml `temperature_limit`), `--floor`, `--output-dir`, `--plot`.
 
 Output in `--output-dir`: `tune_joint<N>_<time>_samples.csv` (every sample: pose, trial, p, d, segment, repeat,
@@ -270,6 +297,11 @@ Ctrl+C stops after the current read and restores the servo; a second Ctrl+C kill
 gains and profile stay in the servo until the robot is started again (any script that calls `get_robot()` rewrites
 the yaml values), and a goal pwm clamp stays until the servos are rebooted or power cycled; the script also resets a
 leftover clamp when it starts. Nothing touches the eeprom.
+
+The run ends with the arm lowered at 0.3 rad/s to `record_static_load.REST_POSE` (where it lies on the table with the
+torque off, straight ahead and a bit over 1 cm higher) and the torque switched off there, before the plot. If the servo under test
+doesn't have its yaml gains again, a servo has a hardware error, the planner refuses the move or Ctrl+C comes during
+it, the arm is not lowered and the prompt to support the arm and press enter is shown instead.
 
 First run, on joint 6 with the arm supported: watch that the baseline shows the sag you expect, that the clamp and
 the step sizes are sensible (the console prints them), that a trial ends in the restore (the gains print back), and
@@ -325,7 +357,7 @@ Assumptions the plan still rests on, each a one line measurement on joint 6:
 - Position Trajectory is the setpoint of the loop also when the host streams goals at 100 Hz (the servo re-plans
   "based on present movement velocity"), so the tracking error of the move test is meaningful; log the host goal
   next to it, which the csv does.
-- The abort thresholds: 40 positions or 2.5 times the sag of divergence, 6 positions of oscillation, 90 % of the
+- The abort thresholds: 40 positions or 2.5 times the sag of divergence, 6 positions of oscillation (both up and down within 1 s), 90 % of the
   clamp for 0.1 s, the yaml temperature limit, 1.5 V, 50 positions of jump. They are guesses; the joint 6 runs of 21-23 October did
   not trip them falsely at rest once the temperature and voltage limits were raised.
 - The loop rate of the servos (about 1 kHz is assumed everywhere, nothing in the manual says so), the behaviour of

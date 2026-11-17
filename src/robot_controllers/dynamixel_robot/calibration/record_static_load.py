@@ -39,7 +39,9 @@ from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
 from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
-from src.utils.movement import plan_move_to_angles, execute_move, check_move, PlannedMove
+from src.kinematics.kinematics import forward_position_kinematics, inverse_kinematics
+from src.kinematics.kinematics_utils import Pose
+from src.utils.movement import MAX_POSITION_ERROR, plan_move_to_angles, execute_move, check_move, PlannedMove
 from src.utils.movement_exception import MovementException
 
 # the unit of the present current register per servo model, (name, value of one unit)
@@ -61,6 +63,11 @@ DEFAULT_RANGES = {4: (np.radians(-90), np.radians(90)), 5: (np.radians(-90), np.
 SAMPLING_ATTEMPTS = 50
 # reads of the servo status before a failure stops the run: a corrupt status packet now and then happens on the bus
 READ_ATTEMPTS = 3
+# where the arm lies on the table with the torque off, as read on 13 November 2026 (gripper tip x=-0.9 y=39.6 z=3.7
+# cm, alpha=-0.007 beta=-0.143 gamma=0.099), rounded to straight ahead with the gripper level and a bit over 1 cm
+# higher so the arm doesn't hit the table
+REST_POSE = Pose(0.0, 40, 5)
+REST_SPEED = 0.3  # rad/s of the joint that turns the most, for the move to the rest pose
 
 T = TypeVar('T')
 
@@ -271,6 +278,49 @@ def disable_torque_on_request(robot: DynamixelRobotController | CombinedRobot) -
         print('\nexiting, the servos keep holding their position')
         return
     robot.disable_servos()
+
+
+def lower_and_disable_torque(robot: DynamixelRobotController | CombinedRobot, speed: float = REST_SPEED,
+                             settle: float = 0.5, sleep: Callable[[float], None] = time.sleep) -> bool:
+    """
+    lower the arm to REST_POSE just above the table and switch the torque off there, so it doesn't drop from height;
+    falls back to disable_torque_on_request (the arm is not moved, or stays where it is) and returns False when a
+    servo has shut down or can't be read, the planner refuses the pose, the angles can't be read, or Ctrl+C comes
+    during the move: the torque is only switched off directly after a completed move
+    :param speed: speed of the joint that turns the most, in rad/s
+    :param settle: seconds to wait at the pose before the torque goes off
+    :return: True if the arm was lowered and the torque is off
+    """
+    why: str | None = None
+    try:
+        errors = robot.get_hardware_errors()
+        if errors is None:
+            why = 'the hardware errors could not be read'
+        elif errors:
+            why = 'servos {} have a hardware error and are limp, the others are not moved'.format(sorted(errors))
+        else:
+            target = inverse_kinematics(REST_POSE, robot.robot_config)
+            reached = forward_position_kinematics(target, robot.robot_config)[-1]
+            if not np.all(np.isfinite(target)) or \
+                    np.linalg.norm(reached - [REST_POSE.x, REST_POSE.y, REST_POSE.z]) > MAX_POSITION_ERROR:
+                why = 'the rest pose can not be reached with these link lengths'
+            else:
+                print('lowering the arm to the table, the torque goes off after it')
+                if move_to(robot, target, speed):
+                    sleep(settle)
+                    robot.disable_servos()
+                    print('the torque is off')
+                    return True
+                why = 'the planner refuses the move to the rest pose'
+    except MovementException as e:
+        why = 'the move to the rest pose is refused: {}'.format(e)
+    except StopRecording as e:
+        why = str(e)
+    except KeyboardInterrupt:
+        why = 'interrupted, the servos hold where they are'
+    print('the arm is not lowered: {}'.format(why))
+    disable_torque_on_request(robot)
+    return False
 
 
 def parse_ranges(values: Iterable[str]) -> dict[int, tuple[float, float]]:

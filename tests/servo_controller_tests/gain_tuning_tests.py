@@ -1,5 +1,7 @@
+import argparse
 import csv
 import io
+import time
 import unittest
 from unittest import mock
 
@@ -111,7 +113,7 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(0, still.pwm_residual_std)
         self.assertIsNone(rest_metrics(samples([2055] * 100, goal=2075, pwm=350)).pwm_slope)
 
-    def test_pwm_noise_the_position_does_not_explain_still_fails(self):
+    def test_pwm_noise_the_position_does_not_explain_is_a_warning(self):
         p = 2240
         rng = np.random.default_rng(3)
         rows = samples([2055, 2056] * 400, goal=2075)
@@ -120,7 +122,7 @@ class MetricsTests(unittest.TestCase):
         rest = rest_metrics(rows, p)
         self.assertGreater(rest.pwm_residual_std, 10)
         baseline = rest_metrics(samples([2055] * 800, goal=2075, pwm=270), 1720)
-        self.assertEqual((['pwm_noise'], []), evaluate(rest, [step()], baseline, p_ratio=p / 1720))
+        self.assertEqual(([], ['pwm_noise']), evaluate(rest, [step()], baseline, p_ratio=p / 1720))
 
     def test_first_order_step_has_no_overshoot(self):
         times = np.arange(0, 0.8, DT)
@@ -218,7 +220,8 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((['settle'], []), evaluate(rest(), [step(settle_time=0.6)], baseline))
         self.assertEqual((['ripple'], []), evaluate(rest(pp=3), [step()], baseline))
         self.assertEqual(([], []), evaluate(rest(pp=3), [step()], rest(pp=2)), 'twice the baseline is allowed')
-        self.assertEqual((['pwm_noise'], []), evaluate(rest(pwm_std=6.0), [step()], baseline))
+        self.assertEqual(([], ['pwm_noise']), evaluate(rest(pwm_std=6.0), [step()], baseline),
+                         'a warning, not a flag: the trial passes')
         self.assertEqual(([], []), evaluate(rest(pwm_std=4.0), [step()], baseline), 'below the floor')
         self.assertEqual(([], []), evaluate(rest(pwm_std=12.0), [step()], rest(pwm_std=10.0)))
 
@@ -233,12 +236,18 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(([], ['heating']), evaluate(rest(), [step()], rest(), temperature_rise=4.0),
                          'the rise over the whole trial counts when given')
 
+    def test_the_pwm_noise_warning_does_not_hide_a_flag(self):
+        # joint 3 on 13 November 2026: the noise follows where the joint parks at an encoder edge, not the gain
+        self.assertEqual((['overshoot'], ['pwm_noise']),
+                         evaluate(rest(pwm_std=6.0), [step(overshoot=3.0)], rest()))
+        self.assertEqual((['ripple'], ['pwm_noise']), evaluate(rest(pp=3, pwm_std=6.0), [step()], rest()))
+
     def test_pwm_noise_is_compared_per_unit_of_p(self):
         # a dither of one position gives a pwm std that scales with P: the same dither at 1.69 times the P passes
         baseline = rest(pwm_std=4.0)
         self.assertEqual(([], []), evaluate(rest(pwm_std=6.7), [step()], baseline, p_ratio=1.69))
-        self.assertEqual((['pwm_noise'], []), evaluate(rest(pwm_std=6.7), [step()], baseline))
-        self.assertEqual((['pwm_noise'], []), evaluate(rest(pwm_std=13.0), [step()], baseline, p_ratio=1.69),
+        self.assertEqual(([], ['pwm_noise']), evaluate(rest(pwm_std=6.7), [step()], baseline))
+        self.assertEqual(([], ['pwm_noise']), evaluate(rest(pwm_std=13.0), [step()], baseline, p_ratio=1.69),
                          'twice the dither at the higher P is noise')
 
 
@@ -295,9 +304,101 @@ class AbortTests(unittest.TestCase):
     def test_oscillation_at_rest(self):
         rows = samples([2000, 2010] * 200)
         self.assertIn('oscillation', self.check(rows))
+        self.assertEqual('oscillation, 10 positions back and forth at rest', self.check(rows))
         self.assertIsNone(self.check(samples([2000, 2002] * 200)), 'quantization')
         self.assertIsNone(self.check(samples([2000, 2010] * 200, ), baseline_pp=4), 'three times the baseline')
         self.assertIsNone(self.check(samples([2000, 2010] * 100), last_goal_time=0.0), 'before the grace period')
+
+    # the oscillation rule: the position has to go both up and down by more than the threshold (6 positions here)
+    # within the last second, never counting the grace of 0.5 s after the goal write
+
+    @staticmethod
+    def ms(positions):
+        """samples 1 ms apart, the goal at the last position"""
+        return samples(positions, dt=0.001)
+
+    def first_oscillation(self, rows, first=500, **kwargs):
+        """the time of the first check, made every 5 samples as the session does, that reports oscillation"""
+        for end in range(first, len(rows) + 1, 5):
+            reason = self.check(rows[:end], **kwargs)
+            if reason is not None and reason.startswith('oscillation'):
+                return rows[end - 1].time
+        return None
+
+    def test_a_creep_in_one_direction_is_not_oscillation(self):
+        # joint 1 on 17 November 2026: still 8, 4 and 1 positions from the goal at 300, 350 and 400 ms after a
+        # step of 60, which is 7 positions in 0.2 s, all in one direction
+        for sign in (1, -1):
+            creep = [2000 + sign * 9 * i / 200 for i in range(200)]
+            rows = self.ms([2000] * 500 + creep)
+            self.assertIsNone(self.check(rows), 'a creep of 9 positions in 0.2 s and still going')
+            self.assertIsNone(self.first_oscillation(rows))
+            # the same creep over the whole second after the grace, from further away
+            long_creep = [2000 + sign * 30 * (1 - i / 1000) ** 2 for i in range(1000)]
+            self.assertIsNone(self.first_oscillation(self.ms([2000] * 500 + long_creep)))
+
+    def test_a_creep_with_a_small_spring_back_is_not_oscillation(self):
+        up_9 = [2000 + 9 * i / 100 for i in range(100)]
+        back_4 = [2009 - 4 * i / 50 for i in range(50)]
+        up_5 = [2005 + 5 * i / 50 for i in range(50)]
+        rows = self.ms([2000] * 500 + up_9 + back_4 + up_5)
+        self.assertIsNone(self.check(rows))
+        self.assertIsNone(self.first_oscillation(rows))
+        # the reverse: down 9, up 4, down 5
+        mirrored = self.ms([4000 - x.position for x in rows])
+        self.assertIsNone(self.first_oscillation(mirrored))
+
+    def test_a_sustained_swing_is_found_soon_after_the_grace(self):
+        for hz, amplitude, within in ((20, 9, 0.15), (2, 10, 1.0)):
+            rows = self.ms([2000 + amplitude * math.sin(2 * math.pi * hz * i / 1000) for i in range(2500)])
+            found = self.first_oscillation(rows)
+            self.assertIsNotNone(found, '{} Hz'.format(hz))
+            self.assertLessEqual(found, 0.5 + within, '{} Hz'.format(hz))
+
+    def test_a_swing_inside_the_grace_followed_by_a_still_position_is_not_oscillation(self):
+        overshoot = [2000 + 40 * math.sin(math.pi * i / 400) for i in range(400)]  # up 40 and back in 0.4 s
+        rows = self.ms(overshoot + [2000] * 600)
+        self.assertIsNone(self.first_oscillation(rows, first=400))
+        # a swing that is still going at the end of the grace counts from there on
+        late = self.ms([2000 + 10 * math.sin(2 * math.pi * 10 * i / 1000) for i in range(800)])
+        self.assertIsNotNone(self.first_oscillation(late))
+
+    def test_both_directions_have_to_exceed_the_threshold(self):
+        # a rise above the threshold with a fall of 3 positions
+        rows = self.ms([2000] * 510 + [2012] * 100 + [2009] * 100)
+        self.assertIsNone(self.check(rows), 'up 12, back 3')
+        rows = self.ms([2000] * 510 + [1988] * 100 + [1991] * 100)
+        self.assertIsNone(self.check(rows), 'down 12, back 3')
+        # up 12 and back 8 is oscillation of 8 positions
+        rows = self.ms([2000] * 510 + [2012] * 100 + [2004] * 100)
+        self.assertEqual('oscillation, 8 positions back and forth at rest', self.check(rows))
+        # and down 12 and up 8
+        rows = self.ms([2000] * 510 + [1988] * 100 + [1996] * 100)
+        self.assertEqual('oscillation, 8 positions back and forth at rest', self.check(rows))
+
+    def test_old_samples_are_not_in_the_window(self):
+        swing = [2000 + 10 * math.sin(2 * math.pi * 10 * i / 1000) for i in range(300)]  # t 0.6 to 0.9 after the grace
+        rows = self.ms([2000] * 600 + swing + [2000] * 1200)
+        self.assertIsNotNone(self.check(rows[:900]), 'the swing is in the window')
+        self.assertIsNone(self.check(rows), 'more than a second ago')
+        self.assertIsNone(self.check(rows[:2000]), 'the swing ended 1.1 s before this sample')
+        narrow = AbortLimits(oscillation_window=0.2)
+        self.assertIsNone(self.check(rows[:1300], limits=narrow), 'a window of 0.2 s holds a still position only')
+        self.assertIsNotNone(self.check(rows[:1300]), 'the default window still sees the swing')
+        self.assertEqual(1.0, AbortLimits().oscillation_window)
+
+    def test_the_streaming_case_has_no_oscillation_rule(self):
+        rows = self.ms([2000 + 10 * math.sin(2 * math.pi * 10 * i / 1000) for i in range(1500)])
+        self.assertIsNone(self.check(rows, streaming=True))
+        self.assertIsNotNone(self.check(rows))
+
+    def test_the_oscillation_rule_is_cheap(self):
+        # the session calls it every 5 samples with all the samples of the trial, up to 15,000 of them
+        rows = self.ms([2000 + (i % 3) for i in range(15000)])
+        began = time.perf_counter()
+        for _ in range(100):
+            self.check(rows)
+        self.assertLess(time.perf_counter() - began, 0.5, 'it looks at the last second only')
 
     def test_pwm_stuck_at_the_clamp(self):
         rows = samples([2000] * 100, pwm=-650)
@@ -375,11 +476,22 @@ class ChoiceTests(unittest.TestCase):
             pwm_slope=None, flags=tuple(flags), warnings=(), aborted=aborted, temperature_start=30, temperature_end=30,
             voltage_min=11.8)
 
+    def test_a_trial_with_only_the_pwm_noise_warning_passes(self):
+        flags, warnings = evaluate(rest(pwm_std=6.0), [step()], rest())
+        result = self.trial(flags)._replace(warnings=tuple(warnings))
+        self.assertEqual(('pwm_noise',), result.warnings)
+        self.assertTrue(result.passed)
+        self.assertFalse(result.sluggish)
+        # a sweep over such trials has no knee
+        recommended, knee = choose_p([(1500, result.passed), (1950, result.passed)], 1.3)
+        self.assertIsNone(knee)
+        self.assertEqual(1500, recommended)
+
     def test_a_trial_that_only_settles_too_slowly_is_sluggish(self):
         self.assertTrue(self.trial(['settle']).sluggish)
         self.assertTrue(self.trial(['stuck']).sluggish)
         self.assertFalse(self.trial(['overshoot', 'settle']).sluggish, 'it overshoots as well')
-        self.assertFalse(self.trial(['aborted'], aborted='oscillation, 8 positions peak to peak at rest').sluggish)
+        self.assertFalse(self.trial(['aborted'], aborted='oscillation, 8 positions back and forth at rest').sluggish)
         self.assertFalse(self.trial().sluggish, 'it passed')
 
     def test_d_grid(self):
@@ -388,6 +500,67 @@ class ChoiceTests(unittest.TestCase):
         self.assertEqual([0, 250, 400, 640, 1020], d_grid(settings, 0))
         self.assertEqual([500], d_grid(settings._replace(tune_d=False), 500))
         self.assertEqual([400, 0], d_grid(settings._replace(d_values=(400, 0, 400)), 500), 'as given, in order')
+
+    def test_the_default_d_grid_ends_at_1640(self):
+        self.assertEqual(2000, tune_servo_gains.DEFAULT_D_MAX)
+        self.assertEqual(tune_servo_gains.DEFAULT_D_MAX, Settings().d_max)
+        self.assertEqual([0, 250, 400, 640, 1020, 1640], d_grid(Settings(), 0))
+        self.assertEqual([0, 250, 400, 550, 640, 1020, 1640], d_grid(Settings(), 550), 'the yaml D joins the ladder')
+        self.assertEqual([0, 250, 400, 640, 1020, 1640], d_grid(Settings(), 640), 'already on it')
+        self.assertEqual([0, 250, 400, 640, 1020, 1640, 2500], d_grid(Settings(), 2500), 'a yaml D above the cap')
+        # --d-max raises it up to the register
+        raised = d_grid(Settings(d_max=cfg.MAX_GAIN), 0)
+        self.assertEqual([0, 250, 400, 640, 1020, 1640, 2620, 4190, 6710, 10740], raised)
+        # --d-values is not limited by the default
+        self.assertEqual([0, 5000, cfg.MAX_GAIN], d_grid(Settings(d_values=(0, 5000, cfg.MAX_GAIN)), 0))
+
+    def test_the_d_max_option_defaults_to_the_constant(self):
+        captured = []
+
+        def fake_robot():
+            raise tune_servo_gains.DynamixelError('no robot in the tests')
+
+        def capture(d_start, d_factor, d_max):
+            captured.append(d_max)
+            return [0]
+
+        with mock.patch.object(tune_servo_gains, 'get_robot', fake_robot),                 mock.patch.object(tune_servo_gains, 'd_ladder', capture),                 mock.patch('builtins.print'):
+            tune_servo_gains.main(['--joint', '3'])
+            tune_servo_gains.main(['--joint', '3', '--d-max', '16383'])
+        self.assertEqual([tune_servo_gains.DEFAULT_D_MAX, cfg.MAX_GAIN], captured)
+
+    def test_the_max_step_option(self):
+        def no_robot():
+            raise AssertionError('the robot was touched')
+
+        with mock.patch.object(tune_servo_gains, 'get_robot', no_robot), mock.patch('builtins.print') as shown:
+            self.assertEqual(1, tune_servo_gains.main(['--joint', '1', '--max-step', '5']))
+            self.assertEqual(1, tune_servo_gains.main(['--joint', '1', '--max-step', '-20']))
+        self.assertIn('--max-step', ' '.join(str(call.args[0]) for call in shown.call_args_list))
+
+        def no_robot_found():
+            raise tune_servo_gains.DynamixelError('no robot in the tests')
+
+        # 8 is the smallest step and is accepted: main gets as far as the robot
+        with mock.patch.object(tune_servo_gains, 'get_robot', no_robot_found), mock.patch('builtins.print'):
+            self.assertEqual(1, tune_servo_gains.main(['--joint', '1', '--max-step', '8']))
+
+    def test_the_max_step_option_defaults_to_none(self):
+        captured = []
+        original = argparse.ArgumentParser.parse_args
+
+        def capture(parser, argv=None, namespace=None):
+            args = original(parser, argv, namespace)
+            captured.append(args)
+            return args
+
+        def no_robot_found():
+            raise tune_servo_gains.DynamixelError('no robot in the tests')
+
+        with mock.patch.object(argparse.ArgumentParser, 'parse_args', capture),                 mock.patch.object(tune_servo_gains, 'get_robot', no_robot_found), mock.patch('builtins.print'):
+            tune_servo_gains.main(['--joint', '3'])
+            tune_servo_gains.main(['--joint', '3', '--max-step', '20'])
+        self.assertEqual([None, 20], [args.max_step for args in captured])
 
     @staticmethod
     def pose_result(number, recommended_by_d):
@@ -670,6 +843,66 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(len(trials), len(rows))
         self.assertTrue(rows[1]['aborted'])
 
+    def test_the_arm_gets_time_to_settle_after_an_abort(self):
+        self.assertEqual(1.5, tune_servo_gains.ABORT_SETTLE)
+        session, robot, sim, _, _ = self.session(resonance_above=1800, resonance_slope=0.8)
+        sleeps = []
+        original = session.sleep
+
+        def recording(seconds):
+            sleeps.append((seconds, robot.servo_handler.gains[3]))
+            original(seconds)
+        session.sleep = recording
+        session.run([parse_pose('elbow_out')])
+        settles = [gains for seconds, gains in sleeps if seconds == tune_servo_gains.ABORT_SETTLE]
+        self.assertEqual([(1500, 0, 0)], settles, 'once, after the abort, with the yaml gains already back')
+        self.assertEqual(1, [seconds for seconds, _ in sleeps].count(tune_servo_gains.ABORT_SETTLE))
+
+    def test_abort_restores_writes_the_goal_and_then_waits(self):
+        session, robot, sim, _, _ = self.session()
+        order = []
+        with mock.patch.object(session, 'restore', side_effect=lambda: order.append('restore') or True),                 mock.patch.object(session, 'write_goal', side_effect=lambda goal: order.append('goal') or goal),                 mock.patch.object(session, 'sleep', side_effect=lambda seconds: order.append(('sleep', seconds))),                 mock.patch('builtins.print'):
+            self.assertTrue(session.abort('oscillation'))
+        self.assertEqual(['restore', 'goal', ('sleep', tune_servo_gains.ABORT_SETTLE)], order)
+
+    def steps_of(self, joint, settings=None, load=50000.0):
+        """the step sizes the session asks step_size for, and the step of the one trial it runs"""
+        settings = settings or Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0,
+                                        max_factor=1.0, tune_d=False)
+        session, robot, sim, _, _ = self.session(joint=joint, load=load, settings=settings)
+        with mock.patch.object(tune_servo_gains, 'step_size', wraps=step_size) as sized:
+            results = session.run([parse_pose('elbow_out')])
+        return session, sized, results[0].trials
+
+    def test_the_base_and_the_shoulder_take_smaller_steps(self):
+        self.assertEqual({1: 15, 2: 15}, tune_servo_gains.MAX_STEP)
+        self.assertEqual(60, tune_servo_gains.DEFAULT_MAX_STEP)
+        self.assertIsNone(Settings().max_step)
+        for joint in (1, 2):
+            session, sized, trials = self.steps_of(joint, load=0.0)
+            self.assertEqual(15, session.max_step)
+            self.assertTrue(sized.called)
+            self.assertEqual({15}, {call.kwargs['maximum'] for call in sized.call_args_list})
+            self.assertTrue(trials)
+            self.assertLessEqual(max(t.step for t in trials), 15)
+            self.assertEqual(15, trials[0].step, 'the cap is what limits it at these gains')
+
+    def test_the_other_joints_still_step_by_60(self):
+        for joint in (4, 6):
+            session, sized, trials = self.steps_of(joint, load=0.0)
+            self.assertEqual(60, session.max_step)
+            self.assertEqual({60}, {call.kwargs['maximum'] for call in sized.call_args_list})
+            self.assertEqual(60, trials[0].step)
+
+    def test_max_step_overrides_the_table(self):
+        settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, max_factor=1.0,
+                            tune_d=False, max_step=30)
+        for joint in (1, 6):
+            session, sized, trials = self.steps_of(joint, settings=settings, load=0.0)
+            self.assertEqual(30, session.max_step)
+            self.assertEqual({30}, {call.kwargs['maximum'] for call in sized.call_args_list})
+            self.assertEqual(30, trials[0].step)
+
     def test_a_failing_yaml_gain_is_swept_down(self):
         session, robot, sim, sample_file, _ = self.session(resonance_above=1300, resonance_slope=0.25, writers=True)
         results = session.run([parse_pose('elbow_out')])
@@ -759,17 +992,32 @@ class SessionTests(unittest.TestCase):
         order = [(int(row['d']), int(row['pose'])) for row in rows if row['phase'] != 'd']
         self.assertEqual([(0, 1), (0, 2), (400, 1), (400, 2), (800, 1), (800, 2)], list(dict.fromkeys(order)))
 
-    def test_d_that_adds_pwm_noise_ends_the_grid(self):
-        session, robot, sim, _, _ = self.session(resonance_above=2000, settings=self.grid_settings())
-        sim.NOISE_PER_D = 0.05  # D 250 is already noisy at every P
+    def test_d_that_adds_pwm_noise_is_a_warning_and_is_held_back(self):
+        # until 13 November 2026 the noise failed the trial: D 250 was already noisy at every P, so no P passed there
+        # and the grid ended. Now the trials pass with the warning, damping raises the knee as it would without the
+        # noise, and the comparison of the candidates is what holds the noisier D gains back
+        session, robot, sim, _, trial_file = self.session(resonance_above=2000, writers=True,
+                                                          settings=self.grid_settings())
+        sim.NOISE_PER_D = 0.05
         results = session.run([parse_pose('elbow_out'), parse_pose('low')])
-        # the ladder goes on to 640, but two D gains in a row without a passing P end it
-        self.assertEqual([0, 250, 400], swept_d_values(results))
-        self.assertEqual([1650, None, None], [joint_p_at(results, d) for d in (0, 250, 400)])
+        # D 250, 400 and 640 pass up to the top of the sweep: two D gains in a row that don't raise the P end the grid
+        self.assertEqual([0, 250, 400, 640], swept_d_values(results))
+        self.assertEqual([1650, 1950, 1950, 1950], [joint_p_at(results, d) for d in (0, 250, 400, 640)])
         for r in results:
-            self.assertTrue(all('pwm_noise' in t.flags for t in r.trials if t.d > 0))
-            self.assertFalse(r.d_tested, 'a single candidate is not compared')
-        self.assertEqual((1650, 0), recommend(results))
+            noisy = [t for t in r.trials if t.d > 0]
+            self.assertTrue(noisy)
+            self.assertTrue(all(t.passed and t.flags == () for t in noisy), 'the noise alone fails nothing')
+            self.assertTrue(all('pwm_noise' in t.warnings for t in noisy))
+            self.assertTrue(all(t.warnings == () for t in r.trials if t.d == 0))
+            self.assertEqual(Sweep(None, 1950, 2540), r.sweeps[250], 'no knee')
+            self.assertTrue(r.d_tested)
+            self.assertEqual(250, r.recommended_d, 'the larger D gains add noise and gain nothing')
+        self.assertEqual([250, 400, 640], d_candidates(results))
+        self.assertEqual((1950, 250), recommend(results))
+        rows = list(csv.DictReader(io.StringIO(trial_file.getvalue()), fieldnames=TRIAL_FIELDS))
+        noisy_rows = [row for row in rows if row['phase'] != 'd' and int(row['d']) > 0]
+        self.assertTrue(noisy_rows)
+        self.assertTrue(all(row['flags'] == '' and row['warnings'] == 'pwm_noise' for row in noisy_rows))
 
     def test_damping_is_chosen_for_the_friction_band_it_lands_in(self):
         # an unloaded roll like joint 6: nothing overshoots and every D passes up to the top of the sweep, so the
@@ -877,3 +1125,26 @@ class SessionTests(unittest.TestCase):
         session, robot, sim, _, _ = self.session()
         results = session.run([parse_pose('90,0,0,0,0,0'), parse_pose('elbow_out')])
         self.assertEqual(1, len(results))
+
+
+class FinishTests(unittest.TestCase):
+
+    def test_a_restored_servo_lets_the_arm_lower_itself(self):
+        robot = FakeRobot([0, pi / 2, 0.4, 0.8, 0, 0, 0])
+        with mock.patch.object(tune_servo_gains.record_static_load, 'lower_and_disable_torque') as lower, \
+                mock.patch.object(tune_servo_gains.record_static_load, 'disable_torque_on_request') as prompt:
+            tune_servo_gains.finish(robot, True)
+        lower.assert_called_once_with(robot)
+        prompt.assert_not_called()
+
+    def test_a_servo_without_its_yaml_gains_gets_the_prompt_and_no_move(self):
+        robot = FakeRobot([0, pi / 2, 0.4, 0.8, 0, 0, 0])
+        with mock.patch.object(tune_servo_gains.record_static_load, 'lower_and_disable_torque') as lower, \
+                mock.patch.object(tune_servo_gains.record_static_load, 'disable_torque_on_request') as prompt, \
+                mock.patch('builtins.input', return_value='') as read, mock.patch('builtins.print') as shown:
+            tune_servo_gains.finish(robot, False)
+        lower.assert_not_called()
+        prompt.assert_called_once_with(robot)
+        read.assert_not_called()  # the prompt itself is patched out
+        self.assertEqual([], robot.moves)
+        self.assertIn('not lowered', shown.call_args_list[0].args[0])
