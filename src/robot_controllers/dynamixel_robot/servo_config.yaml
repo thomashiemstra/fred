@@ -46,10 +46,16 @@ servos:
     angles: [0, 180]
     offset: 346  # measured in the jig at 90 degrees, raw 2394
     profile: {velocity: 250, acceleration: 100}
-    # 17 November 2026 (run tune_joint1_20261117_2150): with the arm out (pose 90 60 0 0 0 0) the joint oscillated after
-    # a step at P 1500 and passed at 1150, at D 0, 250 and 640 alike; with the arm folded it rang from 1950. D makes no
-    # difference on this belt joint
-    pid: {p: 980, i: 0, d: 0}
+    # 17 November 2026, before the belt was tightened (runs tune_joint1_20261117_2150 and _2239): D 0, 250 and 640 gave
+    # the same result, D makes no difference on this belt joint. With steps of 15 positions the joint rang from P 2800
+    # with the arm folded (pose 90 90 0 0 0 0) and from 2150 with the arm out (pose 90 60 0 0 0 0), and overshot from
+    # 1270 at full reach (pose 90 25 65 0 90 0), so P was 980.
+    # After the belt was tightened that evening (run tune_joint1_20261117_2255): no ringing up to 2800 with the arm
+    # folded, ringing from 2800 at the other two poses, and 2150 passed at all three (1.9 positions of overshoot at
+    # full reach, the limit is 2). The friction went up: the drive the joint rests at without moving rose from 10 to
+    # 20-27 pwm units, so at P 980 it stopped 3 to 7 positions short. P 2000 depends on the belt tension: with a slack
+    # belt it is above the 1270 at which full reach overshot, so check the belt first when the base rings
+    pid: {p: 2000, i: 0, d: 0}
   2:
     name: shoulder
     model: XM540-W270
@@ -61,7 +67,10 @@ servos:
     profile: {velocity: 500, acceleration: 500}
     # 17 November 2026 (run tune_joint2_20261117_2158): steps overshoot from P 3080 with the arm at reach and with the
     # elbow out, not up to 4000 with the arm lowered, at D 250, 640 and 1640 alike; P 2000 passed at all three poses
-    pid: {p: 2000, i: 0, d: 250}
+    # After the belt was tightened that evening (run tune_joint2_20261117_2259, D 250 only): P 3080 passed at all
+    # three poses and 3820 overshot with the elbow out only (2.9 positions, the limit is 2); the friction and the
+    # resting error did not change. 0.65 times 3820 is 2480, rounded up to 2500
+    pid: {p: 2500, i: 0, d: 250}
   3:
     name: elbow
     model: XM430-W350
