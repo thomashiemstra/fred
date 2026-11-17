@@ -33,8 +33,8 @@
 # logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure
 # their temperature inside, the plastic around them is cooler. The servos shut down by themselves at their hardware
 # temperature limit, 80C (70C for the gripper), and then just go limp.
-temperature_warning: 55  # degrees celsius
-temperature_limit: 60  # degrees celsius
+temperature_warning: 60  # degrees celsius
+temperature_limit: 65  # degrees celsius
 
 servos:
   1:
