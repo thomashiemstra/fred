@@ -46,7 +46,10 @@ servos:
     angles: [0, 180]
     offset: 346  # measured in the jig at 90 degrees, raw 2394
     profile: {velocity: 250, acceleration: 100}
-    pid: {p: 1500, i: 0, d: 0}
+    # 17 November 2026 (run tune_joint1_20261117_2150): with the arm out (pose 90 60 0 0 0 0) the joint oscillated after
+    # a step at P 1500 and passed at 1150, at D 0, 250 and 640 alike; with the arm folded it rang from 1950. D makes no
+    # difference on this belt joint
+    pid: {p: 980, i: 0, d: 0}
   2:
     name: shoulder
     model: XM540-W270
@@ -56,7 +59,9 @@ servos:
     angles: [0, 180]
     offset: -550  # measured in the jig at 0 degrees, raw 474
     profile: {velocity: 500, acceleration: 500}
-    pid: {p: 1400, i: 0, d: 250}
+    # 17 November 2026 (run tune_joint2_20261117_2158): steps overshoot from P 3080 with the arm at reach and with the
+    # elbow out, not up to 4000 with the arm lowered, at D 250, 640 and 1640 alike; P 2000 passed at all three poses
+    pid: {p: 2000, i: 0, d: 250}
   3:
     name: elbow
     model: XM430-W350
@@ -65,27 +70,35 @@ servos:
     positions: [3072, 1024]
     angles: [-90, 90]
     profile: {velocity: 150, acceleration: 50}
-    pid: {p: 3000, i: 0, d: 350}
+    # 17 November 2026, with the heavier wrist: 8 position steps overshoot by more than 2 positions from P 7240,
+    # at D 350, 640 and 1020 alike
+    pid: {p: 4710, i: 0, d: 350}
   4:
     name: wrist 1
-    model: XC430-W240
+    model: XC430-W150
     bus: ttl
     mode: position
     positions: [0, 4096]
     angles: [-180, 180]
     offset: 3  # measured in the jig at 0 degrees, raw 2051
     profile: {velocity: 300, acceleration: 100}
-    pid: {p: 1100, i: 0, d: 550}
+    # 17 November 2026, new bearing holder: steps overshoot from P 920 at D 400-550, from 1200 at D 1020
+    pid: {p: 780, i: 0, d: 1020}
+  # since November 2026 the servo sits directly on the wrist joint instead of driving it through a belt, which reversed
+  # its direction (hence the reversed positions). No offset, the horn is mounted at its zero. The offset has not been
+  # checked in the jig since. The pid gains tuned with the belt (P 3300, D 500) were far too high for the direct drive:
+  # on 17 November 2026 (run tune_joint5_20261117_1739) the joint oscillated at P 3300 with the gripper bent up and
+  # still rang at P 1500. A second run from P 900 (tune_joint5_20261117_1744, gripper bent up, the pose with the least
+  # damping) passed at 900 and overshot and rang at 1170 at D 400, 640 and 1020 alike, so P 760 with D 640
   5:
     name: wrist 2
     model: XC430-W240
     bus: ttl
     mode: position
-    positions: [0, 4096]
+    positions: [4096, 0]
     angles: [-180, 180]
-    offset: 55  # measured in the jig at 0 degrees, raw 2103
     profile: {velocity: 300, acceleration: 100}
-    pid: {p: 3300, i: 0, d: 500}
+    pid: {p: 760, i: 0, d: 640}
   # an XC330-T288-T on the 12 V bus since 11 November 2026 (rated 6.5-12 V, current limit 910 mA, 1 mA per unit,
   # 1.0 N.m at 12 V), bolted to servo 5. Before it an XL330-M288 on a 5 V step-down converter, which switched off when
   # the servo braked (its energy pushed the 5 V line up) and later got 11.7 V from a mis-set converter, which broke its
@@ -93,6 +106,17 @@ servos:
   # profile are those of the XL330 until calibration/wrist_roll_limits.py has measured the XC330. The gains: with the
   # P of 1200 it came with and D 0 it swung +-115 positions around every target without stopping (11 November); without
   # D it already oscillates from P 600, with D 400 it rests within 3 positions of the target up to P 800 at 5 mA.
+  # Tuned on the arm on 17 November 2026 with tune_servo_gains (run tune_joint6_20261117_1726): the P at which a step
+  # starts to overshoot rises with D (about 350 at D 250-400, 460 at D 640, 770 at D 1020, 1300 at D 1640, the largest
+  # D tried), so P 840 with D 1640; the old 600 / 400 was above its knee.
+  # Later that day the bearing in front of the servo was changed: the current the joint needs to keep turning went from
+  # 24 mA to 34 mA with a first new holder, 16-17 mA without the bearing and 21 mA with the holder that stayed (runs
+  # tune_joint6_20261117_1959, _2006 and _2127). With less friction the knee at D 1640 came down to 1100 in the last
+  # two, so P 720.
+  # A run with more D (tune_joint6_20261117_2142) then put the knee at 2070 with D 2620: P 1220 passed there with one
+  # position of overshoot, no chatter at rest, and moves ending 1 to 3 positions off instead of 5 to 7; the drive is
+  # noisier while moving (pwm std about 38 against 26 at D 1640). So P 1220 with D 2620, above the default 2000 cap of
+  # the D grid of tune_servo_gains.
   # The positions have to be calibrated for the new mounting
   6:
     name: wrist 3
@@ -103,7 +127,7 @@ servos:
     angles: [-180, 180]
     goal_current: 300
     profile: {velocity: 200, acceleration: 50}
-    pid: {p: 600, i: 0, d: 400}
+    pid: {p: 1220, i: 0, d: 2620}
   # an XC330-T288-T on the 12 V bus since 11 November 2026, before it an XL330-M288.
   # NOT CALIBRATED: the positions are still those of the XL330 and the new servo sits far outside them (3999 on 11
   # November), so don't open or close the gripper until its open and closed positions are measured.
@@ -120,4 +144,4 @@ servos:
     states: [0, 100]
     goal_current: 150
     profile: {velocity: 50, acceleration: 50}
-    pid: {p: 600, i: 0, d: 400}  # those of servo 6, see there
+    pid: {p: 600, i: 0, d: 400}  # the bench gains of servo 6, not tuned on the arm
