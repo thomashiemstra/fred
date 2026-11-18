@@ -12,8 +12,13 @@
 #   states: [first, last]       the gripper states at those positions
 #   offset                      added to the position, to calibrate the zero point (optional, default 0)
 #   goal_current                the maximum current in mA in current_based_position mode (optional)
-#   profile                     velocity and acceleration of the movement profile of the servo
-#   pid                         the gains of the position controller of the servo
+#   profile                     velocity and acceleration of the movement profile of the servo. With the optional
+#                               move_time (ms) the servo uses the time-based profile: every streamed goal step
+#                               is interpolated over that time, and velocity and acceleration then only limit a
+#                               goal that is far away. The drive mode of the servo is set to match when the robot
+#                               starts, which needs the torque of that servo off
+#   pid                         the gains of the position controller of the servo, with the optional velocity
+#                               feedforward gain ff1 (calibration/tune_servo_gains.py --ff measures it)
 #   compensation                the static load compensation of the joint (optional, joints 2-5), the positions
 #                               added to every target for gravity at the commanded pose, fitted by
 #                               calibration/fit_static_load.py from the data of calibration/record_static_load.py,
@@ -45,7 +50,7 @@ servos:
     positions: [1024, 3072]
     angles: [0, 180]
     offset: 346  # measured in the jig at 90 degrees, raw 2394
-    profile: {velocity: 250, acceleration: 100}
+    profile: {velocity: 250, acceleration: 100, move_time: 15}
     # 17 November 2026, before the belt was tightened (runs tune_joint1_20261117_2150 and _2239): D 0, 250 and 640 gave
     # the same result, D makes no difference on this belt joint. With steps of 15 positions the joint rang from P 2800
     # with the arm folded (pose 90 90 0 0 0 0) and from 2150 with the arm out (pose 90 60 0 0 0 0), and overshot from
@@ -64,7 +69,7 @@ servos:
     positions: [1024, 3072]
     angles: [0, 180]
     offset: -550  # measured in the jig at 0 degrees, raw 474
-    profile: {velocity: 500, acceleration: 500}
+    profile: {velocity: 500, acceleration: 500, move_time: 15}
     # 17 November 2026 (run tune_joint2_20261117_2158): steps overshoot from P 3080 with the arm at reach and with the
     # elbow out, not up to 4000 with the arm lowered, at D 250, 640 and 1640 alike; P 2000 passed at all three poses
     # After the belt was tightened that evening (run tune_joint2_20261117_2259, D 250 only): P 3080 passed at all
@@ -78,7 +83,7 @@ servos:
     mode: position
     positions: [3072, 1024]
     angles: [-90, 90]
-    profile: {velocity: 150, acceleration: 50}
+    profile: {velocity: 150, acceleration: 50, move_time: 15}
     # 17 November 2026, with the heavier wrist: 8 position steps overshoot by more than 2 positions from P 7240,
     # at D 350, 640 and 1020 alike
     pid: {p: 4710, i: 0, d: 350}
@@ -90,8 +95,12 @@ servos:
     positions: [0, 4096]
     angles: [-180, 180]
     offset: 3  # measured in the jig at 0 degrees, raw 2051
-    profile: {velocity: 300, acceleration: 100}
-    # 17 November 2026, new bearing holder: steps overshoot from P 920 at D 400-550, from 1200 at D 1020
+    profile: {velocity: 300, acceleration: 100, move_time: 15}
+    # 17 November 2026, new bearing holder: steps overshoot from P 920 at D 400-550, from 1200 at D 1020.
+    # 18 November 2026, with the time-based profile (runs tune_joint4_20261118_1356 and _1418): the same limits, P 1010
+    # passes at D 1020 with the overshoot exactly at its limit and D 1640 rings, so P 780 and D 1020 stay.
+    # No feedforward gain (ff1) on any joint: the servo applies it as a pulse per position of its trajectory, which
+    # made the drive very noisy, see Handover Velocity Lead on the PC.md for the measurements and the plan
     pid: {p: 780, i: 0, d: 1020}
   # since November 2026 the servo sits directly on the wrist joint instead of driving it through a belt, which reversed
   # its direction (hence the reversed positions). No offset, the horn is mounted at its zero. The offset has not been
@@ -106,7 +115,7 @@ servos:
     mode: position
     positions: [4096, 0]
     angles: [-180, 180]
-    profile: {velocity: 300, acceleration: 100}
+    profile: {velocity: 300, acceleration: 100, move_time: 15}
     pid: {p: 760, i: 0, d: 640}
   # an XC330-T288-T on the 12 V bus since 11 November 2026 (rated 6.5-12 V, current limit 910 mA, 1 mA per unit,
   # 1.0 N.m at 12 V), bolted to servo 5. Before it an XL330-M288 on a 5 V step-down converter, which switched off when
@@ -126,17 +135,23 @@ servos:
   # position of overshoot, no chatter at rest, and moves ending 1 to 3 positions off instead of 5 to 7; the drive is
   # noisier while moving (pwm std about 38 against 26 at D 1640). So P 1220 with D 2620, above the default 2000 cap of
   # the D grid of tune_servo_gains.
+  # 18 November 2026: position mode like the other arm joints, only the gripper stays current-based. The output of
+  # the position controller is a pwm duty now and no longer a current, so the gains above (P 1220, D 2620) don't
+  # carry over, and nothing limits the torque of the roll any more (the goal current of 300 mA did).
+  # Tuned in position mode that day (run tune_joint6_20261118_1720, from P 400): 60 position steps overshoot by at
+  # most 1 position at every P up to 1490, the largest tried, at D 0, 250 and 400 alike, at both poses; the joint
+  # rests within 1 position at any P, so a higher P has nothing to win. In this mode the motor damps itself, where in
+  # current-based mode it oscillated without D from P 600. So P 1150 without D.
   # The positions have to be calibrated for the new mounting
   6:
     name: wrist 3
     model: XC330-T288-T
     bus: ttl
-    mode: current_based_position
+    mode: position
     positions: [0, 4096]
     angles: [-180, 180]
-    goal_current: 300
-    profile: {velocity: 200, acceleration: 50}
-    pid: {p: 1220, i: 0, d: 2620}
+    profile: {velocity: 200, acceleration: 50, move_time: 15}
+    pid: {p: 1150, i: 0, d: 0}
   # an XC330-T288-T on the 12 V bus since 11 November 2026, before it an XL330-M288.
   # NOT CALIBRATED: the positions are still those of the XL330 and the new servo sits far outside them (3999 on 11
   # November), so don't open or close the gripper until its open and closed positions are measured.
