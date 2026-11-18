@@ -226,16 +226,15 @@ class XboxRobotController:
             self.open_gripper()
 
         pose_update_sleep_time = self.pose_updater.dt
-        next_hardware_check = perf_counter() + HARDWARE_CHECK_INTERVAL
         previous_step_time = perf_counter()
+        next_hardware_check = previous_step_time + HARDWARE_CHECK_INTERVAL
+        # the start of the next pass, like execute_move the passes follow the clock instead of sleeping a fixed time
+        # after the work, so the goals reach the servos evenly spaced whatever a pass costs
+        next_pass = previous_step_time
 
         while True:
             if self.is_done():
                 break
-
-            if perf_counter() > next_hardware_check:
-                self.check_hardware_errors()
-                next_hardware_check = perf_counter() + HARDWARE_CHECK_INTERVAL
 
             self.__handle_commands()
 
@@ -246,11 +245,24 @@ class XboxRobotController:
                                                                           self.center, dt=step_time)
             previous_step_time = now
             self._take_step(new_pose, step_time)
-            recommended_time, time_taken = self._send_current_pose()
+            self._send_current_pose()
+
+            # after the send: reading the bus takes several ms, a failed read 10 to 20 ms, which must come out of the
+            # waiting time and not delay the goal. a hardware error raises, so at most this pass sent its goal
+            if perf_counter() > next_hardware_check:
+                self.check_hardware_errors()
+                next_hardware_check = perf_counter() + HARDWARE_CHECK_INTERVAL
+
             self.handle_buttons()
 
-            time_to_sleep = np.maximum(np.maximum(recommended_time, pose_update_sleep_time) - time_taken, 0)
-            sleep(time_to_sleep)
+            next_pass += pose_update_sleep_time
+            time_to_sleep = next_pass - perf_counter()
+            if time_to_sleep > 0:
+                sleep(time_to_sleep)
+            else:
+                # a pass that overran doesn't make the next ones hurry, the step of the gamepad covers the time
+                # that really passed
+                next_pass = perf_counter()
 
         self.stop_robot()
 
@@ -279,16 +291,15 @@ class XboxRobotController:
         # a pose some other part set (a move, a reset) was sent through the inverse kinematics
         return self.robot.pose_to_angles(self.current_pose)
 
-    def _send_current_pose(self) -> tuple[float, float]:
+    def _send_current_pose(self) -> None:
         """
         sends the angles of the last step, which can be between the two wrist solutions while the wrist turns over;
         they are within the joint speed limit for the time of the step, so there is no extra time to wait for
-        :return: the recommended wait time and the time sending took, in seconds
         """
         if self._step is None or self._step[0] is not self.current_pose:
-            return self.robot.move_to_pose(self.current_pose)
-        time_taken = self.robot.move_servos(self._step[1])
-        return 0.0, time_taken or 0.0
+            self.robot.move_to_pose(self.current_pose)
+            return
+        self.robot.move_servos(self._step[1])
 
     def _choose_step(self, new_pose: Pose, step_time: float) -> tuple[Pose, np.ndarray]:
         """

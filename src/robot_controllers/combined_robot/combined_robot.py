@@ -46,7 +46,7 @@ class CombinedRobot(AbstractRobotController):
         self.dynamixel_robot.disable_servos()
         self.simulated_robot.disable_servos()
 
-    def move_to_pose(self, pose: Pose) -> tuple[float, float]:
+    def move_to_pose(self, pose: Pose) -> float | None:
         self.simulated_robot.move_to_pose(pose)
         return self.dynamixel_robot.move_to_pose(pose)
 

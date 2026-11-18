@@ -11,7 +11,7 @@ from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src import global_constants
-from src.kinematics.kinematics import forward_kinematics
+from src.kinematics.kinematics import forward_kinematics, inverse_kinematics
 
 ACCESS_ERROR = 0x07
 # the tests use their own servo configuration, so recalibrating the robot doesn't affect them
@@ -110,7 +110,8 @@ class FakeBus:
     def write1ByteTxRx(self, port, servo_id, address, value):
         if servo_id in self.unresponsive:
             return dxl.COMM_RX_TIMEOUT, 0
-        if address == cfg.ADDR_OPERATING_MODE and self.torque(servo_id):
+        # both are in the eeprom, which is only written with the torque off
+        if address in (cfg.ADDR_OPERATING_MODE, cfg.ADDR_DRIVE_MODE) and self.torque(servo_id):
             return dxl.COMM_SUCCESS, ACCESS_ERROR
         self.memory[servo_id][address] = value
         return dxl.COMM_SUCCESS, 0
@@ -171,18 +172,33 @@ class TestDynamixelRobotController(unittest.TestCase):
         robot = self.make_robot(perform_safety_checks=False)
         self.assertIsNone(robot.get_current_angles())
 
-    def test_move_to_pose_refuses_while_the_current_angles_are_unknown(self):
+    def test_move_to_pose_returns_the_time_move_servos_took(self):
+        pose = forward_kinematics(self.robot.get_current_angles(), self.robot.robot_config)
+
+        with mock.patch.object(self.robot, 'move_servos', return_value=0.0123) as move_servos:
+            self.assertEqual(0.0123, self.robot.move_to_pose(pose))
+
+        np.testing.assert_allclose(inverse_kinematics(pose, self.robot.robot_config), move_servos.call_args.args[0])
+
+    def test_move_to_pose_sends_the_goals_of_the_pose(self):
+        pose = forward_kinematics(self.robot.get_current_angles(), self.robot.robot_config)
+        self.bus.packets.clear()
+
+        time_taken = self.robot.move_to_pose(pose)
+
+        self.assertGreaterEqual(time_taken, 0)
+        self.assertEqual([('sync_write', cfg.ADDR_GOAL_POSITION, [1, 2, 3, 4, 5, 6])], self.bus.packets)
+
+    def test_move_to_pose_does_not_need_to_know_the_current_angles(self):
         pose = forward_kinematics(self.robot.get_current_angles(), self.robot.robot_config)
         self.bus.unresponsive = {5}
         robot = self.make_robot(perform_safety_checks=False)
+        self.bus.packets.clear()
 
-        with self.assertRaises(DynamixelError):
-            robot.move_to_pose(pose)
+        robot.move_to_pose(pose)
 
-        # once the servos answer the current angles are read before moving
-        self.bus.unresponsive = set()
-        recommended_time, _ = robot.move_to_pose(pose)
-        self.assertGreaterEqual(recommended_time, 0)
+        # the goals are sent without reading the servos first
+        self.assertEqual([('sync_write', cfg.ADDR_GOAL_POSITION, [1, 2, 3, 4, 5, 6])], self.bus.packets)
 
     def test_gripper_position_is_none_when_the_servos_can_not_be_read(self):
         self.assertEqual(3, len(self.robot.get_current_gripper_position()))
@@ -545,6 +561,93 @@ class TestDynamixelRobotController(unittest.TestCase):
             self.robot._print_position_error()
         self.assertIn('2:0', printed.call_args.args[0])
         self.assertAlmostEqual(0.0, self.robot.get_current_angles()[2], places=3)
+
+    # time-based profile
+
+    def test_initialize_servos_sets_the_drive_mode_before_the_profile(self):
+        calls = mock.Mock()
+        names = ('set_control_mode', 'set_drive_mode', 'set_velocity_profile', 'set_pid', 'set_feedforward',
+                 'set_goal_current')
+        with mock.patch.multiple(self.robot, **{name: mock.DEFAULT for name in names}) as patched:
+            for name, method in patched.items():
+                method.return_value = True
+                calls.attach_mock(method, name)
+            self.robot.initialize_servos()
+        self.assertEqual([mock.call.set_control_mode(), mock.call.set_drive_mode(),
+                          mock.call.set_velocity_profile(), mock.call.set_pid(), mock.call.set_feedforward(),
+                          mock.call.set_goal_current()], calls.mock_calls)
+
+    def test_initialize_servos_fails_when_the_drive_mode_can_not_be_set(self):
+        with mock.patch.object(self.robot, 'set_drive_mode', return_value=False):
+            with self.assertRaises(DynamixelError):
+                self.robot.initialize_servos()
+            # without safety checks the robot is used anyway
+            self.robot.perform_safety_checks = False
+            self.robot.initialize_servos()
+
+    def test_a_time_based_servo_is_set_up_with_its_drive_mode_move_time_and_feedforward(self):
+        servo = self.servos[0]
+        servo.move_time, servo.ff1 = 15, 40
+        self.bus.packets.clear()
+        self.robot.initialize_servos()
+        self.assertEqual(cfg.DRIVE_MODE_TIME_BASED_PROFILE, self.bus.memory[1][cfg.ADDR_DRIVE_MODE])
+        self.assertEqual((0, 15), (self.bus.get(1, cfg.ADDR_PROFILE_ACCELERATION, 4),
+                                   self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4)))
+        self.assertEqual((40, 0), (self.bus.get(1, cfg.ADDR_FEEDFORWARD_1ST_GAIN, 2),
+                                   self.bus.get(1, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 2)))
+        # the other servos are untouched: velocity-based, no feedforward
+        self.assertEqual(0, self.bus.memory[2][cfg.ADDR_DRIVE_MODE])
+        self.assertEqual(self.servos[1].profile_velocity, self.bus.get(2, cfg.ADDR_PROFILE_VELOCITY, 4))
+        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [1, 2, 3, 4, 5, 6, 7])],
+                         self.bus.packets_to(cfg.ADDR_FEEDFORWARD_2ND_GAIN))
+
+    def test_the_drive_mode_is_not_changed_when_the_robot_starts_with_the_torque_on(self):
+        self.servos[0].move_time = 15
+        self.bus.memory[1][cfg.ADDR_TORQUE_ENABLE] = 1
+        with self.assertLogs('src.robot_controllers.dynamixel_robot.servo_handler', 'ERROR'):
+            self.assertFalse(self.robot.set_drive_mode())
+        self.assertEqual(0, self.bus.memory[1][cfg.ADDR_DRIVE_MODE])
+
+    def test_the_new_wrappers_are_reachable_through_the_combined_robot(self):
+        from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
+        combined = CombinedRobot.__new__(CombinedRobot)
+        combined.dynamixel_robot = self.robot
+        self.assertTrue(combined.set_drive_mode())
+        self.assertTrue(combined.set_feedforward())
+
+    def test_move_servos_writes_the_goals_before_the_recorder_reads(self):
+        packets_at_record = []
+        recorder = mock.Mock()
+        recorder.record.side_effect = lambda servos: packets_at_record.append(list(self.bus.packets))
+        self.robot.set_recorder(recorder)
+        self.bus.packets.clear()
+        self.robot.move_servos([0, 1.5, 1.5, 0.0, 0.5, -0.5, 1.0])
+        recorder.record.assert_called_once()
+        self.assertEqual([[('sync_write', cfg.ADDR_GOAL_POSITION, [1, 2, 3, 4, 5, 6]),
+                           ('sync_read', cfg.ADDR_PRESENT_POSITION, [1, 2, 3]),
+                           ('sync_read', cfg.ADDR_PRESENT_POSITION, [4, 5, 6])]], packets_at_record)
+
+    def test_move_servos_writes_the_goals_when_the_recorder_read_fails(self):
+        recorder = mock.Mock()
+        self.robot.set_recorder(recorder)
+        self.bus.unresponsive = {2}
+        self.bus.packets.clear()
+        with self.assertLogs(level='WARNING'):
+            self.robot.move_servos([0, 1.5, 1.5, 0.0, 0.5, -0.5, 1.0])
+        self.assertEqual(('sync_write', cfg.ADDR_GOAL_POSITION, [1, 2, 3, 4, 5, 6]), self.bus.packets[0])
+        recorder.record.assert_not_called()
+
+    def test_move_servos_times_the_goals_of_a_time_based_servo(self):
+        servo = self.servos[0]
+        servo.move_time = 15
+        self.robot.initialize_servos()
+        self.robot.move_servos([0, 1.5, 1.5, 0.0, 0.5, -0.5, 1.0])
+        first_time = self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4)
+        self.assertGreater(first_time, 15, 'the first goal is a full turn away')
+        self.robot.move_servos([0, 1.5, 1.5, 0.0, 0.5, -0.5, 1.0])
+        self.assertEqual((0, 15), (self.bus.get(1, cfg.ADDR_PROFILE_ACCELERATION, 4),
+                                   self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4)))
+        self.assertEqual(servo.target_position, self.bus.get(1, cfg.ADDR_GOAL_POSITION, 4))
 
 
 if __name__ == '__main__':

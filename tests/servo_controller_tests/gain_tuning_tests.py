@@ -1,6 +1,10 @@
 import argparse
+import contextlib
 import csv
 import io
+import itertools
+import os
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -14,12 +18,14 @@ from src.robot_controllers.dynamixel_robot.calibration import gain_tuning, tune_
 import math
 
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    AbortLimits, Criteria, RestMetrics, Sample, StepMetrics, abort_reason, choose_d, choose_p, d_ladder,
-    environmental_abort, evaluate, p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics, step_metrics,
-    step_size, tracking_metrics)
+    FF_CRUISE_HOLD, FF_RAMP, AbortLimits, Criteria, CruiseStatistics, LineFit, RestMetrics, Sample, StepMetrics,
+    SweepSample, abort_reason, choose_d, choose_p, clip_gain, cruise_statistics, d_ladder, environmental_abort,
+    evaluate, feedforward_change, ff_sweep, fit_line, lag_growth, p_values, p_values_down, pwm_clamp,
+    pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import (
-    SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep, TuningSession, compared_d, d_candidates,
-    d_grid, grid_is_done, joint_p_at, parse_pose, recommend, swept_d_values)
+    FF_SAMPLE_FIELDS, SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep, TuningSession, compared_d,
+    d_candidates, d_grid, d_progress, feedforward_refusal, grid_is_done, joint_knee_at, joint_p_at, knee_trial,
+    parse_pose, position_sign, recommend, swept_d_values)
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
 from tests.servo_controller_tests.static_load_scripts_tests import FakeRobot
@@ -410,6 +416,21 @@ class AbortTests(unittest.TestCase):
         self.assertIsNone(self.check(mixed), 'not the whole window')
 
 
+def knee_pose(number, by_d, phase='p'):
+    """a pose result from {d: (knee P, recommended P, overshoot of the knee trial, flags of the knee trial)}; the
+    knee trial fails with the flags, a trial of the comparison of the D candidates at the same P and D (the largest
+    overshoot there is) and a trial at another D with the same P come first and must not be taken for it"""
+    trials, sweeps = [], {}
+    for d, (knee_p, recommended, overshoot, flags) in by_d.items():
+        passing = ChoiceTests.trial(p=recommended or 100)._replace(d=d)
+        failing = ChoiceTests.trial(flags, p=knee_p)._replace(d=d, steps=(step(overshoot=overshoot),), phase=phase)
+        noise = ChoiceTests.trial(['overshoot'], p=knee_p)._replace(d=d, steps=(step(overshoot=50.0),), phase='d')
+        other_d = ChoiceTests.trial(['overshoot'], p=knee_p)._replace(d=d + 1, steps=(step(overshoot=60.0),))
+        trials += [noise, other_d, passing, failing]
+        sweeps[d] = Sweep(knee_p, recommended, recommended)
+    return PoseResult(number, None, None, trials, sweeps, None, False)
+
+
 class ChoiceTests(unittest.TestCase):
 
     def test_choose_p(self):
@@ -468,6 +489,132 @@ class ChoiceTests(unittest.TestCase):
         self.assertTrue(grid_is_done([None, 1430, 1430, 1430], 2))
         self.assertTrue(grid_is_done([None, None], 2), 'nothing passes at the first two D gains either')
         self.assertFalse(grid_is_done([1650, None, None], 3))
+
+    def test_no_knees_is_the_rule_of_the_p_of_the_joint_alone(self):
+        for joint_ps in ([1650], [1650, None, None], [1650, 1950, 1650, 1270], [1650, 1270, 1950], [1650, 1650, 1650],
+                         [None, 1430, 1430, 1430], [None, None]):
+            for patience in (1, 2, 3):
+                self.assertEqual(grid_is_done(joint_ps, patience),
+                                 grid_is_done(joint_ps, patience, [None] * len(joint_ps)), joint_ps)
+        with self.assertRaises(ValueError):
+            grid_is_done([1650, 1650], 2, [None])
+
+    def test_a_falling_overshoot_at_the_knee_is_progress(self):
+        # joint 4 on 18 November 2026: the knee stayed at P 1010 from D 250 to 640, the overshoot fell, the limit is 6
+        joint_ps = [510, 660, 660, 660]
+        knees = [(1, 780, 8.0), (1, 1010, 11.7), (1, 1010, 10.0), (1, 1010, 8.7)]
+        self.assertTrue(grid_is_done(joint_ps, 2), 'without the knees the grid stops after D 640')
+        self.assertFalse(grid_is_done(joint_ps, 2, knees))
+        self.assertEqual(['p', 'p', 'overshoot', 'overshoot'], [p.kind for p in d_progress(joint_ps, knees)])
+        self.assertEqual([None, None, 11.7, 10.0], [p.from_overshoot for p in d_progress(joint_ps, knees)])
+        # the same, with the overshoot falling less than the threshold
+        knees = [(1, 780, 8.0), (1, 1010, 11.7), (1, 1010, 11.5), (1, 1010, 11.3)]
+        self.assertTrue(grid_is_done(joint_ps, 2, knees))
+        self.assertEqual(['p', 'p', None, None], [p.kind for p in d_progress(joint_ps, knees)])
+        self.assertFalse(grid_is_done(joint_ps, 3, knees))
+
+    def test_the_drop_has_to_reach_the_larger_of_a_position_and_a_tenth(self):
+        def done(first, second):
+            return grid_is_done([660, 660], 1, [(1, 1010, first), (1, 1010, second)])
+
+        self.assertTrue(done(11.7, 11.0), '0.7 is below the 1.17 that a tenth of 11.7 asks')
+        self.assertTrue(done(11.7, 10.6))
+        self.assertFalse(done(11.7, 10.53), 'exactly a tenth')
+        self.assertFalse(done(11.7, 9.0))
+        self.assertTrue(done(5.0, 4.1), 'below a position')
+        self.assertFalse(done(5.0, 4.0), 'exactly a position')
+        self.assertTrue(done(5.0, 5.0))
+        self.assertTrue(done(5.0, 6.0), 'a rise')
+
+    def test_the_drop_is_measured_against_the_lowest_overshoot_so_far(self):
+        joint_ps = [660, 660, 660]
+        # 11.0 is 1.5 below the 12.5 before it, but not 1.17 below the 11.7 of the first D
+        self.assertTrue(grid_is_done(joint_ps, 2, [(1, 1010, 11.7), (1, 1010, 12.5), (1, 1010, 11.0)]))
+        self.assertTrue(grid_is_done(joint_ps, 2, [(1, 1010, 11.7), (1, 1010, 11.2), (1, 1010, 10.6)]),
+                        'every drop is below the threshold of the lowest so far')
+        self.assertFalse(grid_is_done(joint_ps, 2, [(1, 1010, 11.7), (1, 1010, 12.5), (1, 1010, 10.0)]))
+
+    def test_a_knee_at_another_p_or_pose_is_compared_from_then_on(self):
+        joint_ps = [660, 660, 660, 660]
+        # the first knee of a pose and P is no progress, it only starts the record
+        knees = [(1, 1010, 11.7), (1, 1300, 9.0), (1, 1300, 7.0), (1, 1300, 6.0)]
+        self.assertEqual(['p', None, 'overshoot', 'overshoot'], [p.kind for p in d_progress(joint_ps, knees)])
+        self.assertFalse(grid_is_done(joint_ps, 2, knees))
+        self.assertTrue(grid_is_done(joint_ps[:2], 1, knees[:2]))
+        knees = [(1, 1010, 11.7), (2, 1010, 5.0), (2, 1010, 3.5), (1, 1010, 10.0)]
+        self.assertEqual(['p', None, 'overshoot', 'overshoot'], [p.kind for p in d_progress(joint_ps, knees)])
+        self.assertEqual([None, None, 5.0, 11.7], [p.from_overshoot for p in d_progress(joint_ps, knees)],
+                         'both records are kept')
+        # a knee that is no progress still lowers its record
+        knees = [(1, 1010, 11.7), (1, 1010, 11.2), (1, 1010, 10.0), (1, 1010, 9.0)]
+        self.assertEqual(['p', None, 'overshoot', 'overshoot'], [p.kind for p in d_progress(joint_ps, knees)])
+        self.assertEqual([None, None, 11.2, 10.0], [p.from_overshoot for p in d_progress(joint_ps, knees)])
+
+    def test_a_higher_p_of_the_joint_starts_a_new_record(self):
+        joint_ps = [660, 660, 990, 990, 990]
+        knees = [(1, 1010, 11.7), (1, 1010, 11.5), (1, 1500, 6.0), (1, 1010, 5.0), (1, 1010, 3.0)]
+        progress = d_progress(joint_ps, knees)
+        self.assertEqual(['p', None, 'p', None, 'overshoot'], [p.kind for p in progress])
+        self.assertEqual(5.0, progress[4].from_overshoot, 'the 11.5 of before the rise of P is forgotten')
+
+    def test_a_knee_without_the_overshoot_flag_is_no_progress(self):
+        joint_ps = [660, 660, 660]
+        self.assertTrue(grid_is_done(joint_ps, 2, [(1, 1010, 11.7), None, None]))
+        self.assertTrue(grid_is_done(joint_ps, 2, [None, None, None]))
+        self.assertFalse(grid_is_done(joint_ps, 2, [(1, 1010, 11.7), (1, 1010, 8.0), None]))
+        self.assertTrue(grid_is_done(joint_ps, 1, [(1, 1010, 11.7), (1, 1010, 8.0), None]))
+
+    def test_a_lower_p_of_the_joint_is_no_progress_whatever_the_overshoot(self):
+        knees = [(1, 1010, 11.7), (1, 1010, 3.0), (1, 1010, 1.0)]
+        self.assertTrue(grid_is_done([660, 510, 510], 2, knees))
+        self.assertEqual(['p', None, None], [p.kind for p in d_progress([660, 510, 510], knees)])
+        self.assertTrue(grid_is_done([660, 660, None], 2, [(1, 1010, 11.7), (1, 1010, 11.6), None]))
+        self.assertTrue(grid_is_done([660, 510], 1, [(1, 1010, 11.7), (1, 1010, 3.0)]))
+
+    def test_the_knee_of_the_joint_is_the_one_of_the_limiting_pose(self):
+        results = [knee_pose(1, {0: (1300, 850, 4.0, ('overshoot',)), 250: (2000, 1300, 4.0, ('overshoot',))}),
+                   knee_pose(2, {0: (1010, 660, 8.0, ('overshoot',)), 250: (1500, 980, 9.5, ('overshoot',))})]
+        self.assertEqual((2, 1010, 8.0), joint_knee_at(results, 0), 'the smallest recommendation limits the joint')
+        self.assertEqual((2, 1500, 9.5), joint_knee_at(results, 250))
+        self.assertIsNone(joint_knee_at(results, 400), 'not swept at this D')
+        self.assertEqual(660, joint_p_at(results, 0))
+
+    def test_poses_that_tie_are_told_apart_by_their_overshoot(self):
+        results = [knee_pose(1, {0: (1010, 660, 8.0, ('overshoot',))}),
+                   knee_pose(2, {0: (1010, 660, 11.7, ('overshoot',))}),
+                   knee_pose(3, {0: (1010, 660, 9.0, ('overshoot',))})]
+        self.assertEqual((2, 1010, 11.7), joint_knee_at(results, 0))
+        # the tie is on the overshoot of the knee trial, not on whether it is flagged
+        results = [knee_pose(1, {0: (1010, 660, 8.0, ('overshoot',))}),
+                   knee_pose(2, {0: (1300, 660, 12.0, ('ringing',))})]
+        self.assertIsNone(joint_knee_at(results, 0), 'the limiting pose is the one with the larger overshoot')
+        # a pose without a knee ranks after the ones that have one
+        results = [knee_pose(1, {0: (None, 660, 0.0, ())}), knee_pose(2, {0: (1010, 660, 8.0, ('overshoot',))})]
+        self.assertEqual((2, 1010, 8.0), joint_knee_at(results, 0))
+
+    def test_no_knee_without_the_overshoot_flag_or_a_knee(self):
+        flagged = (1010, 660, 8.0, ('overshoot',))
+        for flags in (('ringing',), ('settle',), ('ripple',), (), ('aborted', 'ringing')):
+            results = [knee_pose(1, {0: (1010, 660, 8.0, flags)})]
+            self.assertIsNone(joint_knee_at(results, 0), flags)
+        both = knee_pose(1, {0: (1010, 660, 8.0, ('ringing', 'overshoot'))})
+        self.assertEqual((1, 1010, 8.0), joint_knee_at([both], 0), 'one flag among others is enough')
+        self.assertEqual((1, 1010, 8.0), joint_knee_at([knee_pose(1, {0: flagged})], 0))
+        every_p_passed = knee_pose(1, {0: (None, 1950, 0.0, ())})
+        self.assertIsNone(joint_knee_at([every_p_passed], 0), 'every P passed')
+        no_p = knee_pose(1, {0: (1010, None, 8.0, ('overshoot',))})
+        self.assertIsNone(joint_knee_at([no_p], 0), 'no P of the joint')
+        self.assertIsNone(joint_knee_at([], 0))
+
+    def test_the_knee_trial_is_one_of_the_p_sweep_at_that_d(self):
+        result = knee_pose(1, {0: (1010, 660, 8.0, ('overshoot',)), 250: (1010, 660, 6.5, ('overshoot',))})
+        trial = knee_trial(result, 250)
+        self.assertEqual(('p', 1010, 250, 6.5), (trial.phase, trial.p, trial.d, trial.max_overshoot))
+        self.assertEqual(8.0, knee_trial(result, 0).max_overshoot, 'the other D gains and the comparison are not it')
+        self.assertIsNone(knee_trial(result, 400))
+        self.assertIsNone(knee_trial(knee_pose(1, {0: (None, 660, 0.0, ())}), 0))
+        down = knee_pose(1, {0: (1010, None, 8.0, ('overshoot',))}, phase='p_down')
+        self.assertEqual(8.0, knee_trial(down, 0).max_overshoot, 'a sweep that went down has its knee there')
 
     @staticmethod
     def trial(flags=(), aborted=None, p=1000):
@@ -613,32 +760,67 @@ class SimulatedServo:
     FRICTION_D = 600.0  # the friction is FRICTION / (1 + D / FRICTION_D)
 
     def __init__(self, position, load=50000.0, resonance_above=None, resonance_slope=0.1, damping=SIM_DAMPING,
-                 dt=DT):
+                 dt=DT, trajectory_time=None):
         """
         :param resonance_above: above this P gain the damping drops by resonance_slope per unit of P, so the loop
             rings and, with a large enough slope, oscillates with an amplitude bounded by the velocity limit
+        :param trajectory_time: seconds the trajectory takes to reach a new goal, a linear ramp as the time-based
+            profile makes with the move time; the loop then follows the trajectory and the velocity feedforward
+            adds ff1 / 4 times its velocity in positions per millisecond to the pwm. None: the trajectory is the goal
         """
         self.position = float(position)
         self.damping = damping
         self.resonance_above = resonance_above
         self.resonance_slope = resonance_slope
         self.velocity = 0.0
-        self.goal = position
         self.p, self.i, self.d = 0, 0, 0
+        self.ff1 = 0
+        self.ff_scale = 1.0  # how much of the formula's feedforward the servo applies
         self.goal_pwm = cfg.MAX_PWM
         self.load = load
         self.dt = dt
         self.now = 0.0
+        self.trajectory_time = trajectory_time
+        self._goal = position
+        self._ramp_from = float(position)
+        self._ramp_start = 0.0
         self.pwm = 0.0
         self.temperature = 30
         self.rng = np.random.default_rng(1)
+
+    @property
+    def goal(self):
+        return self._goal
+
+    @goal.setter
+    def goal(self, value):
+        self._ramp_from = self.trajectory()
+        self._ramp_start = self.now
+        self._goal = value
+
+    def jump_to_goal(self):
+        """a step: the trajectory is at the goal at once"""
+        self._ramp_from = float(self._goal)
+
+    def trajectory(self):
+        if self.trajectory_time is None:
+            return self._goal
+        fraction = min(1.0, (self.now - self._ramp_start) / self.trajectory_time)
+        return self._ramp_from + (self._goal - self._ramp_from) * fraction
+
+    def trajectory_velocity(self):
+        """positions per millisecond"""
+        if self.trajectory_time is None or self.now - self._ramp_start >= self.trajectory_time - 1e-9:
+            return 0.0
+        return (self._goal - self._ramp_from) / (1000.0 * self.trajectory_time)
 
     def advance(self, seconds):
         steps = max(1, int(round(seconds / self.dt)))
         friction = self.FRICTION / (1.0 + self.d / self.FRICTION_D)
         for _ in range(steps):
-            error = self.goal - self.position
-            self.pwm = self.p / 128.0 * error - self.d / 16.0 * self.velocity * 0.0059
+            error = self.trajectory() - self.position
+            feedforward = self.ff1 * self.ff_scale / 4.0 * self.trajectory_velocity()
+            self.pwm = self.p / 128.0 * error + feedforward - self.d / 16.0 * self.velocity * 0.0059
             self.pwm = max(-self.goal_pwm, min(self.goal_pwm, self.pwm))
             damping = self.damping + self.DAMPING_PER_D * self.d
             if self.resonance_above is not None and self.p > self.resonance_above:
@@ -660,7 +842,7 @@ class SimulatedServo:
         noise = self.rng.normal(0, 1.0 + self.NOISE_PER_D * self.d)
         return ServoState(tick=int(1000 * self.now) % 32768, moving=0, moving_status=1, pwm=int(self.pwm + noise),
                           current=0, velocity=int(self.velocity), position=int(round(self.position)),
-                          velocity_trajectory=0, position_trajectory=self.goal, voltage=11.8,
+                          velocity_trajectory=0, position_trajectory=int(round(self.trajectory())), voltage=11.8,
                           temperature=self.temperature)
 
 
@@ -671,13 +853,17 @@ class FakeTuningHandler:
         self.servos = servo_config.servos
         self.joint = joint
         self.sim = sim
-        self.profiles = {servo_id: (servo.profile_velocity, servo.profile_acceleration)
-                         for servo_id, servo in self.servos.items()}
+        self.profiles = {servo_id: servo.profile_registers() for servo_id, servo in self.servos.items()}
         self.goal_pwm = {servo_id: cfg.MAX_PWM for servo_id in self.servos}
         self.gains = {servo_id: (servo.p, servo.i, servo.d) for servo_id, servo in self.servos.items()}
+        self.feedforward = {servo_id: (servo.ff1, 0) for servo_id, servo in self.servos.items()}
         self.gain_writes = []
+        self.feedforward_writes = []
         self.goal_pwm_writes = []
+        self.goal_writes = []  # ('move' or 'step', servo id, position)
+        self.failed_reads = 0
         self.sim.p, self.sim.i, self.sim.d = self.gains[joint]
+        self.sim.ff1 = self.feedforward[joint][0]
         self.fail_reads = False
         self.before_read = None  # called before every state read, for the tests to disturb the servo
         self.temperatures = {servo_id: 30 for servo_id in self.servos}
@@ -730,24 +916,62 @@ class FakeTuningHandler:
         return {servo_id: self.sim.state() for servo_id in servo_ids}
 
     def move_servo_to_pos(self, servo_id, position):
+        self.goal_writes.append(('move', servo_id, position))
         if servo_id == self.joint:
             self.sim.goal = position
         return True
 
+    def step_servo_to_pos(self, servo_id, position):
+        """a step in either drive mode: the profile registers go to 0, the goal is in the same packet"""
+        self.goal_writes.append(('step', servo_id, position))
+        self.profiles[servo_id] = (0, 0)
+        if servo_id == self.joint:
+            self.sim.goal = position
+            self.sim.jump_to_goal()
+        return True
+
+    def set_feedforward_single_servo(self, servo_id, first, second=0):
+        self.feedforward[servo_id] = (first, second)
+        self.feedforward_writes.append((servo_id, first, second))
+        if servo_id == self.joint:
+            self.sim.ff1 = first
+        return True
+
+    def set_feedforward(self, servo_ids=None):
+        for servo_id in servo_ids or self.servos:
+            self.set_feedforward_single_servo(servo_id, self.servos[servo_id].ff1)
+        return True
+
+    def read_feedforward(self, servo_ids=None):
+        if self.fail_reads:
+            return None
+        return {servo_id: self.feedforward[servo_id] for servo_id in servo_ids or self.servos}
+
 
 class FakeTuningRobot(FakeRobot):
 
-    def __init__(self, angles, joint, sim, resonance_by_pose=None):
+    def __init__(self, angles, joint, sim, resonance_by_pose=None, move_time=None, ff1=0):
         """
         :param resonance_by_pose: optional function of the commanded angles giving the resonance_above of the
             simulated servo there, so the knee differs per pose
+        :param move_time: ms of the time-based profile of the joint under test, None for the velocity-based profile
+        :param ff1: the yaml feedforward gain of the joint under test
         """
         super().__init__(angles)
         self.joint = joint
         self.sim = sim
         self.resonance_by_pose = resonance_by_pose
+        servo = self.servo_config.servos[joint]
+        servo.move_time, servo.ff1 = move_time, ff1
         self.servo_handler = FakeTuningHandler(self.servo_config, joint, sim)
         self.enabled = False
+
+    def enable_servos(self):
+        self.enabled = True
+        return True
+
+    def get_servo_temperatures(self):
+        return {servo_id: 30 for servo_id in range(1, 7)}
 
     def move_servos(self, angles):
         super().move_servos(angles)
@@ -757,10 +981,11 @@ class FakeTuningRobot(FakeRobot):
 
 
 def session_for(joint=3, resonance_above=None, resonance_slope=0.1, settings=None, writers=False,
-                resonance_by_pose=None, load=50000.0):
+                resonance_by_pose=None, load=50000.0, move_time=None, ff1=0, trajectory_time=None):
     pose = parse_pose('elbow_out')
-    sim = SimulatedServo(2048, load=load, resonance_above=resonance_above, resonance_slope=resonance_slope)
-    robot = FakeTuningRobot(pose, joint, sim, resonance_by_pose)
+    sim = SimulatedServo(2048, load=load, resonance_above=resonance_above, resonance_slope=resonance_slope,
+                         trajectory_time=trajectory_time)
+    robot = FakeTuningRobot(pose, joint, sim, resonance_by_pose, move_time, ff1)
     servo = robot.servo_handler.get_servo(joint)
     servo.set_target_position_from_angle(pose[joint], pose)
     sim.position = sim.goal = servo.target_position
@@ -1019,6 +1244,65 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(noisy_rows)
         self.assertTrue(all(row['flags'] == '' and row['warnings'] == 'pwm_noise' for row in noisy_rows))
 
+    def test_the_grid_goes_on_while_the_overshoot_at_the_knee_falls(self):
+        # joint 4 on 18 November 2026: the knee stayed at P 1010 from D 250 to 640 while the overshoot fell from 11.7 to
+        # 8.7, and the grid stopped before D 1020. The sweeps are scripted: the simulated servo can't be made to keep
+        # its knee in one step of P while its overshoot falls with D
+        session, robot, sim, _, _ = self.session(settings=self.grid_settings(d_values=(0, 250, 400, 640, 1020, 1640,
+                                                                                        2620)))
+        scripted = {0: (780, 510, 8.0), 250: (1010, 660, 11.7), 400: (1010, 660, 10.0), 640: (1010, 660, 8.7),
+                    1020: (1300, 850, 6.5), 1640: (1300, 850, 6.4), 2620: (1300, 850, 6.4)}
+
+        def sweep_pose(index, pose, d):
+            knee_p, recommended, overshoot = scripted[d]
+            result = knee_pose(index, {d: (knee_p, recommended, overshoot, ('overshoot',))})
+            result = result._replace(pose=pose)
+            if session.results:
+                previous = session.results[0]
+                result = previous._replace(trials=previous.trials + result.trials, sweeps={**previous.sweeps,
+                                                                                           **result.sweeps})
+            session.results[:] = [result]
+            return True
+
+        with mock.patch.object(session, 'sweep_pose', side_effect=sweep_pose), \
+                mock.patch.object(session, 'compare_d') as compared, mock.patch('builtins.print') as shown:
+            results = session.run([parse_pose('elbow_out')])
+        output = '\n'.join(str(call.args[0]) for call in shown.call_args_list if call.args)
+        self.assertEqual([0, 250, 400, 640, 1020, 1640, 2620], swept_d_values(results))
+        self.assertEqual([510, 660, 660, 660, 850, 850, 850], [joint_p_at(results, d) for d in scripted])
+        self.assertIn('D 400: the overshoot at the knee (pose 1, p=1010) fell from 11.7 to 10.0 positions, D still '
+                      'helps', output)
+        self.assertIn('D 640: the overshoot at the knee (pose 1, p=1010) fell from 10.0 to 8.7 positions, D still '
+                      'helps', output)
+        self.assertNotIn('D 250: the overshoot', output, 'the P of the joint rose there')
+        self.assertNotIn('D 1020: the overshoot', output)
+        self.assertEqual(1, output.count('the grid stops'))
+        self.assertIn('the last 2 D gains neither raised the P of the joint nor lowered the overshoot at its knee: '
+                      'the grid stops', output)
+        compared.assert_called_once_with([1020, 1640, 2620], 850)
+        # the rule of the P of the joint alone stops at D 640, before D 1020 is tried
+        self.assertTrue(grid_is_done([joint_p_at(results, d) for d in (0, 250, 400, 640)], 2))
+
+    def test_the_grid_stops_when_the_overshoot_at_the_knee_does_not_fall(self):
+        session, robot, sim, _, _ = self.session(settings=self.grid_settings(d_values=(0, 250, 400, 640, 1020)))
+        scripted = {0: (780, 510, 8.0), 250: (1010, 660, 11.7), 400: (1010, 660, 11.5), 640: (1010, 660, 11.3),
+                    1020: (1010, 660, 5.0)}
+
+        def sweep_pose(index, pose, d):
+            knee_p, recommended, overshoot = scripted[d]
+            result = knee_pose(index, {d: (knee_p, recommended, overshoot, ('overshoot',))})
+            session.results[:] = [result._replace(sweeps={**(session.results[0].sweeps if session.results else {}),
+                                                          **result.sweeps})]
+            return True
+
+        with mock.patch.object(session, 'sweep_pose', side_effect=sweep_pose), \
+                mock.patch.object(session, 'compare_d'), mock.patch('builtins.print') as shown:
+            results = session.run([parse_pose('elbow_out')])
+        output = '\n'.join(str(call.args[0]) for call in shown.call_args_list if call.args)
+        self.assertEqual([0, 250, 400, 640], swept_d_values(results), 'stopped before D 1020')
+        self.assertNotIn('still helps', output)
+        self.assertIn('neither raised the P of the joint nor lowered the overshoot at its knee', output)
+
     def test_damping_is_chosen_for_the_friction_band_it_lands_in(self):
         # an unloaded roll like joint 6: nothing overshoots and every D passes up to the top of the sweep, so the
         # D gains share the P of the joint; D narrows the band the steps come to rest in
@@ -1148,3 +1432,649 @@ class FinishTests(unittest.TestCase):
         read.assert_not_called()  # the prompt itself is patched out
         self.assertEqual([], robot.moves)
         self.assertIn('not lowered', shown.call_args_list[0].args[0])
+
+
+class TimeBasedStepTests(unittest.TestCase):
+    """the P and D stages for a servo with a move_time: its profile registers are (move_time, 0) between the steps,
+    and the steps are written with step_servo_to_pos, which leaves them at 0"""
+
+    def session(self, move_time=20, settings=None):
+        settings = settings or Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0,
+                                        max_factor=1.0, tune_d=False)
+        session, robot, sim, _, _ = session_for(joint=4, load=0.0, settings=settings, move_time=move_time, ff1=100)
+        for name, replacement in (('sleep', sim.advance), ('perf_counter', lambda: sim.now)):
+            patcher = mock.patch('src.utils.movement.' + name, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return session, robot, sim
+
+    def test_the_steps_are_steps_and_the_profile_registers_come_back(self):
+        session, robot, sim = self.session()
+        handler = robot.servo_handler
+        self.assertEqual((20, 0), handler.profiles[4])
+        results = session.run([parse_pose('elbow_out')])
+        self.assertEqual(1, len(results))
+        steps = [write for write in handler.goal_writes if write[0] == 'step']
+        self.assertEqual(4, len(steps), 'up, back, down, back, once')
+        self.assertTrue(all(write[1] == 4 for write in steps))
+        self.assertTrue([write for write in handler.goal_writes if write[0] == 'move'],
+                        'the goals that are not steps follow the profile')
+        servo = handler.get_servo(4)
+        self.assertEqual((20, 0), handler.profiles[4], 'the move time, not the yaml velocity and acceleration')
+        self.assertNotEqual((servo.profile_velocity, servo.profile_acceleration), handler.profiles[4])
+
+    def test_the_streamed_move_runs_with_the_move_time(self):
+        settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=8.0, max_factor=1.0,
+                            tune_d=False)
+        session, robot, sim = self.session(settings=settings)
+        seen = []
+        original = robot.move_servos
+
+        def recording(angles):
+            seen.append(robot.servo_handler.profiles[4])
+            original(angles)
+        robot.move_servos = recording
+        session.run([parse_pose('elbow_out')])
+        self.assertGreater(len(seen), 100)
+        self.assertEqual({(20, 0)}, set(seen), 'the steps left (0, 0), the profile is back before the moves')
+
+    def test_the_restore_writes_and_verifies_the_move_time_and_the_feedforward_gain(self):
+        session, robot, sim = self.session()
+        handler = robot.servo_handler
+        handler.profiles[4] = (0, 0)
+        handler.feedforward[4] = (700, 0)
+        self.assertTrue(session.restore())
+        self.assertEqual((20, 0), handler.profiles[4])
+        self.assertEqual((100, 0), handler.feedforward[4], 'the yaml gain, the 2nd gain 0')
+        self.assertEqual([(4, 100, 0)], handler.feedforward_writes)
+        # a profile that doesn't take is found by the read back; the yaml velocity and acceleration are not it
+        handler.set_profile = lambda servo_id, velocity, acceleration: True
+        handler.profiles[4] = (300, 100)
+        with self.assertLogs(tune_servo_gains.logger, 'ERROR'):
+            self.assertFalse(session.restore())
+        del handler.set_profile
+        # nor is a feedforward gain that doesn't take
+        handler.set_feedforward = lambda servo_ids=None: True
+        handler.feedforward[4] = (7, 0)
+        with self.assertLogs(tune_servo_gains.logger, 'ERROR'):
+            self.assertFalse(session.restore())
+
+    def test_a_servo_without_move_time_is_unchanged(self):
+        session, robot, sim = self.session(move_time=None)
+        handler = robot.servo_handler
+        servo = handler.get_servo(4)
+        handler.profiles[4] = (0, 0)
+        self.assertTrue(session.restore())
+        self.assertEqual((servo.profile_velocity, servo.profile_acceleration), handler.profiles[4])
+        session.run([parse_pose('elbow_out')])
+        self.assertEqual((servo.profile_velocity, servo.profile_acceleration), handler.profiles[4])
+        self.assertEqual(4, sum(1 for write in handler.goal_writes if write[0] == 'step'),
+                         'steps go through step_servo_to_pos in either drive mode')
+
+
+class SweepTests(unittest.TestCase):
+    """the sweep of the feedforward stage"""
+    DT = 0.01
+
+    def test_the_sweep_starts_and_ends_at_the_pose_within_the_amplitude(self):
+        for speed in (10, 20, 30, 100):  # at 100 the legs of 15 degrees are triangles
+            steps = ff_sweep(15, speed, self.DT)
+            offsets = [s.offset for s in steps]
+            self.assertEqual(0.0, steps[0].time)
+            self.assertEqual(0.0, offsets[0])
+            self.assertAlmostEqual(0.0, offsets[-1], places=9)
+            self.assertLessEqual(max(offsets), 15 + 1e-9)
+            self.assertGreaterEqual(min(offsets), -15 - 1e-9)
+            self.assertAlmostEqual(15, max(offsets), delta=0.01)
+            self.assertAlmostEqual(-15, min(offsets), delta=0.01)
+            if speed < 70:  # five legs, each its distance over the speed plus the time of the ramps
+                self.assertAlmostEqual(8 * 15 / speed + 5 * FF_RAMP, steps[-1].time, places=9)
+            np.testing.assert_allclose(np.diff([s.time for s in steps])[:-1], self.DT)
+            legs = [direction for direction, _ in itertools.groupby(s.direction for s in steps)]
+            self.assertEqual([1, -1, 1, -1, 1], legs, 'to +A, -A, +A, -A and back to the pose')
+
+    def test_the_change_per_step_matches_the_speed_in_the_cruise_parts(self):
+        steps = ff_sweep(15, 20, self.DT)
+        offsets = np.array([s.offset for s in steps])
+        per_second = np.abs(np.diff(offsets)) / self.DT  # per_second[k - 1] is the speed up to step k
+        cruise = [k for k, s in enumerate(steps) if s.cruise]
+        self.assertGreater(len(cruise), 200)
+        for k in cruise:
+            self.assertAlmostEqual(20, per_second[k - 1], places=6)
+        self.assertLess(per_second.max(), 20 + 1e-6, 'never faster than the speed')
+        # the ramp is linear: the speed grows by speed / ramp per second over the first 0.2 s of the first leg
+        np.testing.assert_allclose(per_second[:20], 20 * (np.arange(20) + 0.5) * self.DT / FF_RAMP, rtol=1e-6)
+
+    def test_cruise_only_where_the_speed_has_been_full_for_the_hold_time_and_still_is(self):
+        steps = ff_sweep(15, 20, self.DT)
+        offsets = np.array([s.offset for s in steps])
+        full = np.concatenate([[False], np.abs(np.diff(offsets)) / self.DT > 20 - 1e-6])  # the speed up to step k
+        hold_steps = round(FF_CRUISE_HOLD / self.DT) - 1
+        for k, step in enumerate(steps):
+            if step.cruise:
+                self.assertTrue(all(full[k - hold_steps:k + 1]), 'full speed for the hold time up to step {}'.format(k))
+                if steps[k + 1].cruise:  # the last step of a cruise is where the ramp down begins
+                    self.assertTrue(full[k + 1], 'and still at full speed after it')
+        # the first leg (15 degrees, from 0 to 0.95 s) reaches its speed at 0.2 s and cruises until 0.75 s
+        first_leg = [s.time for s in steps if s.cruise and s.time < 0.95]
+        self.assertAlmostEqual(FF_RAMP + FF_CRUISE_HOLD, first_leg[0], delta=1e-6)
+        self.assertAlmostEqual(0.75, first_leg[-1], delta=1e-6)
+        # the second leg (30 degrees, from 0.95 to 2.65 s) cruises from 1.15 s until 2.45 s
+        second_leg = [s.time for s in steps if s.cruise and 0.95 < s.time < 2.65]
+        self.assertAlmostEqual(0.95 + FF_RAMP + FF_CRUISE_HOLD, second_leg[0], delta=self.DT)
+        self.assertAlmostEqual(2.45, second_leg[-1], delta=self.DT)
+        self.assertEqual({-1}, {s.direction for s in steps if s.cruise and 0.95 < s.time < 2.65})
+
+    def test_a_leg_too_short_to_reach_the_speed_is_a_triangle_without_cruise(self):
+        steps = ff_sweep(1.0, 30, self.DT)
+        self.assertFalse(any(s.cruise for s in steps))
+        offsets = np.array([s.offset for s in steps])
+        self.assertAlmostEqual(1.0, offsets.max(), delta=0.05)
+        self.assertAlmostEqual(-1.0, offsets.min(), delta=0.05)
+        peak = np.abs(np.diff(offsets)).max() / self.DT
+        self.assertAlmostEqual(math.sqrt(2.0 * 30 / FF_RAMP), peak, delta=1.0, msg='the legs of 2 degrees peak below 30')
+        # a leg that reaches the speed and doesn't hold it for the hold time has no cruise steps either: the legs of
+        # 2.1 degrees at 10 degrees/s cruise for 0.01 s, those of 4.2 degrees for 0.22 s
+        steps = ff_sweep(2.1, 10, self.DT)
+        cruise_legs = [list(group) for flag, group in itertools.groupby(steps, key=lambda s: s.cruise) if flag]
+        self.assertEqual(3, len(cruise_legs), 'only the three legs of 4.2 degrees')
+        self.assertTrue(all(5 <= len(leg) <= 9 for leg in cruise_legs))
+
+    def test_bad_arguments(self):
+        for arguments in ((0, 10, 0.01), (10, 0, 0.01), (10, 10, 0)):
+            with self.assertRaises(ValueError):
+                ff_sweep(*arguments)
+
+
+def cruise_rows(direction, lag, drive, speed, count=20, gravity_lag=0.0, gravity_pwm=0.0, cruise=True, start=0.0,
+                lag_wobble=0, leg=0, goal_start=2000):
+    """the samples of one direction: the position trails its trajectory by lag positions in the direction of the
+    move, the pwm is drive units in that direction, the goal moves at speed positions per millisecond; the gravity
+    pulls the position and the pwm the same way for both directions"""
+    rows = []
+    for i in range(count):
+        t = start + i * 0.01
+        goal = int(round(goal_start + direction * speed * 1000 * (t - start)))
+        wobble = lag_wobble * (1 if i % 2 else -1)
+        rows.append(SweepSample(
+            Sample(time=t, tick=0, goal=goal, position=int(goal - direction * (lag + wobble) - gravity_lag),
+                   position_trajectory=goal, velocity=0, velocity_trajectory=0,
+                   pwm=int(direction * drive + gravity_pwm), current=0, moving_status=0, voltage=11.8,
+                   temperature=30), direction, cruise, leg))
+    return rows
+
+
+class CruiseStatisticsTests(unittest.TestCase):
+
+    def test_the_lag_is_positive_when_the_servo_trails_in_either_direction(self):
+        rows = cruise_rows(1, 6, 100, 0.3) + cruise_rows(-1, 6, 100, 0.3)
+        # going up the position is below the trajectory, going down above it
+        self.assertEqual(6, rows[0].sample.position_trajectory - rows[0].sample.position)
+        self.assertEqual(-6, rows[-1].sample.position_trajectory - rows[-1].sample.position)
+        stats = cruise_statistics(rows)
+        self.assertAlmostEqual(6, stats.lag)
+        self.assertAlmostEqual(100, stats.pwm, msg='the pwm in the direction of the move')
+        different = cruise_statistics(cruise_rows(1, 6, 100, 0.3) + cruise_rows(-1, 2, 100, 0.3))
+        self.assertAlmostEqual(4, different.lag, msg='the mean of the two directions')
+
+    def test_a_pull_that_has_one_sign_cancels_in_the_mean_of_the_directions(self):
+        # gravity: 4 positions and 50 pwm units the same way going up and going down
+        plain = cruise_statistics(cruise_rows(1, 6, 100, 0.3) + cruise_rows(-1, 6, 100, 0.3))
+        pulled = cruise_statistics(cruise_rows(1, 6, 100, 0.3, gravity_lag=4, gravity_pwm=50) +
+                                   cruise_rows(-1, 6, 100, 0.3, gravity_lag=4, gravity_pwm=50))
+        self.assertAlmostEqual(plain.lag, pulled.lag)
+        self.assertAlmostEqual(plain.pwm, pulled.pwm)
+        up_only = cruise_statistics(cruise_rows(1, 6, 100, 0.3, gravity_lag=4, gravity_pwm=50) +
+                                    cruise_rows(-1, 6, 100, 0.3))
+        self.assertNotAlmostEqual(plain.pwm, up_only.pwm, msg='a pull on one direction only is not cancelled')
+
+    def test_the_speed_comes_from_the_goals(self):
+        stats = cruise_statistics(cruise_rows(1, 6, 100, 0.34) + cruise_rows(-1, 6, 100, 0.34))
+        self.assertAlmostEqual(0.34, stats.speed, delta=0.002)
+        slower = cruise_statistics(cruise_rows(1, 6, 100, 0.2) + cruise_rows(-1, 6, 100, 0.2))
+        self.assertAlmostEqual(0.2, slower.speed, delta=0.002, msg='the absolute slope, going down as well')
+        self.assertEqual(40, stats.samples)
+
+    def test_the_speed_is_the_slope_within_the_legs(self):
+        # two legs going up cover the same goals 2 s apart: one line through both would have a much smaller slope
+        up = (cruise_rows(1, 6, 100, 0.3, count=40, leg=0, goal_start=2000) +
+              cruise_rows(1, 6, 100, 0.3, count=40, leg=2, start=2.0, goal_start=2000))
+        down = cruise_rows(-1, 6, 100, 0.3, count=40, leg=1, start=1.0, goal_start=2100)
+        stats = cruise_statistics(up + down)
+        self.assertAlmostEqual(0.3, stats.speed, delta=0.002)
+
+    def test_the_std_is_per_direction_and_averaged(self):
+        stats = cruise_statistics(cruise_rows(1, 6, 100, 0.3, lag_wobble=1) + cruise_rows(-1, 6, 100, 0.3))
+        self.assertAlmostEqual(0.5, stats.lag_std, delta=0.05, msg='1 in one direction, 0 in the other')
+        self.assertAlmostEqual(0.0, stats.pwm_std)
+        # the means of the two directions differ by a lot, which is no std
+        far = cruise_statistics(cruise_rows(1, 12, 100, 0.3) + cruise_rows(-1, 0, 100, 0.3))
+        self.assertAlmostEqual(0.0, far.lag_std, delta=0.01)
+
+    def test_only_cruise_samples_count_and_a_direction_needs_some(self):
+        rows = cruise_rows(1, 6, 100, 0.3) + cruise_rows(-1, 6, 100, 0.3)
+        ramp = cruise_rows(1, 30, 500, 0.1, cruise=False, start=1.0)
+        self.assertAlmostEqual(6, cruise_statistics(rows + ramp).lag, msg='the ramp samples are left out')
+        with self.assertRaises(ValueError):
+            cruise_statistics(cruise_rows(1, 6, 100, 0.3))
+        with self.assertRaises(ValueError):
+            cruise_statistics(cruise_rows(1, 6, 100, 0.3) + cruise_rows(-1, 6, 100, 0.3, count=2))
+
+
+class FeedforwardArithmeticTests(unittest.TestCase):
+
+    def test_points_on_a_line_give_its_friction_and_slope(self):
+        speeds = [0.1, 0.2, 0.34]
+        fit = fit_line(speeds, [3.0 + 20.0 * v for v in speeds])
+        self.assertAlmostEqual(3.0, fit.friction)
+        self.assertAlmostEqual(20.0, fit.slope)
+        noisy = fit_line(speeds, [3.0 + 20.0 * 0.1 + 0.1, 3.0 + 20.0 * 0.2 - 0.1, 3.0 + 20.0 * 0.34 + 0.05])
+        self.assertAlmostEqual(20.0, noisy.slope, delta=1.5, msg='a least squares line through all the points')
+        with self.assertRaises(ValueError):
+            fit_line([0.2, 0.2, 0.2], [1.0, 2.0, 3.0])
+
+    def test_the_joint_4_numbers_give_the_gain(self):
+        # 18 November 2026, P 780: a lag of 8.0 positions at 145 positions/s and 12.9 at 392, a slope of 20 ms
+        self.assertAlmostEqual(487, feedforward_change(780, 20.0), delta=1)
+        fit = fit_line([0.145, 0.392], [8.0, 12.9])
+        self.assertAlmostEqual(20, fit.slope, delta=0.5)
+        self.assertAlmostEqual(8.0 - 0.145 * fit.slope, fit.friction)
+        self.assertAlmostEqual(487, feedforward_change(780, fit.slope), delta=5)
+
+    def test_a_slope_of_zero_or_less_gives_no_gain_and_the_gain_is_clipped(self):
+        self.assertEqual(0, clip_gain(feedforward_change(780, 0.0), 4000))
+        self.assertEqual(-122, feedforward_change(780, -5.0))
+        self.assertEqual(0, clip_gain(feedforward_change(780, -5.0), 4000))
+        self.assertEqual(6250, feedforward_change(2500, 80.0))
+        self.assertEqual(4000, clip_gain(feedforward_change(2500, 80.0), 4000), 'at --ff-max')
+        self.assertEqual(cfg.MAX_GAIN, clip_gain(100000, cfg.MAX_GAIN))
+        self.assertEqual(900, clip_gain(900, 4000))
+
+    def test_the_growth_of_the_lag_over_the_speeds(self):
+        stats = [CruiseStatistics(speed, 3.0 + 20.0 * speed, 100, 0.5, 2, 40) for speed in (0.1, 0.2, 0.34)]
+        self.assertAlmostEqual(20.0 * 0.24, lag_growth(LineFit(3.0, 20.0), stats))
+        self.assertAlmostEqual(-1.0, lag_growth(LineFit(3.0, -1.0 / 0.24), stats))
+
+    def test_rougher_speeds(self):
+        before = [CruiseStatistics(0.1, 3.0, 100, 0.5, 2, 40), CruiseStatistics(0.2, 4.0, 100, 1.0, 2, 40)]
+        after = [CruiseStatistics(0.1, 3.0, 100, 1.4, 2, 40), CruiseStatistics(0.2, 4.0, 100, 2.5, 2, 40)]
+        self.assertEqual([1], rougher_speeds(before, after), 'more than a position more at the second speed only')
+        self.assertEqual([], rougher_speeds(before, before))
+
+
+class FeedforwardStageTests(unittest.TestCase):
+    """the stage on the simulated servo: its lag grows with the speed (the damping of the loop is a back voltage the
+    position error has to pay for) and the feedforward gain takes that part away; joint 4 at P 1000"""
+    P = 1000
+    YAML_FF1 = 100
+    MOVE_TIME = 20
+    # the lag grows by 128 * damping / (force per pwm) / P seconds per position per second; the gain that takes it
+    # away is P / 32 times that in ms, which doesn't depend on P
+    SLOPE = 1000 * 128 * SIM_DAMPING / SimulatedServo.FORCE_PER_PWM / P
+    FLAT_FF1 = 4000 * SIM_DAMPING / SimulatedServo.FORCE_PER_PWM
+
+    def stage(self, ff_scale=1.0, move_time=MOVE_TIME, load=20000.0, reverse=False, **overrides):
+        settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, tune_d=False,
+                            ff_degrees=10.0)._replace(**overrides)
+        session, robot, sim, _, _ = session_for(joint=4, load=load, settings=settings, move_time=move_time,
+                                                ff1=self.YAML_FF1, trajectory_time=0.01)
+        sim.ff_scale = ff_scale
+        if reverse:  # the positions fall as the angle rises; the pose is at the middle of the range, the same position
+            servo = robot.servo_handler.get_servo(4)
+            servo.min_position, servo.max_position = servo.max_position, servo.min_position
+        for name, replacement in (('sleep', sim.advance), ('perf_counter', lambda: sim.now)):
+            patcher = mock.patch('src.utils.movement.' + name, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return session, robot, sim
+
+    @staticmethod
+    def run_stage(session):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = session.run_feedforward(parse_pose('elbow_out'))
+        return result, out.getvalue()
+
+    def test_the_stage_finds_the_gain_that_makes_the_lag_flat(self):
+        session, robot, sim = self.stage()
+        handler = robot.servo_handler
+        buffer = io.StringIO()
+        session.ff_writer = csv.DictWriter(buffer, fieldnames=FF_SAMPLE_FIELDS)
+        session.ff_writer.writeheader()
+        times, starts = [], []
+        move_servos = robot.move_servos
+
+        def timed(angles):
+            times.append(sim.now)
+            move_servos(angles)
+        robot.move_servos = timed
+        sweep = session.feedforward_sweep
+
+        def marked(pose, speed, ff1):
+            starts.append(len(times))
+            return sweep(pose, speed, ff1)
+        session.feedforward_sweep = marked
+
+        result, output = self.run_stage(session)
+
+        # at FF1 = 0 the lag grows with the speed, at the recommended gain it doesn't
+        self.assertEqual([0, result.recommended], [r.ff1 for r in result.rounds], 'no correction was needed')
+        self.assertAlmostEqual(self.SLOPE, result.rounds[0].fit.slope, delta=0.1 * self.SLOPE)
+        self.assertAlmostEqual(self.FLAT_FF1, result.recommended, delta=0.08 * self.FLAT_FF1)
+        self.assertLess(abs(result.rounds[1].fit.slope), 0.1 * result.rounds[0].fit.slope)
+        speeds = [s.speed for s in result.rounds[0].statistics]
+        self.assertEqual(sorted(speeds), speeds)
+        self.assertAlmostEqual(10 * 4096 / 360 / 1000, speeds[0], delta=0.005, msg='positions per ms from the goals')
+        self.assertAlmostEqual(30 * 4096 / 360 / 1000, speeds[2], delta=0.01)
+        self.assertGreater(result.rounds[0].statistics[2].lag, result.rounds[0].statistics[0].lag + 2)
+        self.assertLess(result.rounds[1].statistics[2].lag, result.rounds[0].statistics[2].lag)
+        # the part of the lag that doesn't depend on the speed: the friction of the simulation, in positions
+        self.assertAlmostEqual(SimulatedServo.FRICTION / SimulatedServo.FORCE_PER_PWM * 128 / self.P,
+                               result.rounds[0].fit.friction, delta=1.5)
+
+        # afterwards the servo has its yaml gains again, not the recommended one
+        self.assertEqual((self.YAML_FF1, 0), handler.feedforward[4])
+        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+        self.assertEqual((1000, 0, 0), handler.gains[4])
+        self.assertEqual(cfg.MAX_PWM, handler.goal_pwm[4])
+        written = [first for _, first, _ in handler.feedforward_writes]
+        self.assertIn(0, written)
+        self.assertIn(result.recommended, written)
+        self.assertEqual(self.YAML_FF1, written[-1])
+
+        # only the joint under test moves in the sweeps, within 10 degrees of the pose
+        pose = parse_pose('elbow_out')
+        moves = np.array(robot.moves)
+        others = [1, 2, 3, 5, 6]
+        np.testing.assert_allclose(moves[:, others], np.tile(pose[others], (len(moves), 1)))
+        self.assertAlmostEqual(np.radians(10), np.abs(moves[:, 4] - pose[4]).max(), places=6)
+
+        # the writes are on the clock without drift, the servo is read several times between two writes
+        first = np.array(times[starts[0]:starts[1]])
+        steps = ff_sweep(10.0, 10.0, 0.01)
+        self.assertEqual(len(steps), len(first))
+        np.testing.assert_allclose(first - first[0], [s.time for s in steps], atol=0.003)
+        rows = list(csv.DictReader(io.StringIO(buffer.getvalue())))
+        self.assertEqual(list(FF_SAMPLE_FIELDS), list(rows[0].keys()))
+        self.assertEqual({'4'}, {row['joint'] for row in rows})
+        self.assertEqual({'0', str(result.recommended)}, {row['ff1'] for row in rows})
+        self.assertEqual({'10.0', '20.0', '30.0'}, {row['speed'] for row in rows})
+        self.assertEqual({'1', '-1'}, {row['direction'] for row in rows})
+        self.assertEqual({'0', '1'}, {row['cruise'] for row in rows})
+        slow = [row for row in rows if row['ff1'] == '0' and row['speed'] == '10.0']
+        self.assertGreater(len(slow), 3 * len(steps), 'sampled as often as it fits between two writes')
+        times_of_slow = [float(row['time']) for row in slow]
+        self.assertEqual(sorted(times_of_slow), times_of_slow)
+
+        # the report
+        self.assertIn('pid: {{p: 1000, i: 0, d: 0, ff1: {}}}'.format(result.recommended), output)
+        self.assertIn('positions/ms', output)
+        self.assertIn('ms per position/ms', output)
+        self.assertIn('the friction', output)
+        self.assertNotIn('rougher', output)
+
+    def test_a_servo_mounted_reversed_gets_the_same_gain(self):
+        # joint 3 of servo_config.yaml has its positions fall as its angle rises: the lag in positions of a joint that
+        # trails its trajectory while the angle goes up is negative, and the stage must still see it grow with speed
+        normal, _, _ = self.stage()
+        reference, _ = self.run_stage(normal)
+        session, robot, sim = self.stage(reverse=True)
+        servo = robot.servo_handler.get_servo(4)
+        self.assertGreater(servo.min_position, servo.max_position)
+        buffer = io.StringIO()
+        session.ff_writer = csv.DictWriter(buffer, fieldnames=FF_SAMPLE_FIELDS)
+        session.ff_writer.writeheader()
+        result, output = self.run_stage(session)
+        self.assertEqual(-1, position_sign(servo))
+        self.assertEqual([0, result.recommended], [r.ff1 for r in result.rounds])
+        self.assertAlmostEqual(self.SLOPE, result.rounds[0].fit.slope, delta=0.1 * self.SLOPE)
+        self.assertAlmostEqual(self.FLAT_FF1, result.recommended, delta=0.08 * self.FLAT_FF1)
+        self.assertAlmostEqual(reference.recommended, result.recommended, delta=0.03 * reference.recommended)
+        self.assertAlmostEqual(reference.rounds[0].statistics[2].lag, result.rounds[0].statistics[2].lag, delta=0.5)
+        self.assertNotIn('does not grow', output)
+        # the direction in the csv is the one of the position: the goal rises where it is 1
+        rows = [row for row in csv.DictReader(io.StringIO(buffer.getvalue())) if row['cruise'] == '1']
+        self.assertTrue(rows)
+        steps = 0
+        for before, after in zip(rows, rows[1:]):
+            if before['direction'] == after['direction'] and before['speed'] == after['speed'] and                     before['ff1'] == after['ff1']:
+                steps += 1
+                self.assertGreaterEqual((int(after['goal']) - int(before['goal'])) * int(after['direction']), 0)
+        self.assertGreater(steps, 1000)
+
+    def test_a_first_gain_that_leaves_a_slope_is_corrected_once(self):
+        # the servo applies 60 % of the feedforward the formula promises: the first gain takes 60 % of the slope
+        session, robot, sim = self.stage(ff_scale=0.6)
+        result, output = self.run_stage(session)
+        self.assertEqual(3, len(result.rounds), 'FF1 = 0, the gain, the corrected gain: never a second correction')
+        first, second, third = result.rounds
+        self.assertEqual(0, first.ff1)
+        self.assertAlmostEqual(self.FLAT_FF1, second.ff1, delta=0.08 * self.FLAT_FF1)
+        remaining = second.fit.slope
+        self.assertAlmostEqual(0.4 * self.SLOPE, remaining, delta=0.15 * self.SLOPE)
+        self.assertEqual(second.ff1 + round(self.P / 32 * remaining), third.ff1)
+        self.assertLess(abs(third.fit.slope), abs(remaining))
+        self.assertEqual(third.ff1, result.recommended)
+        self.assertIn('correcting ff1 from {} to {}'.format(second.ff1, third.ff1), output)
+        self.assertEqual((self.YAML_FF1, 0), robot.servo_handler.feedforward[4])
+
+    def test_a_gain_above_the_maximum_is_clipped_and_not_corrected_beyond_it(self):
+        session, robot, sim = self.stage(ff_max=500)
+        result, output = self.run_stage(session)
+        self.assertEqual([0, 500], [r.ff1 for r in result.rounds], 'the correction would stay at 500')
+        self.assertIn('above --ff-max', output)
+        self.assertEqual(500, result.recommended)
+
+    def test_a_lag_that_does_not_grow_with_the_speed_gives_gain_0(self):
+        session, robot, sim = self.stage()
+        with mock.patch.object(tune_servo_gains, 'fit_line', return_value=LineFit(friction=2.0, slope=-3.0)):
+            result, output = self.run_stage(session)
+        self.assertEqual([0], [r.ff1 for r in result.rounds], 'nothing to verify')
+        self.assertEqual(0, result.recommended)
+        self.assertIn('does not grow with the speed', output)
+        self.assertIn('ff1: 0}', output)
+        self.assertEqual((self.YAML_FF1, 0), robot.servo_handler.feedforward[4])
+
+    def test_an_abort_during_a_sweep_restores_the_gain(self):
+        session, robot, sim = self.stage()
+        handler = robot.servo_handler
+        warm = int(AbortLimits().max_temperature)
+        # the servo gets too warm once a sweep runs with the recommended gain
+        handler.before_read = lambda: setattr(sim, 'temperature',
+                                              warm if handler.feedforward[4][0] not in (0, self.YAML_FF1) else 30)
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop) as raised:
+            session.run_feedforward(parse_pose('elbow_out'))
+        self.assertIn('temperature {}C'.format(warm), str(raised.exception))
+        self.assertEqual((self.YAML_FF1, 0), handler.feedforward[4], 'restored at the abort')
+        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+        self.assertEqual(session.pose_goal, sim.goal, 'the goal is back at the pose')
+
+    def test_a_stop_request_during_a_sweep_restores_the_gain_too(self):
+        session, robot, sim = self.stage()
+        handler = robot.servo_handler
+        handler.before_read = lambda: setattr(session.stop, 'requested',
+                                              handler.feedforward[4][0] not in (0, self.YAML_FF1))
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop) as raised:
+            session.run_feedforward(parse_pose('elbow_out'))
+        self.assertEqual('interrupted', str(raised.exception))
+        self.assertNotEqual((self.YAML_FF1, 0), handler.feedforward[4], 'main restores in its finally')
+        self.assertTrue(session.restore())
+        self.assertEqual((self.YAML_FF1, 0), handler.feedforward[4])
+
+    def test_a_servo_without_move_time_is_skipped(self):
+        session, robot, sim = self.stage(move_time=None)
+        result, output = self.run_stage(session)
+        self.assertIsNone(result)
+        self.assertEqual('servo 4 has no move_time in servo_config.yaml, the feedforward stage needs the time-based '
+                         'profile\n', output)
+        self.assertEqual([], robot.moves, 'nothing moved')
+        self.assertEqual([], robot.servo_handler.feedforward_writes)
+
+    def test_a_refused_sweep_skips_the_stage_before_anything_moves(self):
+        pose = parse_pose('elbow_out')
+        for overrides, expected in (({'ff_degrees': 200.0}, 'range'),  # beyond the +-180 degrees of joint 4
+                                    ({'ff_degrees': 1.0}, 'cruise'),
+                                    ({'ff_speeds': (10.0, 20.0, 900.0)}, 'joint 4 would move')):
+            session, robot, sim = self.stage(**overrides)
+            reason = feedforward_refusal(robot, 4, pose, session.settings)
+            self.assertIsNotNone(reason, overrides)
+            self.assertIn(expected, reason)
+            result, output = self.run_stage(session)
+            self.assertIsNone(result)
+            self.assertIn(expected, output)
+            self.assertEqual([], robot.moves, 'nothing moved')
+            self.assertEqual([], robot.servo_handler.feedforward_writes)
+        session, robot, sim = self.stage()
+        self.assertIsNone(feedforward_refusal(robot, 4, pose, session.settings))
+
+    def test_the_report_warns_when_the_feedforward_makes_the_joint_rougher(self):
+        def round_of(ff1, lag_std):
+            statistics = tuple(CruiseStatistics(speed, 3.0 + 20.0 * speed, 100, lag_std, 2, 40)
+                               for speed in (0.1, 0.2, 0.34))
+            return tune_servo_gains.FeedforwardRound(ff1, statistics, LineFit(3.0, 0.5))
+
+        servo = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, p=780, i=0, d=1020)
+        quiet = tune_servo_gains.FeedforwardResult((10.0, 20.0, 30.0), (round_of(0, 0.5), round_of(487, 1.0)))
+        rough = tune_servo_gains.FeedforwardResult((10.0, 20.0, 30.0), (round_of(0, 0.5), round_of(487, 2.0)))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            tune_servo_gains.print_feedforward(4, servo, quiet)
+        self.assertNotIn('rougher', out.getvalue())
+        self.assertIn('pid: {p: 780, i: 0, d: 1020, ff1: 487}', out.getvalue())
+        self.assertIn('remaining slope at ff1 487: 0.5 ms', out.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            tune_servo_gains.print_feedforward(4, servo, rough)
+        self.assertIn('rougher', out.getvalue())
+        self.assertIn('10, 20, 30 degrees/s', out.getvalue())
+
+
+class PositionSignTests(unittest.TestCase):
+
+    def test_the_sign_follows_the_positions_of_the_calibration(self):
+        normal = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE)
+        reversed_ = Servo(4096, 0, -pi, pi, POSITION_CONTROL_MODE)
+        self.assertEqual(1, position_sign(normal))
+        self.assertEqual(-1, position_sign(reversed_))
+        # and so they move: the angle up is the position up or down
+        for servo, expected in ((normal, 1), (reversed_, -1)):
+            servo.set_target_position_from_angle(0.0)
+            middle = servo.target_position
+            servo.set_target_position_from_angle(0.3)
+            self.assertEqual(expected, np.sign(servo.target_position - middle))
+
+    def test_the_servos_of_the_yaml_are_read_the_same_way(self):
+        servos = FakeRobot(parse_pose('elbow_out')).servo_config.servos
+        self.assertEqual(-1, position_sign(servos[3]), 'positions: [3072, 1024] for angles: [-90, 90]')
+        self.assertEqual(1, position_sign(servos[1]), 'positions: [1024, 3072] for angles: [0, 180]')
+        self.assertEqual(1, position_sign(servos[4]))
+
+
+class FeedforwardOptionTests(unittest.TestCase):
+    """main with the options of the stage, with a session that only records what it is asked to do"""
+
+    def run_main(self, argv, move_time=20, stop_in_run=False):
+        sim = SimulatedServo(2048)
+        robot = FakeTuningRobot(parse_pose('elbow_out'), 4, sim, move_time=move_time)
+        calls = []
+
+        class RecordingSession:
+            def __init__(self, robot, joint, settings, sample_writer=None, trial_writer=None, stop=None,
+                         ff_writer=None):
+                calls.append(('session', sample_writer is not None, trial_writer is not None, ff_writer is not None))
+                self.settings = settings
+                self.results = []
+                self.read_failures = 0
+
+            def run(self, poses):
+                calls.append(('run', len(poses)))
+                if stop_in_run:
+                    raise tune_servo_gains.Stop('a trial aborted')
+                return []
+
+            def run_feedforward(self, pose):
+                calls.append(('ff', np.degrees(pose[1:]).round().tolist()))
+
+            def restore(self):
+                calls.append('restore')
+                return True
+
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(tune_servo_gains, 'get_robot', lambda: robot), \
+                mock.patch.object(tune_servo_gains, 'CombinedRobot', FakeTuningRobot), \
+                mock.patch.object(tune_servo_gains, 'TuningSession', RecordingSession), \
+                mock.patch.object(tune_servo_gains, 'finish') as finish, contextlib.redirect_stdout(out):
+            code = tune_servo_gains.main(['--joint', '4', '--yes', '--pose', 'elbow_out', '--output-dir',
+                                          directory] + argv)
+            files = sorted(os.listdir(directory))
+        self.recorded = (calls, finish, [name.split('_', 4)[-1] for name in files], robot)
+        return code, out.getvalue()
+
+    def test_the_defaults(self):
+        self.assertEqual((10.0, 20.0, 30.0), Settings().ff_speeds)
+        self.assertEqual(15.0, Settings().ff_degrees)
+        self.assertEqual(4000, Settings().ff_max)
+
+    def test_without_the_options_the_stage_does_not_run(self):
+        code, output = self.run_main([])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, False), ('run', 1), 'restore'], calls)
+        self.assertEqual(['samples.csv', 'trials.csv'], files)
+        self.assertNotIn('feedforward stage', output)
+
+    def test_ff_runs_the_stage_after_the_p_and_d_tuning(self):
+        code, output = self.run_main(['--ff'])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, True), ('run', 1), ('ff', [90, 90, 0, 0, 0, 0]), 'restore'], calls)
+        self.assertEqual(['ff.csv', 'samples.csv', 'trials.csv'], files)
+        finish.assert_called_once()
+
+    def test_ff_only_skips_the_p_and_d_stages(self):
+        code, output = self.run_main(['--ff-only', '--ff-degrees', '12', '--ff-speeds', '5', '10', '15',
+                                      '--ff-max', '3000'])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', False, False, True), ('ff', [90, 90, 0, 0, 0, 0]), 'restore'], calls)
+        self.assertEqual(['ff.csv'], files)
+        self.assertTrue(robot.enabled)
+        self.assertIn('sweeps of 12 degrees either way at 5 10 15 degrees/s, ff1 up to 3000', output)
+
+    def test_the_stage_does_not_start_after_a_p_and_d_run_that_stopped(self):
+        code, output = self.run_main(['--ff'], stop_in_run=True)
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, True), ('run', 1), 'restore'], calls)
+        self.assertIn('stopped: a trial aborted', output)
+
+    def test_a_servo_without_move_time_skips_the_stage_and_ff_only_ends_before_the_servos_are_enabled(self):
+        line = 'servo 4 has no move_time in servo_config.yaml, the feedforward stage needs the time-based profile'
+        code, output = self.run_main(['--ff-only'], move_time=None)
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(1, code)
+        self.assertEqual([], calls)
+        self.assertFalse(robot.enabled)
+        self.assertEqual([], files)
+        self.assertEqual(1, output.count(line))
+        # with --ff the P and D stages still run
+        code, output = self.run_main(['--ff'], move_time=None)
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, False), ('run', 1), 'restore'], calls)
+        self.assertEqual(1, output.count(line))
+        self.assertTrue(robot.enabled)
+        self.assertEqual(['samples.csv', 'trials.csv'], files)
+
+    def test_fewer_than_three_speeds_and_bad_values_are_refused(self):
+        def no_robot():
+            raise AssertionError('the robot was touched')
+
+        for argv in (['--ff-speeds', '10', '20'], ['--ff-speeds', '10'], ['--ff-speeds', '10', '10', '20'],
+                     ['--ff-speeds', '0', '10', '20'], ['--ff-degrees', '0'], ['--ff-max', str(cfg.MAX_GAIN + 1)],
+                     ['--ff-max', '-1']):
+            out = io.StringIO()
+            with mock.patch.object(tune_servo_gains, 'get_robot', no_robot), contextlib.redirect_stdout(out):
+                self.assertEqual(1, tune_servo_gains.main(['--joint', '4', '--ff-only'] + argv), argv)
+            self.assertIn('--ff-', out.getvalue())
+        code, output = self.run_main(['--ff-only', '--ff-speeds', '5', '10', '15', '20'])
+        self.assertEqual(0, code, 'four speeds are fine')

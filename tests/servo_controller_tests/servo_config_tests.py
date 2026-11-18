@@ -173,6 +173,51 @@ class ParseServoConfigTests(unittest.TestCase):
         self.assertEqual((16383, 2 ** 32 - 1, -32768), (config.servos[1].p, config.servos[1].profile_velocity,
                                                         config.servos[7].goal_current))
 
+    def test_profile_with_and_without_move_time(self):
+        config = parse_servo_config(config_with(
+            time=(1, 'profile', {'velocity': 250, 'acceleration': 100, 'move_time': 15}),
+            edge=(2, 'profile', {'velocity': 150, 'acceleration': 50, 'move_time': 32737})))
+        self.assertEqual((15, True), (config.servos[1].move_time, config.servos[1].time_based))
+        self.assertEqual((250, 100), (config.servos[1].profile_velocity, config.servos[1].profile_acceleration))
+        self.assertEqual(32737, config.servos[2].move_time)
+        self.assertEqual((None, False), (config.servos[7].move_time, config.servos[7].time_based))
+        self.assertEqual(1, parse_servo_config(config_with(
+            one=(1, 'profile', {'velocity': 250, 'acceleration': 100, 'move_time': 1}))).servos[1].move_time)
+
+    def test_invalid_move_time(self):
+        for move_time in (0, -5, 32738, 2 ** 32, 12.5, '15', True, None):
+            with self.subTest(move_time=move_time):
+                profile = {'velocity': 250, 'acceleration': 100, 'move_time': move_time}
+                self.assert_invalid(config_with(change=(1, 'profile', profile)), 'servo 1: profile move_time')
+
+    def test_move_time_error_gives_the_range(self):
+        self.assert_invalid(config_with(change=(1, 'profile', {'velocity': 250, 'acceleration': 100, 'move_time': 0})),
+                            'move_time should be from 1 to 32737, not 0')
+        self.assert_invalid(config_with(change=(1, 'profile', {'velocity': 250, 'acceleration': 100,
+                                                               'move_time': 32738})),
+                            'move_time should be from 0 to 32737, not 32738')
+
+    def test_unknown_profile_key_is_still_refused(self):
+        self.assert_invalid(config_with(change=(1, 'profile', {'velocity': 250, 'acceleration': 100, 'time': 15})),
+                            'profile: unknown time')
+
+    def test_ff1(self):
+        config = parse_servo_config(config_with(
+            ff1=(1, 'pid', {'p': 1500, 'i': 0, 'd': 500, 'ff1': 300}),
+            edge=(2, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'ff1': 16383})))
+        self.assertEqual((300, 16383, 0), (config.servos[1].ff1, config.servos[2].ff1, config.servos[7].ff1))
+
+    def test_invalid_ff1(self):
+        for ff1 in (-1, 16384, 1.5, '300', None):
+            with self.subTest(ff1=ff1):
+                self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'ff1': ff1})),
+                                    'servo 1: ff1 should be')
+        self.assert_invalid(config_with(change=(1, 'pid', {'p': 1, 'i': 0, 'd': 0, 'ff1': 16384})),
+                            'ff1 should be from 0 to 16383, not 16384')
+
+    def test_unknown_pid_key_is_still_refused(self):
+        self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'ff2': 5})), 'pid: unknown ff2')
+
     def test_invalid_pairs(self):
         self.assert_invalid(config_with(change=(1, 'positions', 1024)), r'positions should be \[first, last\]')
         self.assert_invalid(config_with(change=(1, 'positions', [0, 1024, 2048])), r'positions should be \[first, last\]')

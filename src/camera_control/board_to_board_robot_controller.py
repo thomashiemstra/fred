@@ -163,8 +163,8 @@ class BoardToBoardRobotController:
             # the robot holds its pose when the board asks for one outside the workspace limits
             if self.robot.workspace_violation(self.robot.pose_to_angles(new_pose)) is None:
                 self.current_pose = new_pose
-            recommended_time, time_taken = self.robot.move_to_pose(self.current_pose)
-            time_to_sleep = np.maximum(np.maximum(recommended_time, self.dt) - time_taken, 0)
+            time_taken = self.robot.move_to_pose(self.current_pose)
+            time_to_sleep = np.maximum(self.dt - (time_taken or 0.0), 0)
             sleep(time_to_sleep)
 
         self.stop_robot()

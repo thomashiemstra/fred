@@ -34,6 +34,7 @@ _PROFILE_ACCELERATION_REGISTER = (cfg.LEN_PROFILE_ACCELERATION, False)
 _PROFILE_VELOCITY_REGISTER = (cfg.LEN_PROFILE_VELOCITY, False)
 _PID_REGISTER = (cfg.LEN_PID, False, cfg.MAX_GAIN)  # the servos accept 0..16383 and drop a larger gain silently
 _GOAL_CURRENT_REGISTER = (cfg.LEN_GOAL_CURRENT, True)
+_MOVE_TIME_REGISTER = (cfg.LEN_PROFILE_VELOCITY, False, cfg.MAX_PROFILE_TIME)  # ms in the time-based profile
 
 
 class ServoConfigError(ValueError):
@@ -129,9 +130,16 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
         first, last = _pair(data['states'], 'states', source)
 
     profile = data['profile']
-    _check_fields(profile, {'velocity', 'acceleration'}, set(), source + ', profile')
+    _check_fields(profile, {'velocity', 'acceleration'}, {'move_time'}, source + ', profile')
     pid = data['pid']
-    _check_fields(pid, {'p', 'i', 'd'}, set(), source + ', pid')
+    _check_fields(pid, {'p', 'i', 'd'}, {'ff1'}, source + ', pid')
+
+    move_time = None
+    if 'move_time' in profile:
+        move_time = _register(profile['move_time'], 'profile move_time', source, *_MOVE_TIME_REGISTER)
+        if move_time < 1:
+            raise ServoConfigError('{}: profile move_time should be from 1 to {}, not {}'.format(
+                source, cfg.MAX_PROFILE_TIME, move_time))
 
     goal_current = data.get('goal_current')
     if goal_current is not None:
@@ -157,7 +165,8 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
                  d=_register(pid['d'], 'd', source, *_PID_REGISTER),
                  offset=_register(data.get('offset', 0), 'offset', source, *_POSITION_REGISTER),
                  goal_current=goal_current,
-                 compensation=compensation)
+                 compensation=compensation, move_time=move_time,
+                 ff1=_register(pid.get('ff1', 0), 'ff1', source, *_PID_REGISTER))
 
 
 def _parse_spring(data: Any, source: str, a2: float) -> SpringGeometry:

@@ -150,7 +150,7 @@ class FakeRobot:
     def move_to_pose(self, pose):
         self.moving_threads.add(threading.current_thread().name)
         self.poses.append(copy(pose))
-        return 0, 0
+        return 0.0
 
     def set_gripper(self, new_gripper_state):
         self.gripper_calls.append(new_gripper_state)
@@ -1278,3 +1278,180 @@ class RestartTests(unittest.TestCase):
 
         self.assertEqual([0], robot.gripper_calls)
         self.assertEqual(0, controller.gripper_state)
+
+
+class PacingTests(unittest.TestCase):
+    """the control loop follows the clock, so the passes start one period apart whatever a pass costs"""
+
+    period = 0.01  # the dt of the pose updater of make_controller
+
+    def setUp(self):
+        self.now = 100.0
+        self.pass_starts = []
+        self.sleeps = []  # (index of the pass, seconds)
+        self.events = []  # (what, index of the pass)
+        for name, fake in (('perf_counter', lambda: self.now), ('sleep', self.fake_sleep)):
+            patcher = mock.patch.object(xbox_robot_controller, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # the start move and the move back are not part of the loop
+        patcher = mock.patch.object(xbox_robot_controller, 'execute_move', return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(XboxRobotController, 'stop_robot')
+        self.stop_robot = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fake_sleep(self, seconds):
+        self.sleeps.append((len(self.pass_starts) - 1, seconds))
+        self.now += seconds
+
+    def take_time(self, seconds):
+        """the seconds a part of the current pass takes: a number, or a function of the index of the pass"""
+        index = len(self.pass_starts) - 1
+        self.now += seconds(index) if callable(seconds) else seconds
+
+    def make_loop(self, passes, robot=None, gamepad=0.0, buttons=0.0):
+        """a controller whose loop stops after the given number of passes, reading the gamepad takes time"""
+        robot = robot or FakeRobot(inverse_kinematics(Pose(30, 22, 4), test_config))
+        controller = make_controller(robot, lambda: self.take_time(buttons) or Buttons())
+        controller.current_pose = Pose(30, 22, 4)
+
+        def read_gamepad(pose, find_center_mode, center, dt=None):
+            self.pass_starts.append(self.now)
+            self.take_time(gamepad)
+            if len(self.pass_starts) == passes:
+                controller._stop_requested.set()
+            return pose
+
+        controller.pose_updater.get_updated_pose_from_controller.side_effect = read_gamepad
+        return controller
+
+    def run_loop(self, passes, gamepad=0.0, send=0.0, check=None, buttons=0.0):
+        """run the loop with a fake send that takes `send` seconds, and a fake hardware check of `check` seconds that
+        runs in every pass (without `check` it never runs)"""
+        controller = self.make_loop(passes, gamepad=gamepad, buttons=buttons)
+
+        def send_pose():
+            index = len(self.pass_starts) - 1
+            self.events.append(('send', index))
+            self.take_time(send)
+
+        def check_hardware_errors():
+            self.events.append(('check', len(self.pass_starts) - 1))
+            self.take_time(check)
+
+        with mock.patch.object(controller, '_send_current_pose', side_effect=send_pose), \
+                mock.patch.object(controller, 'check_hardware_errors', side_effect=check_hardware_errors), \
+                mock.patch.object(xbox_robot_controller, 'HARDWARE_CHECK_INTERVAL', 1.0 if check is None else 0.0):
+            controller._XboxRobotController__control_robot()
+        return controller
+
+    def assert_gaps(self, expected_gaps):
+        """the time between the starts of the passes"""
+        gaps = np.diff(self.pass_starts)
+        self.assertEqual(len(expected_gaps), len(gaps))
+        for gap, expected in zip(gaps, expected_gaps):
+            self.assertAlmostEqual(expected, gap, places=9)
+
+    def test_the_sleep_is_the_period_minus_what_the_pass_cost(self):
+        self.run_loop(5, gamepad=0.002, send=0.003, buttons=0.001)
+
+        self.assert_gaps([self.period] * 4)
+        self.assertEqual(5, len(self.sleeps))
+        for _, seconds in self.sleeps:
+            self.assertAlmostEqual(self.period - 0.006, seconds, places=9)
+
+    def test_a_pass_that_costs_nothing_sleeps_the_whole_period(self):
+        self.run_loop(3)
+
+        self.assert_gaps([self.period] * 2)
+        self.assertEqual(3, len(self.sleeps))
+        for _, seconds in self.sleeps:
+            self.assertAlmostEqual(self.period, seconds, places=9)
+
+    def test_the_gamepad_step_still_covers_the_time_that_really_passed(self):
+        controller = self.run_loop(4, gamepad=0.002, send=0.003)
+
+        calls = controller.pose_updater.get_updated_pose_from_controller.call_args_list
+        self.assertEqual(0.0, calls[0].kwargs['dt'])
+        for call in calls[1:]:
+            self.assertAlmostEqual(self.period, call.kwargs['dt'], places=9)
+
+    def test_every_pass_advances_the_deadline_by_the_period(self):
+        # whatever a send costs, as long as it fits in the period
+        self.run_loop(5, gamepad=0.002, send=lambda index: 0.001 * (index + 1))
+
+        self.assert_gaps([self.period] * 4)
+        for index, seconds in self.sleeps:
+            self.assertAlmostEqual(self.period - 0.002 - 0.001 * (index + 1), seconds, places=9)
+
+    def test_a_pass_that_overran_does_not_sleep_and_the_next_passes_do_not_hurry(self):
+        self.run_loop(6, gamepad=0.002, send=lambda index: 0.025 if index == 2 else 0.003)
+
+        self.assertNotIn(2, [index for index, _ in self.sleeps])
+        # the pass after the overrun starts when the overrun pass ended, not at the missed deadline, and the passes
+        # after it are one period apart again: no burst to catch up
+        self.assert_gaps([self.period, self.period, 0.002 + 0.025, self.period, self.period])
+        for index, seconds in self.sleeps:
+            if index != 2:
+                self.assertAlmostEqual(self.period - 0.005, seconds, places=9)
+
+    def test_a_pass_that_ends_exactly_at_its_deadline_does_not_sleep(self):
+        self.run_loop(3, send=self.period)
+
+        self.assertEqual([], self.sleeps)
+        self.assert_gaps([self.period] * 2)
+
+    def test_the_hardware_check_runs_after_the_pose_was_sent_and_comes_out_of_the_sleep(self):
+        self.run_loop(4, gamepad=0.001, send=0.003, check=0.004)
+
+        self.assertEqual([(what, index) for index in range(4) for what in ('send', 'check')], self.events)
+        self.assert_gaps([self.period] * 3)
+        for _, seconds in self.sleeps:
+            self.assertAlmostEqual(self.period - 0.008, seconds, places=9)
+
+    def test_a_slow_hardware_check_makes_the_pass_overrun_without_a_catch_up(self):
+        self.run_loop(4, gamepad=0.001, send=0.003, check=lambda index: 0.02 if index == 1 else 0.004)
+
+        self.assertNotIn(1, [index for index, _ in self.sleeps])
+        self.assert_gaps([self.period, 0.001 + 0.003 + 0.02, self.period])
+
+    def test_the_hardware_check_interval_is_kept(self):
+        controller = self.make_loop(250)
+
+        with mock.patch.object(controller, '_send_current_pose'), \
+                mock.patch.object(controller, 'check_hardware_errors') as check:
+            controller._XboxRobotController__control_robot()
+
+        # the passes are 10ms apart, so the checks are about 100 passes apart
+        self.assertEqual(2, check.call_count)
+
+    def test_a_hardware_error_ends_the_loop_after_the_pass_that_found_it(self):
+        robot = FakeRobot(inverse_kinematics(Pose(30, 22, 4), test_config))
+        robot.hardware_errors = {5: ['overload']}
+        robot.on_move_servos = lambda: self.take_time(0.001)
+        controller = self.make_loop(1000, robot, gamepad=0.001)
+
+        with mock.patch.object(xbox_robot_controller, 'HARDWARE_CHECK_INTERVAL', 0.0), \
+                self.assertRaisesRegex(RuntimeError, r'servos \[5\] shut down'):
+            controller._XboxRobotController__control_robot()
+
+        # that pass sent its goal, then there is no sleep and no second pass, and the servos are left holding
+        self.assertEqual(1, len(self.pass_starts))
+        self.assertEqual(1, len(robot.sent_angles))
+        self.assertEqual([], self.sleeps)
+        self.stop_robot.assert_not_called()
+
+    def test_a_too_warm_servo_ends_the_loop_after_the_pass_that_found_it(self):
+        robot = FakeRobot(inverse_kinematics(Pose(30, 22, 4), test_config))
+        robot.overheating = {2: 51}
+        robot.on_move_servos = lambda: self.take_time(0.001)
+        controller = self.make_loop(1000, robot, gamepad=0.001)
+
+        with mock.patch.object(xbox_robot_controller, 'HARDWARE_CHECK_INTERVAL', 0.0):
+            controller._XboxRobotController__control_robot()
+
+        self.assertEqual(1, len(self.pass_starts))
+        self.assertEqual(1, len(robot.sent_angles))
+        self.stop_robot.assert_called_once()

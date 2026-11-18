@@ -20,6 +20,9 @@ decisions here come from a research and refutation pass over the plan and from a
   or ripple, 0.65 times that knee as the recommendation, then the whole D grid at that P, a D above the
   smallest passing one only where it lowers the overshoot or the resting error after the steps by a position.
   Order: the wrist first (6, 4, 5), then 3, 1 and 2.
+- The feedforward stage (`--ff`, `--ff-only`, since 18 November 2026) sets the velocity feedforward gain of a servo
+  with the time-based profile from the lag of a streamed sweep at three speeds: FF1 = P / 32 times the slope of the
+  lag against the speed. See "The feedforward stage".
 - The script is tested against a simulated servo with friction and reviewed, not run on the robot. The abort
   thresholds are guesses until joint 6 has run.
 
@@ -117,10 +120,22 @@ joint 2 gained nothing from D 250 to 2620); `--d-max` raises it up to the regist
 trials themselves, as pwm noise (D multiplies the encoder's one-count flicker; reported as a warning, and a D that
 adds it is held back when the candidates are compared), a slow settle (overdamped), or, on the belt joints 1 and 2, where the encoder sits on the joint shaft
 behind the belt, as oscillation (the belt delays what the encoder sees, and at its resonance D can feed the
-oscillation instead of damping it). The grid stops when 2 D gains in a row (`--d-patience`) don't raise the P of
-the joint above the best before them: the same P, a lower one, or no passing P at all. The first grid run only
-stopped on a lower P: joint 2 had the same P of the joint from D 250 to 2620, so it walked on until servo 3 (holding
-the upper arm) passed its temperature warning after 13 minutes (`tune_joint2_20261025_1509`). `--d-values` sweeps a
+oscillation instead of damping it). The grid stops when 2 D gains in a row (`--d-patience`) are no progress. A D gain
+is progress when it raises the P of the joint above the best before it, or, at the same P of the joint, when the
+overshoot of the trial at the knee fell clearly. The knee is that of the limiting pose (the pose whose recommended P
+is the P of the joint, the one with the larger overshoot when several tie): its failing trial of the P sweep at that
+D, when it is flagged for overshoot (a knee from ringing, settling or ripple alone says nothing about the overshoot).
+The overshoot has fallen clearly when it is at least the larger of 1 position (`KNEE_OVERSHOOT_DROP`) and 10 %
+(`KNEE_OVERSHOOT_DROP_FRACTION`) of the lowest one recorded below it for the same pose and knee P since the P of the
+joint was last raised (the lowest, not the previous D gain: 11.7, 12.5, 11.0 is no progress); a knee at another pose
+or P is recorded and only compared from then on. A D that lowers the P of the joint, or has none, is no progress
+whatever its overshoot. The first grid run only stopped on a lower P: joint 2 had the same P of the joint from D 250
+to 2620, so it walked on until servo 3 (holding the upper arm) passed its temperature warning after 13 minutes
+(`tune_joint2_20261025_1509`). The overshoot rule came on 18 November 2026: P moves in steps of 1.3, so D can help
+steadily without the knee moving a whole step. Joint 4 had, at the pose that limits it, a knee at P 1010 at D 250,
+400 and 640, with an overshoot of the failing trial of 11.7, 10.0 and 8.7 positions (the limit is 6): the grid
+stopped after D 640 although the overshoot fell steadily, and never tried D 1020, at which the run the day before had
+moved the knee up. `--d-values` sweeps a
 given list instead, `--no-d` the yaml D only (the method before 25 October).
 
 Per pose and D:
@@ -146,10 +161,13 @@ Per pose and D:
      (the measured slope goes to the csv). At the full clamp of joints 4 and 6 that is 60 positions up to a P of
      about 1500 and 34 at 2600, twice what the floor of 442 allowed;
    - switches the profile of the servo off (velocity and acceleration 0, a step instruction) and steps the goal:
-     up, back, down, back, twice; each step is held 0.8 s;
+     up, back, down, back, twice; each step is held 0.8 s. The steps are written with `step_servo_to_pos`, which
+     writes the profile registers 0, 0 and the goal in one packet, also for a servo with a `move_time` (whose registers
+     mean the time of the move and the acceleration time in ms: its yaml registers are `(move_time, 0)`, and that is
+     what the restore writes and checks);
    - restores the profile and the goal pwm and streams a planned 8 degree move of the joint away and back with the
      production profile, sampling the tracking against the position trajectory of the servo;
-   - restores the yaml gains and reads everything back.
+   - restores the yaml gains and the yaml feedforward gain and reads everything back.
 3. The first trial that violates a criterion is the knee; 0.65 times the knee is the recommended P of the pose.
 4. The smallest recommendation of the poses at a D is the P of the joint at that D. The D with the highest P of
    the joint wins: the most margin to the knee. One step of the sweep (a factor 1.3) is its resolution and counts.
@@ -279,7 +297,8 @@ Options: `--pose`, `--factor` 1.3, `--max-factor` 2.0, `--no-d`, `--d-start` 250
 `--max-step` (the largest step of the trials in positions, at least 8; default 15 for joints 1 and 2, which swing
 the whole arm, and 60 for the others; a smaller step is a gentler but coarser test, the overshoot criterion only
 counts above 2 positions),
-`--max-temperature` (default the yaml `temperature_limit`), `--floor`, `--output-dir`, `--plot`.
+`--max-temperature` (default the yaml `temperature_limit`), `--floor`, `--output-dir`, `--plot`, and the options of
+the feedforward stage (see there): `--ff`, `--ff-only`, `--ff-degrees`, `--ff-speeds`, `--ff-max`.
 
 Output in `--output-dir`: `tune_joint<N>_<time>_samples.csv` (every sample: pose, trial, p, d, segment, repeat,
 step index, direction, time, tick, goal, position, position trajectory, velocity, velocity trajectory, pwm, current,
@@ -308,6 +327,87 @@ the step sizes are sensible (the console prints them), that a trial ends in the 
 try one Ctrl+C. Then the other joints. Put the recommended gains in `servo_config.yaml` and record the static load
 again.
 
+## The feedforward stage
+
+Nov 18, 2026. `--ff` runs the stage after the P and D tuning, `--ff-only` runs it alone. It sets the velocity
+feedforward gain FF1 of one joint. It needs the time-based profile: the servo has to have a `move_time` in
+`servo_config.yaml`, because only then does every goal the robot streams carry a time and the trajectory of the servo
+is a smooth ramp whose velocity the feedforward can follow. For a servo without `move_time` the script prints
+`servo N has no move_time in servo_config.yaml, the feedforward stage needs the time-based profile` and skips the
+stage (with `--ff-only` it ends there, before the servos are enabled). Tested on the simulated servo only, not run on
+the robot yet.
+
+What the gain does. The position controller outputs P / 128 pwm units per position of error. The feedforward adds
+FF1 / 4 pwm units per position per millisecond of the velocity of the trajectory (Position Trajectory, not the goal),
+outside the loop, so it can't make it oscillate. A joint that moves needs drive that grows with its speed: the motor's
+back voltage and the viscous friction. Without feedforward that drive can only come from P times the error, so the
+joint trails its trajectory by a lag that grows with its speed. With the right FF1 the drive for the speed comes from
+the feedforward and the lag is the same at every speed. What doesn't depend on the speed stays: the friction (its
+drive divided by P / 128 is a lag of a few positions in either direction, the friction band of the steps) and the
+sag under a static load, which the averaging over both directions takes out of the measurement.
+
+The gain. The lag is the drive divided by P / 128, so a lag that grows by `slope` positions per position per
+millisecond of speed (the slope is in milliseconds) needs `FF1 = 4 * P / 128 * slope = P / 32 * slope`. The slope is
+proportional to 1 / P, so the gain doesn't depend on P: it is the drive the motor needs per unit of speed. The stage
+measures at the yaml P and D, and the yaml line it prints still holds after a later change of P (a consequence of the
+formula, not checked on the robot).
+
+The method, at the first accepted pose only (the slope is a property of the motor and doesn't depend on the pose):
+
+1. Before anything moves, every sweep is built and checked with the planner's `check_move` (joint speed, range,
+   workspace of every step), the pose with the joint moved by the sweep either way is checked as the script checks an
+   excursion, and every sweep must have cruise parts in both directions. A refused sweep prints why and skips the
+   stage.
+2. A sweep at one speed moves only the joint under test: from the pose to +A, to -A, to +A, to -A and back to the pose
+   (A is `--ff-degrees`). Every leg is a rest to rest move: the speed ramps up linearly over 0.2 s, cruises at the
+   speed and ramps down over 0.2 s (a triangle without cruise when the leg is too short to reach the speed). The
+   angles go out with `move_servos` every 1 / `steps_per_second` s against the clock, as the streamed move of a trial
+   does, and the servo is read as often as fits between two writes. The abort rules for a streamed move apply (an abort
+   restores the servo and ends the stage).
+3. A sample counts as cruise when the commanded speed has been at its full value for at least 0.15 s and still is.
+   Per sweep, over the cruise samples, separately for the position going up and going down and then averaged over the
+   two (so the pull of gravity and any static load cancel). The direction is the one of the position: for a servo
+   mounted reversed (`positions: [3072, 1024]` for `angles: [-90, 90]`, joint 3) it is the opposite of the sweep's
+   direction in degrees, found with `position_sign`. The lag is `(position trajectory - position) * direction`, so
+   positive when the servo trails; the pwm times the direction; the std of both; and the cruise speed in positions per
+   millisecond, from the goal positions the servo was sent (the slope of the goal against the time within each cruise
+   part), not converted from degrees.
+4. Measure: FF1 = 0 (written and read back), one sweep per speed. Fit a straight line `lag = friction + slope * speed`
+   through the points of all speeds (least squares). The gain is `round(P / 32 * slope)` with the yaml P, clipped to 0
+   to `--ff-max` (a warning when it was clipped; a slope of 0 or less gives 0 and a line saying the lag doesn't grow
+   with speed, and nothing is verified).
+5. Verify: write that gain (read back), sweep at every speed again and fit again. When the remaining slope would change
+   the lag by more than 1 position between the slowest and the fastest speed, correct once:
+   `FF1 += round(P / 32 * remaining slope)` (clipped), write, sweep and fit again. There is no second correction: the
+   remaining slope is reported either way.
+6. The servo has its yaml feedforward gain again afterwards, not the recommended one, as after every stage: an abort
+   or Ctrl+C goes through the same restore (gains, feedforward gain, profile registers, goal pwm, all read back), and
+   the arm is lowered at the end as after the other stages. `--ff` after a P and D run that stopped doesn't start the
+   stage.
+
+Options: `--ff`, `--ff-only` (the P and D stages are skipped, and so are their csv files), `--ff-degrees` (A, default
+15), `--ff-speeds` (three or more different cruise speeds in degrees per second, default `10 20 30`; fewer than three
+is an error), `--ff-max` (the largest gain the stage sets, default 4000, at most 16383).
+
+Output: a table with a row per FF1 and speed (speed in degrees/s and positions/ms, lag, pwm, std of the lag and of
+the pwm); the friction as a lag in positions and as a drive (`P / 128 * friction lag`) and the slope without feedforward
+in ms; the remaining slope after the verify; a warning when the std of the lag at any speed grew by more than a position
+against FF1 = 0 (the feedforward makes the joint rougher; the pwm std grows with it by itself and is not the warning);
+and the line for the yaml, e.g. `pid: {p: 780, i: 0, d: 1020, ff1: 487}`. The samples go to
+`tune_joint<N>_<time>_ff.csv`: joint, pose, ff1, speed (degrees/s), time, direction (of the position), cruise, goal,
+position, position trajectory, velocity, velocity trajectory, pwm, current, voltage, temperature. The files of the P and D stages keep
+their columns.
+
+Worked example: joint 4 at P 780, measured on 18 November 2026 with a bench script, before this stage existed. The
+lag while cruising was 8.0 positions at 145 positions/s and 12.9 positions at 392 positions/s: 4.9 positions more for
+247 positions/s more, a slope of 20 ms. FF1 = 780 / 32 * 20 = 487 makes the lag the same at every speed; the 8.0
+positions at 145 positions/s are mostly the part that doesn't depend on the speed (a line through the two points has
+5.1 positions at no speed), and that part stays.
+
+Where the stage can mislead: it measures the lag against the Position Trajectory of the servo, so it assumes the
+trajectory is what the loop follows when goals stream (see "Assumptions the plan still rests on"); on the belt joints 1 and 2 the lag is in encoder positions, with the belt inside the loop; the sweep at the
+fastest speed is where a gain that is too high shows first (the lag turns negative, the joint leads).
+
 ## The code
 
 - `src/robot_controllers/dynamixel_robot/calibration/gain_tuning.py`: the arithmetic, pure functions on lists of
@@ -317,12 +417,18 @@ again.
 - `src/robot_controllers/dynamixel_robot/calibration/tune_servo_gains.py`: `TuningSession` (snapshot, restore,
   the planned moves through `record_static_load.move_to`, sampling with the abort rules, the trial, `run_sweep` and
   `sweep_pose` for the P sweep at a D, `compare_d` for the D gains that share the best P, `run` for the grid),
-  the grid functions `d_grid`, `swept_d_values`, `joint_p_at`, `d_candidates`, `grid_is_done`, `compared_d`, and
+  the grid functions `d_grid`, `swept_d_values`, `joint_p_at`, `d_candidates`, `knee_trial`, `joint_knee_at`, `d_progress`, `grid_is_done`, `compared_d`, and
   `recommend`, `print_summary`, `plot_results`, `main`. `PoseResult.sweeps` holds a `Sweep` (knee, recommended P,
   highest P that passed) per D.
 - `src/robot_controllers/dynamixel_robot/calibration/plot_tuning.py`: the figures from the csv files: the knee and
   the recommended P against D (`plot_grid`), the metrics of the P sweep per D (`plot_knee`), the comparison of the
   D gains (`plot_d`), the step responses per D (`plot_steps`).
+- The feedforward stage: in `gain_tuning.py` `ff_sweep` (the steps of a sweep: time, joint offset in degrees,
+  direction, cruise flag, leg), `cruise_statistics` (per direction, averaged), `fit_line`, `lag_growth`,
+  `feedforward_change` (P / 32 times the slope), `clip_gain`, `rougher_speeds`; in `tune_servo_gains.py`
+  `feedforward_refusal` (the checks before anything moves), `TuningSession.run_feedforward`, `feedforward_sweep` and
+  `measure_feedforward`, `print_feedforward`. It uses `ServoHandler.set_feedforward`,
+  `set_feedforward_single_servo`, `read_feedforward` and `step_servo_to_pos`.
 - `ServoHandler` (`servo_handler.py`): `read_state` (one 27 byte packet per bus, addresses 120-146, a `ServoState`
   per servo), `read_pid`, `read_profile`, `read_goal_pwm`, `set_profile(servo_id, velocity, acceleration)`,
   `set_goal_pwm`; the gain range check in `__write_pid`; `read_temperature_and_voltage` in one packet per bus;
@@ -335,7 +441,10 @@ again.
   above a P threshold so it rings and, with a steep enough drop, oscillates with a bounded amplitude, and a friction
   band that narrows with D; the knee, the abort, the sweep downwards, a D that raises the knee winning, a noisy D
   ending the grid, D gains that share the best P compared and chosen for the band they rest in, the full clamp of an unloaded joint, an environmental stop, a warm servo, a leftover clamp, a
-  flaky read, a refused pose) and the block read tests at the end of `servo_handler_tests.py`.
+  flaky read, a refused pose; the feedforward stage on a simulated servo whose lag grows with the speed and whose
+  trajectory ramps over the move time: the gain that makes the lag flat, the single correction, the clip, an abort and
+  a stop during a sweep, a servo without `move_time`, the options of `main`) and the block read tests at the end of
+  `servo_handler_tests.py`.
 - Removed: `calibration/pid_test.py` (2021: a quarter turn step of servo 1 at import, torque left on).
 
 ## What the review changed, and what is still unverified
@@ -416,4 +525,4 @@ Open items:
   elbow at P 1500, I 0, D 600, close to this yaml. The firmware's D acts on the error, so with the profile off it
   adds a derivative kick on a step and with the profile on it is a velocity tracking term; the velocity feedforward
   (Feedforward 1st Gain) is outside the loop and can't destabilise it, which makes it the parameter for the tracking
-  lag in the friction stage later.
+  lag; the feedforward stage above sets it.

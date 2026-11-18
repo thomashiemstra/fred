@@ -387,6 +387,11 @@ def main(argv: list[str] | None = None) -> int:
         print('servo {} is not in servo_config.yaml'.format(servo_id))
         return 1
     servo = config.servos[servo_id]
+    # it sweeps profile velocities, which a time-based servo doesn't have; refused before the port is opened
+    if servo.time_based:
+        print('servo {} uses the time-based profile (move_time in servo_config.yaml), this script only works with the '
+              'velocity-based one'.format(servo_id))
+        return 1
     try:
         profiles = parse_profiles(args.profiles) if args.profiles else [(servo.profile_velocity,
                                                                           servo.profile_acceleration)]

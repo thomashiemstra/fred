@@ -234,7 +234,7 @@ class RobotEnv(py_environment.PyEnvironment):
         # self._create_visual_target_spheres(self._target_pose)
 
         self._robot_controller.reset_to_pose(self._start_pose)
-        self._advance_simulation(0)
+        self._advance_simulation()
 
         self._current_angles = self._robot_controller.get_current_angles()
         observation, self._closest_distance_so_far = self._get_observations()
@@ -282,7 +282,6 @@ class RobotEnv(py_environment.PyEnvironment):
         if self._done:
             return self.reset()
 
-        recommended_time: float = 0
         prev_x: float = 0
         prev_y: float = 0
         prev_z: float = 0
@@ -296,9 +295,9 @@ class RobotEnv(py_environment.PyEnvironment):
             prev_x, prev_y, prev_z = self._current_pose.x, self._current_pose.y, self._current_pose.z
             self._update_current_pose_and_clip(action)
             self._pose_recorder.add_pose(self._current_pose)
-            recommended_time, _ = self._robot_controller.move_to_pose(self._current_pose)
+            self._robot_controller.move_to_pose(self._current_pose)
 
-        self._advance_simulation(recommended_time)
+        self._advance_simulation()
         self._sync_position()
 
         assert self._current_pose is not None
@@ -441,14 +440,11 @@ class RobotEnv(py_environment.PyEnvironment):
         normalized_gamma = self._current_pose.gamma / np.pi
         return [normalized_x, normalized_y, normalized_z, normalized_alpha, normalized_gamma]
 
-    def _advance_simulation(self, recommended_time: float) -> None:
+    def _advance_simulation(self) -> None:
         # for _ in range(self._simulation_steps_per_step):
         #     p.stepSimulation(self._physics_client)
         if self._use_gui:
-            if recommended_time == 0:
-                sleep(self._wait_time_per_step)
-            else:
-                sleep(recommended_time)
+            sleep(self._wait_time_per_step)
         else:
             for _ in range(self._simulation_steps_per_step):
                 p.stepSimulation(self._physics_client)

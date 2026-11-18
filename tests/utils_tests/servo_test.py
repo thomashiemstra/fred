@@ -1,8 +1,15 @@
+import os
 import unittest
 
 from src.global_constants import EXTENDED_POSITION_CONTROL
+from src.robot_controllers.dynamixel_robot.dynamixel_x_config import MAX_PROFILE_TIME
 from src.robot_controllers.dynamixel_robot.servo import Servo, Servo2, Servo3, ServoWithOffsetFunction
+from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from numpy import pi
+
+# the servo configuration of the tests, so a new calibration of the robot doesn't change them
+TEST_SERVO_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'servo_controller_tests',
+                                      'test_servo_config.yaml')
 
 
 class ServoTest(unittest.TestCase):
@@ -398,3 +405,103 @@ class ServoCompensationTest(unittest.TestCase):
         self.servo.set_target_position_from_angle(1.0, self.angles)
         self.servo.set_target_position_from_angle(1.0 + self.servo.direction_deadband / 2, self.angles)
         self.assertEqual(20, self.servo.compensation_positions, 'the mean terms, no direction yet')
+
+
+class TimeBasedProfileTests(unittest.TestCase):
+
+    @staticmethod
+    def servo(move_time=15, profile_velocity=300, profile_acceleration=100, **kwargs):
+        return Servo(0, 4095, 0, 2 * pi, EXTENDED_POSITION_CONTROL, profile_velocity=profile_velocity,
+                     profile_acceleration=profile_acceleration, move_time=move_time, **kwargs)
+
+    def test_velocity_based_by_default(self):
+        servo = Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, profile_velocity=300, profile_acceleration=100)
+        self.assertFalse(servo.time_based)
+        self.assertIsNone(servo.move_time)
+        self.assertEqual(0, servo.ff1)
+        self.assertEqual((300, 100), servo.profile_registers())
+
+    def test_time_based(self):
+        servo = self.servo(ff1=700)
+        self.assertTrue(servo.time_based)
+        self.assertEqual((15, 0), servo.profile_registers())
+        self.assertEqual((15, 700), (servo.move_time, servo.ff1))
+        self.assertIn('move_time=15 ff1=700', str(servo))
+
+    def test_subclasses_take_move_time_and_ff1(self):
+        offsets = {'0.0': {'0.0': 0}}
+        servos = (ServoWithOffsetFunction(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, lambda angles: 0,
+                                          lambda angles: 0, move_time=12, ff1=3),
+                  Servo2(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offsets, move_time=12, ff1=3),
+                  Servo3(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets={'0.0': 0}, move_time=12, ff1=3))
+        for servo in servos:
+            self.assertEqual((12, 3, True), (servo.move_time, servo.ff1, servo.time_based), type(servo).__name__)
+
+    def test_a_small_distance_gets_the_move_time(self):
+        servo = self.servo()
+        self.assertEqual((15, 0), servo.goal_timing(0))
+        self.assertEqual((15, 0), servo.goal_timing(50))  # 11 ms at the top speed
+        self.assertEqual((15, 0), servo.goal_timing(-50))
+        self.assertEqual((15, 0), servo.goal_timing(70))  # 14.9 ms, rounded up to the move time
+
+    def test_a_far_distance_gets_a_trapezoid(self):
+        # 300 velocity units are 300 * 0.229 / 60 * 4096 = 4690.2 positions/s, 2000 positions take
+        # ceil(426.4) = 427 ms, the acceleration time is 64 * 300 / 100 = 192 ms, together 619 ms
+        servo = self.servo()
+        self.assertEqual((619, 192), servo.goal_timing(2000))
+        self.assertEqual((619, 192), servo.goal_timing(-2000))
+
+    def test_speed_factor_slows_the_move(self):
+        # half the speed: 2345.1 positions/s, ceil(852.8) = 853 ms, the acceleration time 64 * 150 / 100 = 96 ms
+        self.assertEqual((949, 96), self.servo().goal_timing(2000, 0.5))
+        self.assertEqual((619, 192), self.servo().goal_timing(2000, 1.0))
+        # 50 positions are a streamed step at the top speed but take 22 ms at half the speed: ceil(21.3), the ramp
+        # is cut to the cruise time
+        self.assertEqual((22 + 22, 22), self.servo().goal_timing(50, 0.5))
+
+    def test_the_acceleration_time_is_at_most_the_cruise_time(self):
+        # 80 positions take 18 ms, longer than the move time of 15 ms, but less than the acceleration time of 192 ms
+        self.assertEqual((36, 18), self.servo().goal_timing(80))
+
+    def test_no_acceleration_gives_no_acceleration_time(self):
+        self.assertEqual((427, 0), self.servo(profile_acceleration=0).goal_timing(2000))
+
+    def test_a_huge_distance_is_capped(self):
+        total, ramp = self.servo().goal_timing(10 ** 6)
+        self.assertEqual((MAX_PROFILE_TIME, 192), (total, ramp))
+        # a slow acceleration would give more than half of the move
+        slow = self.servo(profile_acceleration=1)
+        self.assertEqual((MAX_PROFILE_TIME, MAX_PROFILE_TIME // 2), slow.goal_timing(10 ** 6))
+
+    def test_no_speed_limit(self):
+        servo = self.servo(profile_velocity=0)
+        self.assertEqual((15, 0), servo.goal_timing(0))
+        self.assertEqual((15, 0), servo.goal_timing(10 ** 6))
+        self.assertEqual((15, 0), servo.goal_timing(10 ** 6, 0.5))
+
+    def test_a_servo_without_move_time_has_no_goal_timing(self):
+        servo = Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL)
+        with self.assertRaises(ValueError):
+            servo.goal_timing(100)
+
+    def test_invalid_speed_factor(self):
+        for speed_factor in (0, -0.5, 1.01, 2):
+            with self.subTest(speed_factor=speed_factor), self.assertRaises(ValueError):
+                self.servo().goal_timing(100, speed_factor)
+
+
+class DegreesAtPositionTests(unittest.TestCase):
+
+    def setUp(self):
+        self.servos = load_servo_config(TEST_SERVO_CONFIG_PATH).servos
+
+    def test_degrees_at_position_is_not_clamped(self):
+        servo = self.servos[1]
+        self.assertAlmostEqual(0, servo.degrees_at_position(1024 + servo.constant_offset))
+        self.assertAlmostEqual(180, servo.degrees_at_position(3072 + servo.constant_offset))
+        self.assertAlmostEqual(-180, servo.degrees_at_position(1024 - 2048 + servo.constant_offset))
+        # the elbow is mounted the other way around
+        elbow = self.servos[3]
+        self.assertAlmostEqual(-90, elbow.degrees_at_position(3072 + elbow.constant_offset))
+        self.assertAlmostEqual(90, elbow.degrees_at_position(1024 + elbow.constant_offset))
+        self.assertAlmostEqual(270, elbow.degrees_at_position(-1024 + elbow.constant_offset))

@@ -53,7 +53,6 @@ class SimulatedRobotController(AbstractRobotController):
         self.physics_client = physics_client
 
         self._motors = [i for i in range(6)]
-        self._current_angles: np.ndarray | Sequence[float] = self.get_current_angles()
         self._status = False
 
         # Used for gradient descent control and reinforcement learning
@@ -81,17 +80,14 @@ class SimulatedRobotController(AbstractRobotController):
 
         :param angles: angles to reset the servos to
         """
-        self._current_angles = angles
         p.setJointMotorControlArray(self.body_id, self._motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)
         for i in range(1, 7):
             p.resetJointState(self.body_id, i-1, angles[i], physicsClientId=self.physics_client, targetVelocity=0)
 
-    def move_to_pose(self, pose: Pose) -> tuple[float, float]:
-        angles = inverse_kinematics(pose, self.robot_config)
-        self.move_servos(angles)
-        recommended_time = 0
-        return recommended_time, 0
+    def move_to_pose(self, pose: Pose) -> float | None:
+        self.move_servos(inverse_kinematics(pose, self.robot_config))
+        return None
 
     def move_to_pose_and_give_new_angles(self, pose: Pose) -> np.ndarray:
         angles = inverse_kinematics(pose, self.robot_config)
@@ -99,7 +95,6 @@ class SimulatedRobotController(AbstractRobotController):
         return angles
 
     def move_servos(self, angles: np.ndarray | Sequence[float]) -> None:
-        self._current_angles = angles
         # First set the target_position variable of all servos
         p.setJointMotorControlArray(self.body_id, self._motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)

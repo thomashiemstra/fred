@@ -13,6 +13,7 @@ ADDR_D                  = 80
 ADDR_GOAL_CURRENT       = 102
 ADDR_OPERATING_MODE     = 11
 ADDR_HOMING_OFFSET      = 20  # eeprom, added by the servo to every position it reports
+ADDR_DRIVE_MODE         = 10  # eeprom, written with the torque off; bit 2 chooses the time-based profile
 ADDR_HARDWARE_ERROR_STATUS = 70
 ADDR_PRESENT_CURRENT    = 126
 ADDR_PRESENT_INPUT_VOLTAGE = 144
@@ -40,6 +41,7 @@ LEN_PID                 = 2
 LEN_GOAL_CURRENT        = 2
 LEN_OPERATING_MODE      = 1
 LEN_HOMING_OFFSET       = 4
+LEN_DRIVE_MODE          = 1
 LEN_HARDWARE_ERROR_STATUS = 1
 LEN_PRESENT_CURRENT     = 2
 LEN_PRESENT_INPUT_VOLTAGE = 2
@@ -61,6 +63,12 @@ LEN_STATE_BLOCK         = 27  # addresses 120 to 146, read in one packet by Serv
 MAX_GAIN                = 16383
 MAX_PWM                 = 885  # 100% duty, 0.113% per unit
 MAX_RETURN_DELAY_TIME   = 254  # 2 us per unit
+MAX_PROFILE_TIME        = 32737  # ms, the largest time the two profile registers accept in time-based mode
+# one velocity unit of the profile is 0.229 rev/min, a revolution is 4096 positions
+POSITIONS_PER_SECOND_PER_VELOCITY_UNIT = 0.229 * 4096 / 60
+# bit of the drive mode register: in this mode the profile velocity register (112) is the time of the move in ms
+# and the profile acceleration register (108) the acceleration time in ms
+DRIVE_MODE_TIME_BASED_PROFILE = 1 << 2
 # bits of the moving status register
 MOVING_STATUS_IN_POSITION = 1 << 0
 MOVING_STATUS_PROFILE_ONGOING = 1 << 1

@@ -13,16 +13,21 @@ under test (a multiple of the pwm it needs to hold the pose, the only torque lim
 full 885 on joints 1, 4 and 6, which carry no static load), writes the gains to that servo only, records the rest
 (ripple of the position and the pwm), steps the goal a few positions up and down with the profile of the servo
 switched off (the response of the position loop itself: overshoot, rings, settle time, steady state error per
-direction), and streams a short planned move with the production profile (the tracking of the trajectory). The step
+direction; a step is written with ServoHandler.step_servo_to_pos, which is a step in the time-based profile as well),
+and streams a short planned move with the production profile (the tracking of the trajectory). The step
 is sized so the pwm stays below the clamp, and capped per joint (--max-step: 15 positions on joints 1 and 2, which
 swing the whole arm, 60 on the others). A trial that overshoots, rings, doesn't settle, or raises the ripple at
 rest is the knee of the sweep; the recommended P is 0.65 times the knee. The pwm noise at rest is reported as a
 warning only: it follows where the joint parks relative to an encoder edge rather than the gain (joint 3,
 13 November 2026), though a D that adds pwm noise is still held back when the candidates are compared. The smallest
-recommendation of the poses is the P of the joint at that D. D is raised until --d-patience D gains in a row don't
-raise the P of the joint above the best before them (the same P, a lower one, or none: too much D shows as pwm
-noise, a slow settle, or on the belt joints as oscillation); the grid stops at --d-max, 2000 by default (the
-largest D in servo_config.yaml is 550), and --d-max raises it up to 16383. A start that
+recommendation of the poses is the P of the joint at that D. D is raised until --d-patience D gains in a row are no
+progress: a D gain is progress when it raises the P of the joint above the best before it, or, at the same P, when
+the overshoot of the trial at the knee of the limiting pose (the pose with the smallest recommendation) fell clearly
+(by the larger of a position and 10 %) below the lowest at the same pose and knee P since that P was reached; P moves
+in steps of 1.3, so D can damp the loop steadily without moving the knee a step (joint 4, 18 November 2026: knee P
+1010 at D 250, 400 and 640, overshoot 11.7, 10.0 and 8.7 positions). Otherwise the P of the joint stays, falls or is
+missing, and too much D shows as pwm noise, a slow settle, or on the belt joints as oscillation; the grid stops at
+--d-max, 2000 by default (the largest D in servo_config.yaml is 550), and --d-max raises it up to 16383. A start that
 fails only on its settle time (or doesn't move) is sluggish rather than too stiff, and lowering P would only make it
 more so (joint 2 at the low pose oscillated in its backlash below P 1000 at D 0): the sweep doesn't go down then. The D with the highest P of the joint wins. D
 gains that share it (their knees lie in the same step of the sweep, so their margins can't be told apart) are
@@ -34,9 +39,21 @@ at their yaml gains throughout.
 A run that stops keeps the D gains swept at every pose so far: the grid goes D by D, every pose at a D before the
 next D, so the summary can still recommend from them.
 
+The feedforward stage (--ff after the P and D tuning, --ff-only for the stage alone) sets the velocity feedforward
+gain FF1 of a joint with the time-based profile (a servo with a move_time in servo_config.yaml) at its yaml gains, at
+the first pose only. The servo adds FF1 / 4 times the velocity of its trajectory in positions per millisecond to the
+output of the position controller, so the lag behind the trajectory, which grows with the speed because the motor's
+back voltage has to come from P times the error, can be taken away. The joint sweeps +-15 degrees (--ff-degrees) at
+three speeds (--ff-speeds, degrees per second) with FF1 = 0, in legs that ramp up over 0.2 s, cruise and ramp down;
+the lag of the cruise parts, averaged over both directions so gravity cancels, is fitted against the speed, and
+FF1 = P / 32 times the slope of the fit (at most --ff-max). That gain is written, measured again and corrected
+once when the lag still changes by more than a position over the speeds. The report has a table, the friction part
+of the lag, the slope before and after and the yaml line; the samples go to tune_joint<N>_<time>_ff.csv. The servo
+has its yaml feedforward gain again afterwards.
+
 Safety: every sample is checked live (temperature, voltage drop, position jumps, divergence from the trajectory,
-oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the profile and the goal pwm
-at once, after which the run waits 1.5 s for the arm to move back to the pose. Oscillation is the position going both
+oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the feedforward gain, the
+profile and the goal pwm at once, after which the run waits 1.5 s for the arm to move back to the pose. Oscillation is the position going both
 up and down by more than max(6 positions, 3 times the baseline ripple) within the last second, never counting the
 0.5 s after a goal write; a creep in one direction is the joint settling. Divergence, oscillation and a pwm stuck at the clamp count as the knee; a temperature, voltage or position
 jump abort says nothing about the gains and ends the run. Ctrl+C stops after the current read and restores the same;
@@ -47,7 +64,7 @@ the servo.
 
 The run ends with the arm lowered to record_static_load.REST_POSE (where it lies on the table, a bit over 1 cm higher) at
 0.3 rad/s and the torque switched off there, before the plot. The prompt to support the arm and press enter is the
-fallback: when the servo under test doesn't have its yaml gains again, when a servo has a hardware error or the status
+fallback: when the servo under test doesn't have its yaml gains and feedforward gain again, when a servo has a hardware error or the status
 can't be read, when the planner refuses the move, and on Ctrl+C during it (the servos then hold where they are).
 
 Output: a csv with every sample (<output-dir>/tune_joint<N>_<time>_samples.csv), a csv with the metrics of every
@@ -65,6 +82,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable, Sequence
+from contextlib import ExitStack
 from datetime import datetime
 from types import FrameType
 from typing import Any, NamedTuple
@@ -78,11 +96,13 @@ from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.calibration import record_static_load
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    AbortLimits, Criteria, RestMetrics, Sample, StepMetrics, TrackingMetrics, abort_reason, choose_d, choose_p,
-    d_ladder, environmental_abort, evaluate, p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics,
-    step_metrics, step_size, tracking_metrics)
+    FF_LAG_TOLERANCE, AbortLimits, Criteria, CruiseStatistics, LineFit, RestMetrics, Sample, StepMetrics,
+    SweepSample, SweepStep, TrackingMetrics, abort_reason, choose_d, choose_p, clip_gain, cruise_statistics, d_ladder,
+    environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth, p_values, p_values_down,
+    pwm_clamp, pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
+from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.utils.movement import PlannedMove, check_move, plan_move_to_angles
 from src.utils.movement_exception import MovementException
 
@@ -116,6 +136,9 @@ TRIAL_FIELDS = ('joint', 'pose', 'pose_degrees', 'trial', 'phase', 'p', 'i', 'd'
                 'max_settle_time', 'min_rise_time', 'error_up', 'error_down', 'pwm_per_position', 'track_peak',
                 'track_rms', 'track_final', 'following_error', 'flags', 'warnings', 'aborted', 'temperature_start',
                 'temperature_end', 'voltage_min', 'sample_period')
+FF_SAMPLE_FIELDS = ('joint', 'pose', 'ff1', 'speed', 'time', 'direction', 'cruise', 'goal', 'position',
+                    'position_trajectory', 'velocity', 'velocity_trajectory', 'pwm', 'current', 'voltage',
+                    'temperature')
 STEP_SEQUENCE = ((1, 1), (-1, 0), (-1, -1), (1, 0))  # (direction, offset in steps from the pose) of a repeat
 MOVE_HOLD = 1.0  # seconds of hold after a streamed move
 GAIN_SETTLE = 0.3  # seconds between a gain write and the first measurement
@@ -137,6 +160,20 @@ SLUGGISH_FLAGS = frozenset({'settle', 'stuck'})
 # the default largest D of the grid (0, 250, 400, 640, 1020, 1640): the largest D in servo_config.yaml is 550, the pwm
 # kick per encoder flip grows with D, and joint 2 gained nothing from D 250 to 2620 on 25 October 2026
 DEFAULT_D_MAX = 2000
+# a D gain that doesn't raise the P of the joint still helps when the overshoot of the trial at the knee falls by this
+# many positions or this fraction of the lowest so far, whichever is more: P moves in steps of 1.3, so the knee can
+# stay in a step while D damps the loop (joint 4, 18 November 2026: knee P 1010 at D 250, 400 and 640, overshoot 11.7,
+# 10.0 and 8.7 positions)
+KNEE_OVERSHOOT_DROP = 1.0
+KNEE_OVERSHOOT_DROP_FRACTION = 0.10
+P_SWEEP_PHASES = ('p', 'p_down')  # the phases of the trials of a P sweep, as opposed to 'd' of the comparison
+# (pose number, knee P, max overshoot of the trial at the knee) of the pose that limits the joint at a D
+Knee = tuple[int, int, float]
+DEFAULT_FF_DEGREES = 15.0  # the sweep of the feedforward stage goes this far either side of the pose
+DEFAULT_FF_SPEEDS = (10.0, 20.0, 30.0)  # degrees per second of the cruise of the sweeps
+DEFAULT_FF_MAX = 4000  # the largest feedforward gain the stage sets
+MIN_FF_SPEEDS = 3  # the line of the lag against the speed needs more than two points to be a line
+FF_REST = 0.5  # seconds at rest after a sweep before the next one
 
 
 class Stop(Exception):
@@ -180,7 +217,7 @@ class Settings(NamedTuple):
     d_factor: float = 1.6  # between the D gains of the grid
     d_max: int = DEFAULT_D_MAX
     d_values: tuple[int, ...] | None = None  # the D gains of the grid instead of the ladder, in this order
-    d_patience: int = 2  # D gains in a row that don't raise the P of the joint above the best end the grid
+    d_patience: int = 2  # D gains in a row that neither raise the P of the joint nor lower the knee overshoot end it
     repeats: int = 2
     hold: float = 0.8  # seconds after every step
     rest: float = 3.0  # seconds of rest per trial
@@ -189,6 +226,9 @@ class Settings(NamedTuple):
     speed: float = 0.5  # rad/s of the planned moves
     clamp: int | None = None  # goal pwm clamp, None computes it from the holding pwm
     max_step: int | None = None  # the largest step of the trials in positions, None takes MAX_STEP of the joint
+    ff_degrees: float = DEFAULT_FF_DEGREES  # the feedforward sweep goes this far either side of the pose
+    ff_speeds: tuple[float, ...] = DEFAULT_FF_SPEEDS  # degrees per second of its cruise
+    ff_max: int = DEFAULT_FF_MAX  # the largest feedforward gain the stage sets
     criteria: Criteria = Criteria()
     limits: AbortLimits = AbortLimits()
 
@@ -257,6 +297,24 @@ class PoseResult(NamedTuple):
     d_tested: bool  # the D candidates were compared at this pose
 
 
+class FeedforwardRound(NamedTuple):
+    """the sweeps at every speed with one feedforward gain"""
+    ff1: int
+    statistics: tuple[CruiseStatistics, ...]  # in the order of Settings.ff_speeds
+    fit: LineFit
+
+
+class FeedforwardResult(NamedTuple):
+    """the rounds of the feedforward stage in the order they ran: FF1 = 0, the recommended gain, and the corrected
+    gain when the first one left a slope; the last round is the recommendation"""
+    speeds: tuple[float, ...]  # degrees per second
+    rounds: tuple[FeedforwardRound, ...]
+
+    @property
+    def recommended(self) -> int:
+        return self.rounds[-1].ff1
+
+
 def parse_pose(value: str) -> np.ndarray:
     """a pose name or 6 comma separated degrees of joints 1 to 6 into the 7 element angle array in radians"""
     if value in POSES:
@@ -289,6 +347,52 @@ def pose_is_accepted(pose: np.ndarray, robot: DynamixelRobotController | Combine
 
 def pose_degrees(pose: np.ndarray) -> str:
     return ' '.join('{:.0f}'.format(value) for value in np.degrees(pose[1:]))
+
+
+def sweep_angles(pose: np.ndarray, joint: int, speed: float, settings: Settings) -> tuple[list[SweepStep], np.ndarray]:
+    """the steps of the sweep of the joint at the speed (degrees per second) and the angles of every step: only the
+    joint under test moves, the other joints keep the angles of the pose"""
+    steps = ff_sweep(settings.ff_degrees, speed, 1.0 / global_constants.steps_per_second)
+    angles = np.tile(pose, (len(steps), 1))
+    angles[:, joint] += np.radians([step.offset for step in steps])
+    return steps, angles
+
+
+def position_sign(servo: Servo) -> int:
+    """
+    1 when the positions of the servo rise with its angle, -1 when they fall (a servo mounted reversed: servo_config
+    has `positions: [3072, 1024]` for `angles: [-90, 90]`, which Servo keeps as min_position 3072 for min_angle). The
+    lag and the pwm of the feedforward stage are in positions, so the direction of a sweep, which is one of the angle,
+    has to be turned into the direction of the position before they are signed with it.
+    """
+    return 1 if servo.max_position > servo.min_position else -1
+
+
+def feedforward_refusal(robot: DynamixelRobotController | CombinedRobot, joint: int, pose: np.ndarray,
+                        settings: Settings) -> str | None:
+    """
+    why the feedforward stage can't run at the pose, or None; nothing moves. The servo needs the time-based profile,
+    the pose with the joint moved by the sweep either way has to pass the pose check of the script, every sweep has
+    to pass the planner's check_move (joint speed, range and workspace of every step), and has to cruise in both
+    directions or there is nothing to measure.
+    """
+    servo = robot.servo_handler.get_servo(joint)
+    if not servo.time_based:
+        return 'servo {} has no move_time in servo_config.yaml, the feedforward stage needs the time-based profile' \
+            .format(joint)
+    refused = pose_is_accepted(pose, robot, joint, np.radians(settings.ff_degrees))
+    if refused is not None:
+        return 'no feedforward stage at pose {} degrees: {}'.format(pose_degrees(pose), refused)
+    for speed in settings.ff_speeds:
+        steps, angles = sweep_angles(pose, joint, speed, settings)
+        try:
+            check_move(PlannedMove('sweep at {} degrees/s'.format(speed), angles, steps[-1].time), robot)
+        except MovementException as e:
+            return 'no feedforward stage, the sweep at {} degrees/s is refused: {}'.format(speed, e)
+        if {step.direction for step in steps if step.cruise} != {1, -1}:
+            return 'no feedforward stage, a sweep of {} degrees either way at {} degrees/s has no cruise part going ' \
+                   'both ways: use a larger --ff-degrees or lower --ff-speeds'.format(settings.ff_degrees, speed)
+    return None
 
 
 def d_grid(settings: Settings, yaml_d: int) -> list[int]:
@@ -330,17 +434,90 @@ def d_candidates(results: Sequence[PoseResult]) -> list[int]:
     return sorted(d for d, p in passed.items() if p >= 0.98 * best)
 
 
-def grid_is_done(joint_ps: Sequence[int | None], patience: int) -> bool:
-    """whether the last patience D gains of the grid all failed to raise the P of the joint above the best before
-    them: the same P, a lower one, or none. More D than that only adds pwm noise (joint 2 on 25 October: the same P
-    of the joint from D 250 to 2620)"""
+def knee_trial(result: PoseResult, d: int) -> TrialResult | None:
+    """the knee trial of the pose at the D: the failing trial of the P sweep (not of the comparison of the D
+    candidates) at that D whose P is the knee P of the sweep, None when the sweep has no knee"""
+    sweep = result.sweeps.get(d)
+    if sweep is None or sweep.knee_p is None:
+        return None
+    return next((t for t in result.trials if t.phase in P_SWEEP_PHASES and t.d == d and t.p == sweep.knee_p
+                 and not t.passed), None)
+
+
+def joint_knee_at(results: Sequence[PoseResult], d: int) -> Knee | None:
+    """
+    the knee of the joint at the D: (pose number, knee P, max overshoot of the knee trial) of the limiting pose,
+    the pose whose recommended P is the P of the joint (the one whose knee trial overshoots most when several tie,
+    a pose without a knee trial after the others). None when the joint has no P at the D, the limiting pose has no
+    knee, or its knee trial is not flagged for overshoot: a knee from ringing, settling or ripple alone says nothing
+    about the overshoot
+    """
+    p = joint_p_at(results, d)
+    if p is None:
+        return None
+    tied = [(r, knee_trial(r, d)) for r in results if r.sweeps[d].recommended_p == p]
+    pose, trial = max(tied, key=lambda pair: pair[1].max_overshoot if pair[1] is not None else -1.0)
+    if trial is None or 'overshoot' not in trial.flags:
+        return None
+    return pose.number, trial.p, trial.max_overshoot
+
+
+class DProgress(NamedTuple):
+    """what a D gain of the grid did: 'p' raised the P of the joint, 'overshoot' lowered the overshoot at the knee
+    (from_overshoot is the lowest before it), None neither"""
+    kind: str | None
+    from_overshoot: float | None = None
+
+
+def d_progress(joint_ps: Sequence[int | None], knees: Sequence[Knee | None] | None = None) -> list[DProgress]:
+    """
+    the progress of every D gain of the grid, in order. A D gain is progress when its P of the joint is above the best
+    so far (which also starts a new record of the lowest knee overshoot per (pose number, knee P), beginning with its
+    own knee). At the best P it is progress when its knee has the same pose and knee P as one recorded since that P
+    was reached, and an overshoot at least KNEE_OVERSHOOT_DROP and KNEE_OVERSHOOT_DROP_FRACTION of the lowest
+    recorded below it. Any other D gain is no progress, its knee is recorded when it is new or lower. Without knees
+    only the P of the joint counts.
+    """
+    if knees is None:
+        knees = [None] * len(joint_ps)
+    if len(knees) != len(joint_ps):
+        raise ValueError('{} knees for {} D gains'.format(len(knees), len(joint_ps)))
     best: int | None = None
-    without_gain = 0
-    for p in joint_ps:
+    lowest: dict[tuple[int, int], float] = {}
+    progress: list[DProgress] = []
+    for p, knee in zip(joint_ps, knees):
+        key = (knee[0], knee[1]) if knee is not None else None
         if p is not None and (best is None or p > best):
-            best, without_gain = p, 0
-        else:
-            without_gain += 1
+            best = p
+            lowest = {} if key is None or knee is None else {key: knee[2]}
+            progress.append(DProgress('p'))
+            continue
+        step: DProgress | None = None
+        if knee is not None and key is not None:
+            recorded = lowest.get(key)
+            # the small tolerance keeps a drop of exactly the threshold from failing on float rounding
+            if p is not None and p == best and recorded is not None and knee[2] <= recorded - max(
+                    KNEE_OVERSHOOT_DROP, KNEE_OVERSHOOT_DROP_FRACTION * recorded) + 1e-9:
+                step = DProgress('overshoot', recorded)
+            if recorded is None or knee[2] < recorded:
+                lowest[key] = knee[2]
+        progress.append(step if step is not None else DProgress(None))
+    return progress
+
+
+def grid_is_done(joint_ps: Sequence[int | None], patience: int, knees: Sequence[Knee | None] | None = None) -> bool:
+    """
+    whether the last patience D gains of the grid were all no progress: they neither raised the P of the joint above
+    the best before them (the same P, a lower one, or none) nor lowered the overshoot at its knee clearly, see
+    d_progress. More D than that only adds pwm noise (joint 2 on 25 October: the same P of the joint from D 250 to
+    2620). The P moves in steps of a factor, so D can help steadily without moving the knee a whole step (joint 4 on
+    18 November: the knee stayed at P 1010 from D 250 to 640 while the overshoot at it fell from 11.7 to 8.7).
+    :param knees: joint_knee_at of every D gain, in the order of joint_ps; None: no knees known
+    """
+    progress = d_progress(joint_ps, knees)
+    without_gain = 0
+    for step in progress:
+        without_gain = 0 if step.kind is not None else without_gain + 1
     return without_gain >= patience
 
 
@@ -350,7 +527,7 @@ class TuningSession:
     def __init__(self, robot: DynamixelRobotController | CombinedRobot, joint: int, settings: Settings,
                  sample_writer: csv.DictWriter[str] | None = None, trial_writer: csv.DictWriter[str] | None = None,
                  clock: Callable[[], float] = time.perf_counter, sleep: Callable[[float], None] = time.sleep,
-                 stop: StopFlag | None = None) -> None:
+                 stop: StopFlag | None = None, ff_writer: csv.DictWriter[str] | None = None) -> None:
         self.robot = robot
         self.handler = robot.servo_handler
         self.joint = joint
@@ -359,6 +536,7 @@ class TuningSession:
         self.max_step = settings.max_step if settings.max_step is not None else MAX_STEP.get(joint, DEFAULT_MAX_STEP)
         self.sample_writer = sample_writer
         self.trial_writer = trial_writer
+        self.ff_writer = ff_writer
         self.clock = clock
         self.sleep = sleep
         self.stop = stop if stop is not None else StopFlag()
@@ -424,28 +602,45 @@ class TuningSession:
             raise Stop('the gain write to servo {} failed'.format(self.joint))
         self.current_p, self.current_d = p, d
 
+    def verify_feedforward(self, first: int, second: int = 0) -> bool:
+        feedforward = self.handler.read_feedforward([self.joint])
+        if feedforward is None:
+            raise Stop('failed to read the feedforward gains of servo {}'.format(self.joint))
+        if feedforward[self.joint] != (first, second):
+            logger.error('servo %d has feedforward gains %s, not the written %s', self.joint,
+                         feedforward[self.joint], (first, second))
+            return False
+        return True
+
+    def write_feedforward(self, first: int) -> None:
+        """write the feedforward gain to the servo under test and read it back"""
+        if not self.handler.set_feedforward_single_servo(self.joint, first) or not self.verify_feedforward(first):
+            self.restore()
+            raise Stop('the feedforward write to servo {} failed'.format(self.joint))
+
     def restore(self) -> bool:
-        """put the yaml gains, the yaml profile and the original goal pwm back, returns False when a read-back
-        doesn't match"""
+        """put the yaml gains, the yaml feedforward gain, the yaml profile (the time and the acceleration time of a
+        servo with a move_time) and the original goal pwm back, returns False when a read-back doesn't match"""
         ok = self.handler.set_pid([self.joint])
-        ok &= self.handler.set_profile(self.joint, self.servo.profile_velocity, self.servo.profile_acceleration)
+        ok &= self.handler.set_feedforward([self.joint])
+        ok &= self.handler.set_profile(self.joint, *self.servo.profile_registers())
         if self.original_goal_pwm is not None:
             ok &= self.handler.set_goal_pwm(self.joint, self.original_goal_pwm)
         self.current_p, self.current_d = self.servo.p, self.servo.d
         gains = self.handler.read_pid([self.joint])
+        feedforward = self.handler.read_feedforward([self.joint])
         profile = self.handler.read_profile([self.joint])
         goal_pwm = self.handler.read_goal_pwm([self.joint])
-        if gains is None or profile is None or goal_pwm is None:
+        if gains is None or feedforward is None or profile is None or goal_pwm is None:
             logger.error('could not read servo %d back after restoring its settings', self.joint)
             return False
-        expected = ((self.servo.p, self.servo.i, self.servo.d),
-                    (self.servo.profile_velocity, self.servo.profile_acceleration), self.original_goal_pwm)
-        actual = (gains[self.joint], profile[self.joint], goal_pwm[self.joint])
-        if self.original_goal_pwm is None:
-            actual = (actual[0], actual[1], None)
+        expected = ((self.servo.p, self.servo.i, self.servo.d), (self.servo.ff1, 0), self.servo.profile_registers(),
+                    self.original_goal_pwm)
+        actual = (gains[self.joint], feedforward[self.joint], profile[self.joint],
+                  goal_pwm[self.joint] if self.original_goal_pwm is not None else None)
         if actual != expected:
-            logger.error('servo %d has gains, profile, goal pwm %s after the restore, expected %s', self.joint,
-                         actual, expected)
+            logger.error('servo %d has gains, feedforward gains, profile, goal pwm %s after the restore, expected %s',
+                         self.joint, actual, expected)
             return False
         return ok
 
@@ -513,10 +708,16 @@ class TuningSession:
                     return reason
         return None
 
-    def write_goal(self, position: int) -> int:
-        """write a goal position to the servo under test, clamped to its calibrated range, returns what was sent"""
+    def write_goal(self, position: int, step: bool = False) -> int:
+        """
+        write a goal position to the servo under test, clamped to its calibrated range, returns what was sent
+        :param step: a deliberate step, with the profile registers at 0 (the servo jumps to the goal), in either drive
+            mode; otherwise the goal follows the profile of the servo, and with a time-based servo carries its time
+        """
         position = self.servo.clamp_position(position)
-        if not self.handler.move_servo_to_pos(self.joint, position):
+        written = self.handler.step_servo_to_pos(self.joint, position) if step \
+            else self.handler.move_servo_to_pos(self.joint, position)
+        if not written:
             raise Stop('failed to write the goal position of servo {}'.format(self.joint))
         self.last_goal_time = self.clock() - self.trial_start
         return position
@@ -657,7 +858,7 @@ class TuningSession:
             for repeat in range(settings.repeats):
                 for step_index, (direction, offset) in enumerate(STEP_SEQUENCE):
                     segment_start = max(0, len(rows) - SAMPLES_PER_ABORT_CHECK)
-                    goal = self.write_goal(self.pose_goal + offset * step)
+                    goal = self.write_goal(self.pose_goal + offset * step, step=True)
                     step_time = self.last_goal_time
                     aborted = self.capture(rows, goal, settings.hold, clamp, step, baseline.position_pp,
                                            start_voltage)
@@ -675,7 +876,7 @@ class TuningSession:
             else:
                 # the profile and the goal pwm back for the streamed move
                 original = self.original_goal_pwm if self.original_goal_pwm is not None else cfg.MAX_PWM
-                profile = (self.servo.profile_velocity, self.servo.profile_acceleration)
+                profile = self.servo.profile_registers()
                 if not self.handler.set_profile(self.joint, *profile) or \
                         not self.handler.set_goal_pwm(self.joint, original) or \
                         not self.verify_settings(original, profile):
@@ -850,6 +1051,7 @@ class TuningSession:
         self.snapshot()
         settings = self.settings
         joint_ps: list[int | None] = []
+        knees: list[Knee | None] = []
         for d in d_grid(settings, self.servo.d):
             if not self.results:
                 # the first D: the poses the planner refuses are left out of the run
@@ -863,11 +1065,17 @@ class TuningSession:
                     print('the planner refused pose {} at D {}, the grid stops'.format(refused, d))
                     break
             joint_ps.append(joint_p_at(self.results, d))
+            knees.append(joint_knee_at(self.results, d))
             print('D {}: P of the joint {}'.format(d, joint_ps[-1] if joint_ps[-1] is not None
                                                    else 'none, a pose has no passing P'))
-            if grid_is_done(joint_ps, settings.d_patience):
-                print("the last {} D gains didn't raise the P of the joint: the grid stops"
-                      .format(settings.d_patience))
+            latest = d_progress(joint_ps, knees)[-1]
+            latest_knee = knees[-1]
+            if latest.kind == 'overshoot' and latest_knee is not None and latest.from_overshoot is not None:
+                print('D {}: the overshoot at the knee (pose {}, p={}) fell from {:.1f} to {:.1f} positions, D still '
+                      'helps'.format(d, latest_knee[0], latest_knee[1], latest.from_overshoot, latest_knee[2]))
+            if grid_is_done(joint_ps, settings.d_patience, knees):
+                print('the last {} D gains neither raised the P of the joint nor lowered the overshoot at its knee: '
+                      'the grid stops'.format(settings.d_patience))
                 break
         candidates = d_candidates(self.results)
         if len(candidates) > 1:
@@ -876,6 +1084,140 @@ class TuningSession:
                 ', '.join(str(d) for d in candidates), p))
             self.compare_d(candidates, p)
         return self.results
+
+    # the feedforward stage
+
+    def write_ff_samples(self, rows: Sequence[SweepSample], ff1: int, speed: float) -> None:
+        if self.ff_writer is None:
+            return
+        for row in rows:
+            s = row.sample
+            self.ff_writer.writerow({'joint': self.joint, 'pose': self.pose_index, 'ff1': ff1, 'speed': speed,
+                                     'time': '{:.4f}'.format(s.time), 'direction': row.direction,
+                                     'cruise': int(row.cruise), 'goal': s.goal, 'position': s.position,
+                                     'position_trajectory': s.position_trajectory, 'velocity': s.velocity,
+                                     'velocity_trajectory': s.velocity_trajectory, 'pwm': s.pwm,
+                                     'current': s.current, 'voltage': s.voltage, 'temperature': s.temperature})
+
+    def feedforward_sweep(self, pose: np.ndarray, speed: float, ff1: int) -> list[SweepSample]:
+        """
+        stream one sweep of the joint at the speed (degrees per second) against the clock, as move_test does, and
+        sample the servo as often as fits between two writes. An abort rule for a streamed move restores the servo
+        and stops the stage.
+        """
+        self.check_servos()
+        dt = 1.0 / global_constants.steps_per_second
+        steps, angles = sweep_angles(pose, self.joint, speed, self.settings)
+        clamp = self.original_goal_pwm if self.original_goal_pwm is not None else cfg.MAX_PWM
+        rows: list[Sample] = []
+        recorded: list[SweepSample] = []
+        self.trial_start = self.clock()
+        self.last_goal_time = 0.0
+        self.sag = 0.0  # the divergence rule of a streamed move allows 120 positions
+        sign = position_sign(self.servo)
+        start_voltage = 0.0
+        reason = None
+        next_step = self.clock()
+        try:
+            for step, step_angles in zip(steps, angles):
+                self.robot.move_servos(step_angles)
+                self.last_goal_time = self.clock() - self.trial_start
+                goal = self.servo.target_position
+                next_step += dt
+                while True:
+                    began = self.clock()
+                    sample = self.sample(rows, goal)
+                    now = self.clock()
+                    recorded.append(SweepSample(sample, step.direction * sign, step.cruise, step.leg))
+                    if len(rows) == 1:
+                        start_voltage = sample.voltage
+                    reason = abort_reason(rows, clamp, 0, 0.0, start_voltage, self.last_goal_time,
+                                          self.settings.limits, sag=self.sag, streaming=True)
+                    # another sample only when a read still fits before the next write is due
+                    if reason is not None or now + (now - began) >= next_step:
+                        break
+                if reason is not None:
+                    break
+                if next_step - self.clock() > 1e-4:  # a shorter sleep is not worth it
+                    self.sleep(next_step - self.clock())
+        finally:
+            self.write_ff_samples(recorded, ff1, speed)
+        if reason is not None:
+            if not self.abort(reason):
+                raise Stop('could not restore the settings of servo {} after the abort'.format(self.joint))
+            raise Stop('the feedforward stage was aborted: {}'.format(reason))
+        return recorded
+
+    def measure_feedforward(self, pose: np.ndarray, ff1: int) -> FeedforwardRound:
+        """write the feedforward gain and sweep at every speed"""
+        self.write_feedforward(ff1)
+        self.sleep(GAIN_SETTLE)
+        statistics: list[CruiseStatistics] = []
+        for speed in self.settings.ff_speeds:
+            recorded = self.feedforward_sweep(pose, speed, ff1)
+            try:
+                statistics.append(cruise_statistics(recorded))
+            except ValueError as e:
+                raise Stop('the sweep at {:g} degrees/s has too few cruise samples: {}'.format(speed, e))
+            s = statistics[-1]
+            print('  ff1 {} at {:g} degrees/s ({:.3f} positions/ms): lag {:.1f} positions, pwm {:.0f}, lag std {:.1f}'
+                  .format(ff1, speed, s.speed, s.lag, s.pwm, s.lag_std))
+            self.sleep(FF_REST)
+        fit = fit_line([s.speed for s in statistics], [s.lag for s in statistics])
+        return FeedforwardRound(ff1, tuple(statistics), fit)
+
+    def run_feedforward(self, pose: np.ndarray) -> FeedforwardResult | None:
+        """
+        the feedforward stage at the pose, see the module docstring; None when the stage can't run (the servo is not
+        time-based, a sweep is refused, the planner refuses the pose). The servo has its yaml feedforward gain again
+        afterwards.
+        """
+        settings = self.settings
+        refused = feedforward_refusal(self.robot, self.joint, pose, settings)
+        if refused is not None:
+            print(refused)
+            return None
+        if self.original_goal_pwm is None:  # without the P and D stages
+            self.snapshot()
+        self.pose_index = 1
+        self.check_servos()
+        print('feedforward stage at pose {} degrees: sweeps of {:g} degrees either way at {} degrees/s, yaml p={} '
+              'ff1={}'.format(pose_degrees(pose), settings.ff_degrees, ' '.join('{:g}'.format(s) for s in
+                                                                               settings.ff_speeds),
+                              self.servo.p, self.servo.ff1))
+        if not self.move_to_pose(pose):
+            print('no feedforward stage: the planner refuses the move to the pose')
+            return None
+        self.pose_goal = self.servo.target_position
+        self.sleep(settings.baseline_rest / 2)
+        p = self.servo.p
+        rounds = [self.measure_feedforward(pose, 0)]
+        slope = rounds[0].fit.slope
+        change = feedforward_change(p, slope)
+        value = clip_gain(change, settings.ff_max)
+        if slope <= 0:
+            print('the lag does not grow with the speed (slope {:.1f} ms), the feedforward gain stays 0'.format(slope))
+        else:
+            if change > value:
+                print('warning: the gain {} that takes the slope away is above --ff-max, using {}'.format(change,
+                                                                                                         value))
+            if value == 0:
+                print('the slope of {:.1f} ms gives a feedforward gain of 0'.format(slope))
+            else:
+                rounds.append(self.measure_feedforward(pose, value))
+                last = rounds[-1]
+                if abs(lag_growth(last.fit, last.statistics)) > FF_LAG_TOLERANCE:
+                    corrected = clip_gain(value + feedforward_change(p, last.fit.slope), settings.ff_max)
+                    print('the lag still changes by {:.1f} positions over the speeds (slope {:.1f} ms): correcting '
+                          'ff1 from {} to {}'.format(lag_growth(last.fit, last.statistics), last.fit.slope, value,
+                                                     corrected))
+                    if corrected != value:
+                        rounds.append(self.measure_feedforward(pose, corrected))
+        if not self.restore():
+            raise Stop('could not restore the settings of servo {} after the feedforward stage'.format(self.joint))
+        result = FeedforwardResult(tuple(settings.ff_speeds), tuple(rounds))
+        print_feedforward(self.joint, self.servo, result)
+        return result
 
 
 def compared_d(results: Sequence[PoseResult], criteria: Criteria = Criteria()) -> int | None:
@@ -955,6 +1297,31 @@ def print_summary(joint: int, results: Sequence[PoseResult], servo_p: int, servo
     print('    pid: {{p: {}, i: 0, d: {}}}'.format(p, d))
 
 
+def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> None:
+    """the table of the feedforward stage, the friction and the slope of the lag, and the yaml line"""
+    print('\nfeedforward of joint {} (yaml p={} d={}):'.format(joint, servo.p, servo.d))
+    print('  {:>6s} {:>10s} {:>12s} {:>8s} {:>7s} {:>8s} {:>7s}'.format('ff1', 'degrees/s', 'positions/ms', 'lag',
+                                                                       'pwm', 'lag std', 'pwm std'))
+    for r in result.rounds:
+        for degrees_per_second, s in zip(result.speeds, r.statistics):
+            print('  {:6d} {:10g} {:12.3f} {:8.1f} {:7.0f} {:8.1f} {:7.1f}'.format(
+                r.ff1, degrees_per_second, s.speed, s.lag, s.pwm, s.lag_std, s.pwm_std))
+    first = result.rounds[0]
+    print('  without feedforward the lag is {:.1f} positions at no speed (a drive of {:.1f} pwm units, the friction) '
+          'and grows by {:.1f} ms per position/ms'.format(first.fit.friction, servo.p / 128 * first.fit.friction,
+                                                          first.fit.slope))
+    last = result.rounds[-1]
+    if len(result.rounds) > 1:
+        print('  remaining slope at ff1 {}: {:.1f} ms (the lag changes by {:.1f} positions over the speeds)'.format(
+            last.ff1, last.fit.slope, lag_growth(last.fit, last.statistics)))
+    rougher = rougher_speeds(first.statistics, last.statistics) if len(result.rounds) > 1 else []
+    if rougher:
+        print('  warning: the std of the lag grew by more than 1 position at {} degrees/s, the feedforward makes the '
+              'joint rougher'.format(', '.join('{:g}'.format(result.speeds[i]) for i in rougher)))
+    print('recommended for servo_config.yaml:')
+    print('    pid: {{p: {}, i: {}, d: {}, ff1: {}}}'.format(servo.p, servo.i, servo.d, result.recommended))
+
+
 def plot_results(joint: int, results: Sequence[PoseResult], samples_path: str) -> None:
     """the first step up of every trial per pose, from the samples csv"""
     import matplotlib.pyplot as plt
@@ -1011,7 +1378,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--d-values', default=None,
                         help='comma separated D gains to sweep P at, in this order, instead of the grid')
     parser.add_argument('--d-patience', type=int, default=2,
-                        help="D gains in a row that don't raise the P of the joint above the best, that end the grid")
+                        help="D gains in a row that neither raise the P of the joint above the best nor clearly lower "
+                             "the overshoot at its knee, that end the grid")
     parser.add_argument('--repeats', type=int, default=2, help='how often the steps are repeated per trial')
     parser.add_argument('--hold', type=float, default=0.8, help='seconds after every step')
     parser.add_argument('--rest', type=float, default=3.0, help='seconds of rest per trial')
@@ -1031,6 +1399,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--floor', type=float, default=None,
                         help='cm above the table the wrist and gripper tip stay, default WorkSpaceLimits.z_min ({})'
                         .format(WorkSpaceLimits.z_min))
+    parser.add_argument('--ff', action='store_true',
+                        help='after the P and D tuning, set the velocity feedforward gain (a servo with a move_time)')
+    parser.add_argument('--ff-only', action='store_true',
+                        help='only the feedforward stage, the P and D stages are skipped')
+    parser.add_argument('--ff-degrees', type=float, default=DEFAULT_FF_DEGREES,
+                        help='the feedforward sweep goes this many degrees either side of the pose (default '
+                             '%(default)s)')
+    parser.add_argument('--ff-speeds', type=float, nargs='+', default=list(DEFAULT_FF_SPEEDS),
+                        help='three or more cruise speeds of the feedforward sweeps in degrees per second (default '
+                             '{})'.format(' '.join('{:g}'.format(s) for s in DEFAULT_FF_SPEEDS)))
+    parser.add_argument('--ff-max', type=int, default=DEFAULT_FF_MAX,
+                        help='the largest feedforward gain the stage sets, at most {} (default %(default)s)'.format(
+                            cfg.MAX_GAIN))
     parser.add_argument('--output-dir', default='.', help='where the csv files go')
     parser.add_argument('--plot', action='store_true', help='plot the step responses at the end')
     parser.add_argument('--yes', action='store_true', help="don't ask before enabling the servos")
@@ -1049,6 +1430,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.max_step is not None and args.max_step < MIN_STEP:
             raise ValueError('--max-step has to be at least {} positions, the smallest step of a trial'.format(
                 MIN_STEP))
+        if len(set(args.ff_speeds)) < MIN_FF_SPEEDS or any(speed <= 0 for speed in args.ff_speeds):
+            raise ValueError('--ff-speeds needs at least {} different positive speeds in degrees per second'.format(
+                MIN_FF_SPEEDS))
+        if args.ff_degrees <= 0:
+            raise ValueError('--ff-degrees has to be above 0')
+        if not 0 <= args.ff_max <= cfg.MAX_GAIN:
+            raise ValueError('--ff-max has to be between 0 and {}'.format(cfg.MAX_GAIN))
     except (argparse.ArgumentTypeError, ValueError) as e:
         print(e)
         return 1
@@ -1066,7 +1454,9 @@ def main(argv: list[str] | None = None) -> int:
                         d_start=args.d_start, d_factor=args.d_factor, d_max=args.d_max, d_values=d_values,
                         d_patience=args.d_patience, repeats=args.repeats, hold=args.hold, rest=args.rest,
                         baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
-                        clamp=args.pwm_clamp, max_step=args.max_step, limits=AbortLimits(max_temperature=max_temperature))
+                        clamp=args.pwm_clamp, max_step=args.max_step, ff_degrees=args.ff_degrees,
+                        ff_speeds=tuple(args.ff_speeds), ff_max=args.ff_max,
+                        limits=AbortLimits(max_temperature=max_temperature))
     if args.floor is not None:
         robot.workspace_limits = record_static_load.limits_with_floor(args.floor, robot.workspace_limits)
     excursion = np.radians(max(args.move_degrees, 6.0))
@@ -1081,6 +1471,17 @@ def main(argv: list[str] | None = None) -> int:
         print('no pose the planner accepts')
         return 1
     servo = robot.servo_handler.get_servo(args.joint)
+    run_pd = not args.ff_only
+    run_ff = args.ff or args.ff_only
+    if run_ff:
+        # nothing moves yet: a servo without the time-based profile or a refused sweep is known before the servos
+        # are enabled
+        refused_ff = feedforward_refusal(robot, args.joint, accepted[0], settings)
+        if refused_ff is not None:
+            print(refused_ff)
+            if args.ff_only:
+                return 1
+            run_ff = False
 
     # before the servos are enabled, so a bad directory doesn't leave the arm under torque; relative to the working
     # directory, which a PyCharm run configuration may set to this file's folder
@@ -1093,15 +1494,24 @@ def main(argv: list[str] | None = None) -> int:
     stamp = datetime.now().strftime('%Y%m%d_%H%M')
     samples_path = os.path.join(output_dir, 'tune_joint{}_{}_samples.csv'.format(args.joint, stamp))
     trials_path = os.path.join(output_dir, 'tune_joint{}_{}_trials.csv'.format(args.joint, stamp))
-    print("joint {} (yaml p={} d={}), poses {}, P up to {} in steps of {}, at D {} until {} D gains in a row don't "
-          "raise the P of the joint, {} repeats, steps of at most {} positions, output {}".format(
-              args.joint, servo.p, servo.d, ', '.join(pose_degrees(pose) for pose in accepted),
-              round(servo.p * args.max_factor), args.factor, ' '.join(str(d) for d in d_grid(settings, servo.d)),
-              args.d_patience, args.repeats,
-              args.max_step if args.max_step is not None else MAX_STEP.get(args.joint, DEFAULT_MAX_STEP),
-              trials_path))
-    print('the arm moves to these poses and steps joint {} by up to 5 degrees there, nothing may be in its way; '
-          'the other joints hold their position'.format(args.joint))
+    ff_path = os.path.join(output_dir, 'tune_joint{}_{}_ff.csv'.format(args.joint, stamp))
+    if run_pd:
+        print("joint {} (yaml p={} d={}), poses {}, P up to {} in steps of {}, at D {} until {} D gains in a row "
+              "don't raise the P of the joint, {} repeats, steps of at most {} positions, output {}".format(
+                  args.joint, servo.p, servo.d, ', '.join(pose_degrees(pose) for pose in accepted),
+                  round(servo.p * args.max_factor), args.factor, ' '.join(str(d) for d in d_grid(settings, servo.d)),
+                  args.d_patience, args.repeats,
+                  args.max_step if args.max_step is not None else MAX_STEP.get(args.joint, DEFAULT_MAX_STEP),
+                  trials_path))
+        print('the arm moves to these poses and steps joint {} by up to 5 degrees there, nothing may be in its way; '
+              'the other joints hold their position'.format(args.joint))
+    if run_ff:
+        print('feedforward stage: joint {} (yaml p={} ff1={}) at pose {} degrees, sweeps of {:g} degrees either way '
+              'at {} degrees/s, ff1 up to {}, output {}'.format(
+                  args.joint, servo.p, servo.ff1, pose_degrees(accepted[0]), args.ff_degrees,
+                  ' '.join('{:g}'.format(s) for s in args.ff_speeds), args.ff_max, ff_path))
+        print('joint {} sweeps up to {:g} degrees either way at the speeds above, nothing may be in its way; '
+              'the other joints hold their position'.format(args.joint, args.ff_degrees))
     if not args.yes and input('type yes to enable the servos and start: ').strip().lower() != 'yes':
         return 0
     if not robot.enable_servos():
@@ -1114,14 +1524,28 @@ def main(argv: list[str] | None = None) -> int:
     stopped = False
     restored = True  # without a session nothing was changed
     try:
-        with open(samples_path, 'w', newline='') as samples_file, open(trials_path, 'w', newline='') as trials_file:
+        with ExitStack() as files:
             print('temperatures: {}'.format(robot.get_servo_temperatures()))
-            sample_writer = csv.DictWriter(samples_file, fieldnames=SAMPLE_FIELDS)
-            sample_writer.writeheader()
-            trial_writer = csv.DictWriter(trials_file, fieldnames=TRIAL_FIELDS)
-            trial_writer.writeheader()
-            session = TuningSession(robot, args.joint, settings, sample_writer, trial_writer, stop=stop)
-            session.run(accepted)
+            sample_writer = trial_writer = ff_writer = None
+            if run_pd:
+                samples_file = files.enter_context(open(samples_path, 'w', newline=''))
+                trials_file = files.enter_context(open(trials_path, 'w', newline=''))
+                sample_writer = csv.DictWriter(samples_file, fieldnames=SAMPLE_FIELDS)
+                sample_writer.writeheader()
+                trial_writer = csv.DictWriter(trials_file, fieldnames=TRIAL_FIELDS)
+                trial_writer.writeheader()
+            if run_ff:
+                ff_writer = csv.DictWriter(files.enter_context(open(ff_path, 'w', newline='')),
+                                           fieldnames=FF_SAMPLE_FIELDS)
+                ff_writer.writeheader()
+            session = TuningSession(robot, args.joint, settings, sample_writer, trial_writer, stop=stop,
+                                    ff_writer=ff_writer)
+            if run_pd:
+                session.run(accepted)
+            # a P and D run that stopped raised Stop and never gets here; a Ctrl+C that came after the last read
+            # of it doesn't start the stage either
+            if run_ff and not stop.requested:
+                session.run_feedforward(accepted[0])
             print('temperatures: {}'.format(robot.get_servo_temperatures()))
     except Stop as e:
         print('\nstopped: {}'.format(e))
@@ -1134,10 +1558,10 @@ def main(argv: list[str] | None = None) -> int:
             stop.protected = True
             restored = session.restore()
             if restored:
-                print('the yaml gains, profile and goal pwm of servo {} are back'.format(args.joint))
+                print('the yaml gains, feedforward gain, profile and goal pwm of servo {} are back'.format(args.joint))
             else:
-                print('RESTORING SERVO {} FAILED: start the robot again for the gains and the profile, reboot or '
-                      'power cycle the servos for the goal pwm'.format(args.joint))
+                print('RESTORING SERVO {} FAILED: start the robot again for the gains, the feedforward gain and the '
+                      'profile, reboot or power cycle the servos for the goal pwm'.format(args.joint))
             stop.protected = False
         stop.uninstall()
     results = session.results if session is not None else []
@@ -1153,7 +1577,8 @@ def main(argv: list[str] | None = None) -> int:
                   handler.failed_reads, ', '.join('servos {}: {}'.format(list(bus), count)
                                                   for bus, count in handler.failed_reads_by_bus.items()),
                   handler.late_reads, handler.failed_reads - handler.late_reads))
-    print('samples in {}, trials in {}'.format(samples_path, trials_path))
+    print('; '.join(([] if not run_pd else ['samples in {}, trials in {}'.format(samples_path, trials_path)]) +
+                     ([] if not run_ff else ['feedforward samples in {}'.format(ff_path)])))
     finish(robot, restored)  # before the plot, which blocks until its windows are closed
     if args.plot and results:
         plot_results(args.joint, results, samples_path)

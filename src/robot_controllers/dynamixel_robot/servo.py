@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from math import ceil
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -8,6 +9,8 @@ import numpy as np
 import logging
 from numpy import pi
 
+from src.robot_controllers.dynamixel_robot.dynamixel_x_config import MAX_PROFILE_TIME, \
+    POSITIONS_PER_SECOND_PER_VELOCITY_UNIT
 from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
 
 if TYPE_CHECKING:
@@ -24,10 +27,13 @@ class Servo:
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
                  d: int = 500, offset: int = 0, goal_current: int | None = None,
-                 compensation: StaticCompensation | None = None) -> None:
+                 compensation: StaticCompensation | None = None, move_time: int | None = None, ff1: int = 0) -> None:
         """
         :param compensation: a StaticCompensation, the positions it gives for the commanded angles of all joints
             are added to every target position (see static_compensation.py)
+        :param move_time: ms the servo gets for each small streamed goal step, None for the velocity-based profile;
+            profile_velocity and profile_acceleration then limit a goal that is far away
+        :param ff1: velocity feedforward gain of the position controller
         """
         self.p = p
         self.i = i
@@ -42,6 +48,8 @@ class Servo:
         self.constant_offset = offset
         self.goal_current = goal_current
         self.compensation = compensation
+        self.move_time = move_time
+        self.ff1 = ff1
         self.compensation_positions = 0  # the positions the compensation added to the last target
         self._direction: str | None = None
         self._extreme_angle: float | None = None  # the furthest commanded angle in the current direction
@@ -52,10 +60,48 @@ class Servo:
 
     def __str__(self) -> str:
         return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
-               "profile_velocity={} profile_acceleration={} offset={} goal_current={} compensation={}" \
+               "profile_velocity={} profile_acceleration={} offset={} goal_current={} compensation={} move_time={} " \
+               "ff1={}" \
             .format(self.p, self.i, self.d, self.max_angle, self.min_angle, self.min_position, self.max_position,
                     self.operating_mode, self.profile_velocity, self.profile_acceleration, self.constant_offset,
-                    self.goal_current, self.compensation)
+                    self.goal_current, self.compensation, self.move_time, self.ff1)
+
+    @property
+    def time_based(self) -> bool:
+        """whether the servo uses the time-based profile"""
+        return self.move_time is not None
+
+    def profile_registers(self) -> tuple[int, int]:
+        """the values of the profile velocity and the profile acceleration register the servo holds between moves"""
+        if self.move_time is not None:
+            return self.move_time, 0
+        return self.profile_velocity, self.profile_acceleration
+
+    def goal_timing(self, distance: int, speed_factor: float = 1.0) -> tuple[int, int]:
+        """
+        the time of the move and the acceleration time in ms to send with a goal of a time-based servo
+        :param distance: the positions from the previous goal, the sign doesn't matter
+        :param speed_factor: the part of the top speed (profile_velocity) the move may use, above 0 up to 1
+        :raises ValueError: if the servo is not time-based or the speed factor is not in (0, 1]
+        """
+        if self.move_time is None:
+            raise ValueError('goal_timing is only for a servo with a move_time')
+        if not 0 < speed_factor <= 1:
+            raise ValueError('speed_factor should be above 0 and at most 1, not {}'.format(speed_factor))
+        if self.profile_velocity == 0:  # 0 means no speed limit
+            return self.move_time, 0
+        velocity = self.profile_velocity * speed_factor  # velocity units
+        # ms the move takes at the top speed
+        cruise = ceil(1000 * abs(distance) / (velocity * POSITIONS_PER_SECOND_PER_VELOCITY_UNIT))
+        if cruise <= self.move_time:  # a streamed step: the servo interpolates over the move time
+            return self.move_time, 0
+        # a goal that is far away: a trapezoid with the top speed and the acceleration of the yaml, as the
+        # velocity-based profile gives; the servo manual: acceleration time in ms = 64 * profile velocity / profile
+        # acceleration
+        ramp = round(64 * velocity / self.profile_acceleration) if self.profile_acceleration > 0 else 0
+        ramp = min(ramp, cruise)
+        total = min(cruise + ramp, MAX_PROFILE_TIME)
+        return total, min(ramp, total // 2)
 
     # updates the target position of this servo
     def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
@@ -129,6 +175,16 @@ class Servo:
             return np.interp(position - self.constant_offset, [self.min_position, self.max_position],  # type: ignore[return-value]  # scalar in, scalar out
                              [self.min_angle, self.max_angle])
 
+    def degrees_at_position(self, position: int) -> float:
+        """
+        the angle of the servo at the raw position in degrees, with the calibration of the servo. Unlike
+        get_angle_from_position this does not clamp to the calibrated range, a position outside of it gives
+        the angle the servo is really at.
+        """
+        angle_per_position = (self.max_angle - self.min_angle) / (self.max_position - self.min_position)
+        angle = self.min_angle + (position - self.constant_offset - self.min_position) * angle_per_position
+        return float(np.degrees(angle))
+
 
 class AdjustmentDirections(Enum):
     UP = 1
@@ -140,9 +196,10 @@ class ServoWithOffsetFunction(Servo):
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  offset_function_up: Callable[[np.ndarray], int], offset_function_down: Callable[[np.ndarray], int],
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
-                 d: int = 500, offset: int = 0, goal_current: int | None = None) -> None:
+                 d: int = 500, offset: int = 0, goal_current: int | None = None, move_time: int | None = None,
+                 ff1: int = 0) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
-                         profile_acceleration, p, i, d, offset, goal_current)
+                         profile_acceleration, p, i, d, offset, goal_current, move_time=move_time, ff1=ff1)
         if offset_function_up is None or offset_function_down is None:
             raise ValueError("Should have gotten offset functions")
         self.offset_function_up = offset_function_up
@@ -186,9 +243,10 @@ class Servo2(Servo):
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
                  d: int = 500, offset: int = 0, goal_current: int | None = None,
-                 dynamic_offsets: dict[str, dict[str, int]] | None = None) -> None:
+                 dynamic_offsets: dict[str, dict[str, int]] | None = None, move_time: int | None = None,
+                 ff1: int = 0) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
-                         profile_acceleration, p, i, d, offset, goal_current)
+                         profile_acceleration, p, i, d, offset, goal_current, move_time=move_time, ff1=ff1)
         if dynamic_offsets is None:
             raise ValueError('Servo2 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
@@ -210,9 +268,10 @@ class Servo3(Servo):
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
                  d: int = 500, offset: int = 0, goal_current: int | None = None,
-                 dynamic_offsets: dict[str, int] | None = None) -> None:
+                 dynamic_offsets: dict[str, int] | None = None, move_time: int | None = None, ff1: int = 0) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode,
-                         profile_velocity, profile_acceleration, p, i, d, offset, goal_current)
+                         profile_velocity, profile_acceleration, p, i, d, offset, goal_current,
+                         move_time=move_time, ff1=ff1)
         if dynamic_offsets is None:
             raise ValueError('Servo3 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets

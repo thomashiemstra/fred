@@ -1,7 +1,9 @@
 """
 The arithmetic of calibration/tune_servo_gains.py: the size of a test step, the metrics of a step response and of a
 rest period, the acceptance criteria that mark the knee of a gain sweep, the live abort rules, and the choice of the
-gains from the trials. Pure functions on lists of samples, nothing here talks to the robot.
+gains from the trials, and the feedforward stage: the sweep of the joint, the statistics of its cruise parts, the line
+fit of the lag against the speed and the gain it gives. Pure functions on lists of samples, nothing here talks to the
+robot.
 
 A Sample is one read of the state block of the servo under test (ServoHandler.read_state) with the host time and the
 goal position the host last wrote. The quantities are in the units of the servo registers: positions (4096 per turn),
@@ -9,6 +11,7 @@ pwm units (885 is 100 % duty) and the 0.229 rpm velocity unit.
 """
 from __future__ import annotations
 
+import math
 from bisect import bisect_right
 from collections.abc import Sequence
 from itertools import accumulate
@@ -469,3 +472,191 @@ def choose_d(results: Sequence[tuple[int, bool, float, int, float, float]], pwm_
     if not better:
         return reference[0]
     return min(better, key=lambda r: (round(r[5], 1), round(r[2], 1), r[3], r[0]))[0]
+
+
+# the feedforward stage
+
+FF_RAMP = 0.2  # seconds a leg of the sweep takes to ramp its speed up from rest, and to ramp it down again
+FF_CRUISE_HOLD = 0.15  # seconds at the full speed before a step counts as cruise
+MIN_CRUISE_SAMPLES = 3  # per direction, fewer than this and the statistics of a sweep are not made
+FF_LAG_TOLERANCE = 1.0  # positions the lag may change between the slowest and the fastest speed before a correction
+FF_ROUGHNESS = 1.0  # positions the std of the lag may grow with the feedforward before it is a warning
+
+
+class SweepStep(NamedTuple):
+    """one step of the feedforward sweep: where the joint is commanded to and what the commanded motion is doing"""
+    time: float  # seconds since the start of the sweep
+    offset: float  # degrees from the pose
+    direction: int  # of the leg the step is in: 1 up, -1 down
+    cruise: bool  # the commanded speed has been at its full value for FF_CRUISE_HOLD seconds and still is
+    leg: int = 0  # the number of the leg, the cruise parts of the legs going the same way are not one line
+
+
+class _Leg(NamedTuple):
+    """a rest to rest move of the sweep: the speed ramps up linearly, cruises, and ramps down again"""
+    start: float  # seconds since the start of the sweep
+    origin: float  # degrees
+    direction: int
+    distance: float  # degrees, positive
+    peak: float  # degrees per second, below the speed of the sweep for a leg that is a triangle
+    ramp_time: float
+    cruise_time: float  # 0 for a triangle
+
+    @property
+    def duration(self) -> float:
+        return 2 * self.ramp_time + self.cruise_time
+
+    def offset_at(self, seconds: float) -> float:
+        """degrees from the pose, seconds since the start of the leg"""
+        tau = min(max(seconds, 0.0), self.duration)
+        acceleration = self.peak / self.ramp_time
+        if tau <= self.ramp_time:
+            travelled = 0.5 * acceleration * tau ** 2
+        elif tau <= self.ramp_time + self.cruise_time:
+            travelled = 0.5 * acceleration * self.ramp_time ** 2 + self.peak * (tau - self.ramp_time)
+        else:
+            travelled = self.distance - 0.5 * acceleration * (self.duration - tau) ** 2
+        return self.origin + self.direction * travelled
+
+    def is_cruise(self, seconds: float, hold: float) -> bool:
+        end = self.ramp_time + self.cruise_time
+        return self.cruise_time > 0 and self.ramp_time + hold - 1e-9 <= seconds <= end + 1e-9
+
+
+def ff_sweep(amplitude: float, speed: float, dt: float, ramp: float = FF_RAMP,
+             cruise_hold: float = FF_CRUISE_HOLD) -> list[SweepStep]:
+    """
+    the steps of one sweep of the feedforward stage: the joint goes from the pose to +amplitude, to -amplitude, to
+    +amplitude, to -amplitude and back to the pose, every leg rest to rest with the speed ramping linearly up over
+    `ramp` seconds, cruising at the speed and ramping down again (a triangle when the leg is too short to reach the
+    speed, without cruise steps). The first step is at the pose at time 0, the last one at the pose at the end.
+    :param amplitude: degrees either side of the pose
+    :param speed: degrees per second of the cruise
+    :param dt: seconds between the steps
+    :param cruise_hold: seconds the speed has to have been at its full value before a step counts as cruise
+    """
+    if amplitude <= 0 or speed <= 0 or dt <= 0 or ramp <= 0:
+        raise ValueError('the amplitude, the speed, the step time and the ramp of a sweep have to be positive')
+    acceleration = speed / ramp
+    legs: list[_Leg] = []
+    start, origin = 0.0, 0.0
+    for target in (amplitude, -amplitude, amplitude, -amplitude, 0.0):
+        distance = abs(target - origin)
+        full = distance >= speed * ramp
+        peak = speed if full else math.sqrt(distance * acceleration)
+        ramp_time = peak / acceleration
+        cruise_time = (distance - speed * ramp) / speed if full else 0.0
+        legs.append(_Leg(start, origin, 1 if target > origin else -1, distance, peak, ramp_time, cruise_time))
+        start += legs[-1].duration
+        origin = target
+    total = start
+    steps: list[SweepStep] = []
+    index = 0
+    for k in range(math.ceil(total / dt - 1e-9) + 1):
+        seconds = min(k * dt, total)
+        while index < len(legs) - 1 and seconds >= legs[index + 1].start - 1e-9:
+            index += 1
+        leg = legs[index]
+        local = seconds - leg.start
+        steps.append(SweepStep(seconds, leg.offset_at(local), leg.direction, leg.is_cruise(local, cruise_hold),
+                               index))
+    return steps
+
+
+class SweepSample(NamedTuple):
+    """a sample of the servo during a sweep with what the commanded motion was doing at the time"""
+    sample: Sample
+    direction: int  # in positions: 1 when the position rises, -1 when it falls (not the direction of the angle)
+    cruise: bool
+    leg: int = 0
+
+
+class CruiseStatistics(NamedTuple):
+    """the cruise parts of one sweep, per direction and then averaged over the two directions, so that the pull of
+    gravity cancels"""
+    speed: float  # positions per millisecond, from the goals the servo was sent
+    lag: float  # positions the servo trails its trajectory, in the direction of the move
+    pwm: float  # pwm units, in the direction of the move
+    lag_std: float  # positions
+    pwm_std: float
+    samples: int  # the cruise samples of both directions
+
+
+def cruise_statistics(samples: Sequence[SweepSample], minimum: int = MIN_CRUISE_SAMPLES) -> CruiseStatistics:
+    """
+    the statistics of the cruise samples of a sweep: for each direction (of the position: 1 when it rises, as the
+    lag and the pwm are in positions) the mean of (position trajectory - position) times the direction (positive when
+    the servo trails), the mean pwm times the direction, the std of both and the
+    speed (the absolute slope of the goal against the time, one line per leg with the legs' own offsets); the result
+    is the mean over the two directions
+    :raises ValueError: when a direction has fewer cruise samples than the minimum
+    """
+    lags, pwms, lag_stds, pwm_stds, speeds = [], [], [], [], []
+    for direction, name in ((1, 'up'), (-1, 'down')):
+        legs: dict[int, list[Sample]] = {}
+        for s in samples:
+            if s.cruise and s.direction == direction:
+                legs.setdefault(s.leg, []).append(s.sample)
+        rows = [r for leg in legs.values() for r in leg]
+        if len(rows) < minimum:
+            raise ValueError('{} cruise samples going {}, at least {} are needed'.format(len(rows), name, minimum))
+        lag = np.array([(r.position_trajectory - r.position) * direction for r in rows], dtype=float)
+        pwm = np.array([r.pwm * direction for r in rows], dtype=float)
+        lags.append(lag.mean())
+        pwms.append(pwm.mean())
+        lag_stds.append(lag.std())
+        pwm_stds.append(pwm.std())
+        # the slope of the goal against the time within the legs, pooled, in positions per millisecond: the unit of
+        # the servo's feedforward gain
+        covariance = variance = 0.0
+        for leg in legs.values():
+            times = np.array([r.time for r in leg])
+            goals = np.array([r.goal for r in leg], dtype=float)
+            covariance += float(((times - times.mean()) * (goals - goals.mean())).sum())
+            variance += float(((times - times.mean()) ** 2).sum())
+        if variance <= 0:
+            raise ValueError('the cruise samples going {} are all at the same time'.format(name))
+        speeds.append(abs(covariance / variance) / 1000.0)
+    return CruiseStatistics(speed=float(np.mean(speeds)), lag=float(np.mean(lags)), pwm=float(np.mean(pwms)),
+                            lag_std=float(np.mean(lag_stds)), pwm_std=float(np.mean(pwm_stds)),
+                            samples=sum(1 for s in samples if s.cruise))
+
+
+class LineFit(NamedTuple):
+    """lag = friction + slope * speed"""
+    friction: float  # positions, the lag at speed 0: what doesn't depend on the speed
+    slope: float  # milliseconds (positions per position per millisecond)
+
+
+def fit_line(speeds: Sequence[float], lags: Sequence[float]) -> LineFit:
+    """the least squares line of the lag in positions against the speed in positions per millisecond"""
+    if len(set(speeds)) < 2:
+        raise ValueError('a line needs at least two different speeds')
+    slope, friction = np.polyfit(np.asarray(speeds, dtype=float), np.asarray(lags, dtype=float), 1)
+    return LineFit(friction=float(friction), slope=float(slope))
+
+
+def lag_growth(fit: LineFit, statistics: Sequence[CruiseStatistics]) -> float:
+    """the change of the lag in positions between the slowest and the fastest speed of the statistics, on the line"""
+    speeds = [s.speed for s in statistics]
+    return fit.slope * (max(speeds) - min(speeds))
+
+
+def feedforward_change(p: int, slope: float) -> int:
+    """
+    the feedforward gain that takes the part of the lag that grows with the speed away: the servo adds FF1 / 4 times
+    the trajectory velocity in positions per millisecond to the output of the position controller, whose proportional
+    term is P / 128 times the error, so a lag growing by `slope` milliseconds per position per millisecond needs
+    FF1 = 4 * P / 128 * slope = P / 32 * slope. Negative for a slope below 0.
+    """
+    return round(p / 32.0 * slope)
+
+
+def clip_gain(value: int, maximum: int) -> int:
+    return max(0, min(maximum, value))
+
+
+def rougher_speeds(before: Sequence[CruiseStatistics], after: Sequence[CruiseStatistics],
+                   limit: float = FF_ROUGHNESS) -> list[int]:
+    """the indexes of the speeds where the std of the lag grew by more than the limit"""
+    return [i for i, (b, a) in enumerate(zip(before, after)) if a.lag_std - b.lag_std > limit]

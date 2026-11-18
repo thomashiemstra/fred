@@ -38,7 +38,7 @@ class AbstractRobotController(ABC):
         pass
 
     @abstractmethod
-    def move_to_pose(self, pose: Pose) -> tuple[float, float]:
+    def move_to_pose(self, pose: Pose) -> float | None:
         pass
 
     @abstractmethod

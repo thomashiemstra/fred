@@ -16,7 +16,6 @@ from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler
 from src.utils.decorators import synchronized_with_lock
 from src.utils.movement import move_from_current_angles
-from src.utils.robot_controller_utils import get_recommended_wait_time, position_to_degrees
 
 if TYPE_CHECKING:
     from src.kinematics.kinematics_utils import Pose, RobotConfig
@@ -75,7 +74,7 @@ class DynamixelRobotController(AbstractRobotController):
         self._warm_servos: set[int] = set()
 
         self.initialize_servos()
-        self._current_angles = self._read_initial_angles()
+        self._check_initial_angles_can_be_read()
         self.status = False
         self.lock = threading.RLock()
 
@@ -94,8 +93,11 @@ class DynamixelRobotController(AbstractRobotController):
 
     def initialize_servos(self) -> None:
         success = self.set_control_mode()
+        # the drive mode decides what the profile registers mean, so it comes before the profile
+        success = success & self.set_drive_mode()
         success = success & self.set_velocity_profile()
         success = success & self.set_pid()
+        success = success & self.set_feedforward()
         success = success & self.set_goal_current()
         # the calibrated range is enforced by clamping every target (Servo.clamp_target_position), not with the position
         # limits in the eeprom of the servos: the static load compensation is added beyond the range (up to its
@@ -103,11 +105,10 @@ class DynamixelRobotController(AbstractRobotController):
         if self.perform_safety_checks and not success:
             raise DynamixelError("failed to setup the dynamixel robot")
 
-    def _read_initial_angles(self) -> np.ndarray | None:
-        angles = self.get_current_angles()
-        if angles is None and self.perform_safety_checks:
+    def _check_initial_angles_can_be_read(self) -> None:
+        """read the angles once at start-up, raises a DynamixelError when that fails (with perform_safety_checks)"""
+        if self.get_current_angles() is None and self.perform_safety_checks:
             raise DynamixelError("failed to read the initial position of the dynamixel robot")
-        return angles
 
     @synchronized_with_lock("bus_lock")
     def enable_servos(self) -> bool:
@@ -125,13 +126,13 @@ class DynamixelRobotController(AbstractRobotController):
             if outside:
                 for servo_id, (position, (lower, upper)) in outside.items():
                     servo = self.servo_handler.get_servo(servo_id)
-                    low_degrees, high_degrees = sorted((position_to_degrees(servo, lower),
-                                                        position_to_degrees(servo, upper)))
+                    low_degrees, high_degrees = sorted((servo.degrees_at_position(lower),
+                                                        servo.degrees_at_position(upper)))
                     logger.error('DANGER servo %d is at raw position %d (%.1f degrees), more than %.0f degrees outside '
                                  'its calibrated range of %d to %d (%.0f to %.0f degrees): its reported angle would be '
                                  'clamped to the range and the first move would jump. Move the arm by hand into the '
                                  'range, or recalibrate the offset, and try again', servo_id, position,
-                                 position_to_degrees(servo, position), CALIBRATED_RANGE_MARGIN_DEGREES, lower, upper,
+                                 servo.degrees_at_position(position), CALIBRATED_RANGE_MARGIN_DEGREES, lower, upper,
                                  low_degrees, high_degrees)
                 logger.error('servos %s are outside their calibrated range, disabling servos!', sorted(outside))
                 self.disable_servos()
@@ -163,15 +164,8 @@ class DynamixelRobotController(AbstractRobotController):
             logger.error('failed to disable all servos!')
         return success
 
-    def move_to_pose(self, pose: Pose) -> tuple[float, float]:
-        angles = inverse_kinematics(pose, self.robot_config)
-        # unknown only before the first move when the initial read failed without safety checks
-        previous_angles = self._current_angles if self._current_angles is not None else self.get_current_angles()
-        if previous_angles is None:
-            raise DynamixelError('the current angles of the robot are unknown, not moving')
-        recommended_time = get_recommended_wait_time(previous_angles, angles)
-        time_taken = self.move_servos(angles)
-        return recommended_time, time_taken
+    def move_to_pose(self, pose: Pose) -> float:
+        return self.move_servos(inverse_kinematics(pose, self.robot_config))
 
     def move_to_pose_and_give_new_angles(self, pose: Pose) -> np.ndarray:
         angles = inverse_kinematics(pose, self.robot_config)
@@ -269,22 +263,22 @@ class DynamixelRobotController(AbstractRobotController):
     def move_servos(self, angles: np.ndarray) -> float:
         start = timer()
 
-        if self.print_position_error:
+        if self.print_position_error:  # reads the bus before the goals are written, so only for debugging
             if self.counter > 10:
                 self._print_position_error()
                 self.counter = 0
             self.counter += 1
 
-        if self._recorder is not None and self.servo_handler.read_current_pos(ARM_IDS):
-            self._recorder.record(self._servos)
-
-        self._current_angles = angles
         # First set the target_position variable of all servos, some servos compensate based on the other angles
         for servo_id in ARM_IDS:
             self.servo_handler.set_angle(servo_id, angles[servo_id], angles)
 
         # Next physically move the servos to their target_position
         self.servo_handler.move_to_angles(ARM_IDS)
+
+        # after the goals are written: a failed read can take 10-20 ms and must not delay them
+        if self._recorder is not None and self.servo_handler.read_current_pos(ARM_IDS):
+            self._recorder.record(self._servos)
         end = timer()
         return end - start
 
@@ -327,6 +321,12 @@ class DynamixelRobotController(AbstractRobotController):
         if not self.servo_handler.read_current_pos([GRIPPER_ID]):
             return None
         return self.servo_handler.get_angle(GRIPPER_ID, self.servo7.current_position)
+
+    def set_drive_mode(self) -> bool:
+        return self.servo_handler.set_configured_drive_mode()
+
+    def set_feedforward(self) -> bool:
+        return self.servo_handler.set_feedforward()
 
     def set_velocity_profile(self) -> bool:
         return self.servo_handler.set_profile_velocity_and_acceleration()

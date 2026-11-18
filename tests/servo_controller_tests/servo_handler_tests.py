@@ -588,5 +588,342 @@ class TestServoHandlerBlockReads(unittest.TestCase):
                           ('sync_read', cfg.ADDR_PRESENT_INPUT_VOLTAGE, [3, 4])], self.bus.packets)
 
 
+class TestServoHandlerTimeBasedProfile(unittest.TestCase):
+    """the drive mode, the profile registers, the feedforward and the goal writes of servos with a move time; servos 1
+    and 3 are time-based, 2 and 4 velocity-based"""
+
+    BUSES = ((1, 2), (3, 4))
+
+    def setUp(self):
+        self.servos = [
+            Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=250, profile_acceleration=100,
+                  move_time=15, ff1=40),
+            Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=250, profile_acceleration=100,
+                  ff1=cfg.MAX_GAIN),
+            Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=500, profile_acceleration=50,
+                  move_time=20),
+            Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=300, profile_acceleration=70),
+        ]
+        self.bus = FakeBus(self.servos, self.BUSES)
+        self.handler = ServoHandler({servo_id: servo for servo_id, servo in enumerate(self.servos, start=1)},
+                                    cfg, mock.Mock(), self.bus, self.BUSES)
+
+    def raw(self, servo_id, address, length):
+        return list(self.bus.memory[servo_id][address:address + length])
+
+    def goal_packet(self, servo_id):
+        """the (acceleration, velocity, goal) registers of the servo"""
+        return (self.bus.get(servo_id, cfg.ADDR_PROFILE_ACCELERATION, 4),
+                self.bus.get(servo_id, cfg.ADDR_PROFILE_VELOCITY, 4),
+                self.bus.get(servo_id, cfg.ADDR_GOAL_POSITION, 4, signed=True))
+
+    @staticmethod
+    def packet_bytes(acceleration, time_ms, goal):
+        return [b for value in (acceleration, time_ms, goal) for b in (value & 0xFFFFFFFF).to_bytes(4, 'little')]
+
+    # construction
+
+    def test_the_goal_and_feedforward_registers_have_to_be_adjacent_too(self):
+        config_values = {name: getattr(cfg, name) for name in dir(cfg) if name.isupper()}
+        for changes in ({'ADDR_GOAL_POSITION': cfg.ADDR_GOAL_POSITION + 4},
+                        {'ADDR_FEEDFORWARD_1ST_GAIN': cfg.ADDR_FEEDFORWARD_1ST_GAIN + 2},
+                        {'ADDR_FEEDFORWARD_2ND_GAIN': cfg.ADDR_FEEDFORWARD_2ND_GAIN - 2}):
+            config = types.SimpleNamespace(**dict(config_values, **changes))
+            with self.assertRaises(ValueError):
+                ServoHandler({1: self.servos[0]}, config, None, None)
+
+    def test_a_new_handler_has_no_last_goals_and_the_full_speed(self):
+        self.assertEqual(({}, 1.0), (self.handler.last_goal, self.handler.speed_factor))
+
+    # drive mode
+
+    def test_drive_mode_is_read(self):
+        self.bus.memory[3][cfg.ADDR_DRIVE_MODE] = 5
+        self.assertEqual({1: 0, 2: 0, 3: 5, 4: 0}, self.handler.read_drive_mode())
+        self.assertEqual({3: 5}, self.handler.read_drive_mode([3]))
+        self.bus.unresponsive = {4}
+        self.assertIsNone(self.handler.read_drive_mode())
+
+    def test_drive_mode_is_not_written_when_it_already_matches(self):
+        for servo_id, mode in ((1, 0b0101), (2, 0b0001), (3, cfg.DRIVE_MODE_TIME_BASED_PROFILE), (4, 0)):
+            self.bus.memory[servo_id][cfg.ADDR_DRIVE_MODE] = mode
+            self.bus.memory[servo_id][cfg.ADDR_TORQUE_ENABLE] = 1  # the servos are holding their position
+        with mock.patch.object(self.bus, 'write1ByteTxRx', wraps=self.bus.write1ByteTxRx) as write:
+            self.assertTrue(self.handler.set_configured_drive_mode())
+        write.assert_not_called()
+
+    def test_the_time_based_bit_is_set_and_cleared_and_the_other_bits_are_kept(self):
+        self.bus.memory[1][cfg.ADDR_DRIVE_MODE] = 0b0001
+        self.bus.memory[2][cfg.ADDR_DRIVE_MODE] = 0b0101
+        self.bus.memory[3][cfg.ADDR_DRIVE_MODE] = 0
+        with self.assertLogs(servo_handler_module.logger, 'INFO') as logs:
+            self.assertTrue(self.handler.set_configured_drive_mode())
+        self.assertEqual([0b0101, 0b0001, cfg.DRIVE_MODE_TIME_BASED_PROFILE, 0],
+                         [self.bus.memory[servo_id][cfg.ADDR_DRIVE_MODE] for servo_id in range(1, 5)])
+        self.assertEqual(['INFO:' + servo_handler_module.logger.name + ':the drive mode of servo %d changed from %d '
+                          'to %d' % change for change in ((1, 1, 5), (2, 5, 1), (3, 0, 4))], logs.output)
+
+    def test_drive_mode_of_some_servos(self):
+        self.assertTrue(self.handler.set_configured_drive_mode([3]))
+        self.assertEqual([0, 0, 4, 0], [self.bus.memory[servo_id][cfg.ADDR_DRIVE_MODE] for servo_id in range(1, 5)])
+
+    def test_drive_mode_is_not_changed_with_the_torque_on(self):
+        self.bus.memory[1][cfg.ADDR_TORQUE_ENABLE] = 1
+        with mock.patch.object(self.bus, 'write1ByteTxRx', wraps=self.bus.write1ByteTxRx) as write, \
+                self.assertLogs(servo_handler_module.logger, 'ERROR') as logs:
+            self.assertFalse(self.handler.set_configured_drive_mode([1]))
+        write.assert_not_called()
+        self.assertEqual(0, self.bus.memory[1][cfg.ADDR_DRIVE_MODE])
+        self.assertIn('servo 1 has drive mode 0 and should have 4', logs.output[0])
+        self.assertIn('torque of this servo has to be off', logs.output[0])
+
+    def test_drive_mode_is_not_changed_when_the_torque_can_not_be_read(self):
+        read = self.bus.read1ByteTxRx
+
+        def torque_unreadable(port, servo_id, address):
+            return (0, dxl.COMM_RX_TIMEOUT, 0) if address == cfg.ADDR_TORQUE_ENABLE else read(port, servo_id, address)
+
+        with mock.patch.object(self.bus, 'read1ByteTxRx', torque_unreadable), \
+                mock.patch.object(self.bus, 'write1ByteTxRx') as write, \
+                self.assertLogs(servo_handler_module.logger, 'ERROR') as logs:
+            self.assertFalse(self.handler.set_configured_drive_mode([1]))
+        write.assert_not_called()
+        self.assertIn("can't be read", logs.output[-1])
+        self.assertEqual(0, self.bus.memory[1][cfg.ADDR_DRIVE_MODE])
+
+    def test_drive_mode_fails_when_the_servo_does_not_answer(self):
+        self.bus.unresponsive = {1}
+        self.assertFalse(self.handler.set_configured_drive_mode([1]))
+
+    def test_drive_mode_fails_when_the_read_back_differs(self):
+        write = self.bus.write1ByteTxRx
+
+        def dropped(port, servo_id, address, value):
+            return (dxl.COMM_SUCCESS, 0) if address == cfg.ADDR_DRIVE_MODE else write(port, servo_id, address, value)
+
+        with mock.patch.object(self.bus, 'write1ByteTxRx', dropped), \
+                self.assertLogs(servo_handler_module.logger, 'ERROR') as logs:
+            self.assertFalse(self.handler.set_configured_drive_mode([1]))
+        self.assertIn('servo 1 did not take the drive mode 4', logs.output[0])
+
+    def test_a_failing_servo_does_not_stop_the_others(self):
+        self.bus.memory[1][cfg.ADDR_TORQUE_ENABLE] = 1  # servo 1 can't be changed
+        self.bus.memory[2][cfg.ADDR_DRIVE_MODE] = 0b0100  # servo 2 and 3 can
+        with self.assertLogs(servo_handler_module.logger, 'INFO'):
+            self.assertFalse(self.handler.set_configured_drive_mode())
+        self.assertEqual([0, 0, 4, 0], [self.bus.memory[servo_id][cfg.ADDR_DRIVE_MODE] for servo_id in range(1, 5)])
+
+    # profile registers
+
+    def test_a_time_based_servo_gets_its_move_time_and_no_acceleration_time(self):
+        self.assertTrue(self.handler.set_profile_velocity_and_acceleration())
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1, 2, 3, 4])], self.bus.packets)
+        self.assertEqual([(0, 15), (100, 250), (0, 20), (70, 300)],
+                         [(self.bus.get(servo_id, cfg.ADDR_PROFILE_ACCELERATION, 4),
+                           self.bus.get(servo_id, cfg.ADDR_PROFILE_VELOCITY, 4)) for servo_id in range(1, 5)])
+        # the configured profile of the servo is kept for the goals that are far away
+        self.assertEqual((250, 100), (self.servos[0].profile_velocity, self.servos[0].profile_acceleration))
+        self.assertEqual({1: (15, 0), 3: (20, 0)}, self.handler.read_profile([1, 3]))
+
+    def test_the_raw_profile_is_written_as_it_is_to_a_time_based_servo(self):
+        self.assertTrue(self.handler.set_profile(1, 33, 12))
+        self.assertEqual({1: (33, 12)}, self.handler.read_profile([1]))
+
+    # speed percentage
+
+    def test_the_speed_percentage_writes_the_velocity_of_the_velocity_based_servos_only(self):
+        self.handler.set_profile_velocity_and_acceleration()
+        self.bus.packets.clear()
+        self.assertTrue(self.handler.set_profile_velocity_percentage(50))
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_VELOCITY, [2, 4])], self.bus.packets)
+        self.assertEqual([15, 125, 20, 150], [self.bus.get(servo_id, cfg.ADDR_PROFILE_VELOCITY, 4)
+                                              for servo_id in range(1, 5)])
+        self.assertEqual(0.5, self.handler.speed_factor)
+
+    def test_the_speed_percentage_of_time_based_servos_only_is_not_written(self):
+        self.assertTrue(self.handler.set_profile_velocity_percentage(25, [1, 3]))
+        self.assertEqual([], self.bus.packets)
+        self.assertEqual(0.25, self.handler.speed_factor)
+        # velocity-based servos only: the factor of the time-based ones stays
+        self.assertTrue(self.handler.set_profile_velocity_percentage(80, [2]))
+        self.assertEqual(0.25, self.handler.speed_factor)
+
+    def test_the_speed_percentage_is_still_checked(self):
+        for percentage in (0, -10, 100.1):
+            with self.assertRaises(ValueError):
+                self.handler.set_profile_velocity_percentage(percentage, [1])
+        self.assertEqual((1.0, []), (self.handler.speed_factor, self.bus.packets))
+
+    def test_the_speed_percentage_changes_the_time_of_a_far_goal(self):
+        servo = self.servos[0]
+        self.handler.move_servo_to_pos(1, 1000)
+        self.handler.set_profile_velocity_percentage(50, [1])
+        self.handler.move_servo_to_pos(1, 2000)
+        self.assertEqual(servo.goal_timing(1000, 0.5)[0], self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4))
+        self.handler.set_profile_velocity_percentage(100, [1])
+        self.handler.move_servo_to_pos(1, 3000)
+        self.assertEqual(servo.goal_timing(1000)[0], self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4))
+        self.assertLess(servo.goal_timing(1000)[0], servo.goal_timing(1000, 0.5)[0])
+
+    # feedforward
+
+    def test_feedforward_is_written_in_one_packet_as_second_and_first_gain(self):
+        self.assertTrue(self.handler.set_feedforward())
+        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [1, 2, 3, 4])], self.bus.packets)
+        # little endian, the 2nd gain 0 and then the 1st
+        self.assertEqual([0, 0, 40, 0], self.raw(1, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
+        self.assertEqual([0, 0, 0xFF, 0x3F], self.raw(2, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
+        self.assertEqual([0, 0, 0, 0], self.raw(3, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
+        self.assertEqual({1: (40, 0), 2: (cfg.MAX_GAIN, 0), 3: (0, 0), 4: (0, 0)}, self.handler.read_feedforward())
+
+    def test_feedforward_of_some_servos(self):
+        self.assertTrue(self.handler.set_feedforward([1]))
+        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [1])], self.bus.packets)
+
+    def test_single_servo_feedforward(self):
+        self.assertTrue(self.handler.set_feedforward_single_servo(3, 100))
+        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [3])], self.bus.packets)
+        self.assertEqual([0, 0, 100, 0], self.raw(3, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
+        self.assertTrue(self.handler.set_feedforward_single_servo(3, 100, 7))
+        self.assertEqual([7, 0, 100, 0], self.raw(3, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
+        self.assertEqual({3: (100, 7)}, self.handler.read_feedforward([3]))
+        self.assertEqual(0, self.servos[2].ff1, 'the configured value stays')
+        self.assertTrue(self.handler.set_feedforward([3]))
+        self.assertEqual({3: (0, 0)}, self.handler.read_feedforward([3]))
+
+    def test_feedforward_outside_the_firmware_range_is_refused(self):
+        for first, second in ((-1, 0), (cfg.MAX_GAIN + 1, 0), (0, -1), (0, cfg.MAX_GAIN + 1)):
+            with self.assertRaises(ValueError):
+                self.handler.set_feedforward_single_servo(3, first, second)
+        self.assertEqual([], self.bus.packets)
+        self.assertTrue(self.handler.set_feedforward_single_servo(3, cfg.MAX_GAIN, cfg.MAX_GAIN))
+
+    def test_feedforward_read_fails_when_a_servo_does_not_answer(self):
+        self.bus.unresponsive = {2}
+        self.assertIsNone(self.handler.read_feedforward())
+
+    # goals
+
+    def test_a_velocity_based_servo_gets_the_goal_only(self):
+        self.servos[1].target_position = 0x0204
+        self.assertTrue(self.handler.move_to_angles([2]))
+        self.assertEqual([('sync_write', cfg.ADDR_GOAL_POSITION, [2])], self.bus.packets)
+        self.assertEqual([0x04, 0x02, 0, 0], self.raw(2, cfg.ADDR_GOAL_POSITION, 4))
+        self.assertEqual([0] * 8, self.raw(2, cfg.ADDR_PROFILE_ACCELERATION, 8), 'the profile is left alone')
+        self.assertEqual({2: 0x204}, self.handler.last_goal)
+        self.assertTrue(self.handler.move_servo_to_pos(4, 1500))
+        self.assertEqual([0xDC, 0x05, 0, 0], self.raw(4, cfg.ADDR_GOAL_POSITION, 4))
+        self.assertEqual([0] * 8, self.raw(4, cfg.ADDR_PROFILE_ACCELERATION, 8))
+
+    def test_the_first_goal_of_a_time_based_servo_counts_as_a_full_turn_away(self):
+        self.servos[0].target_position = 2000
+        self.assertTrue(self.handler.move_to_angles([1]))
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1])], self.bus.packets)
+        time_ms, acceleration_ms = self.servos[0].goal_timing(4096)
+        self.assertGreater(time_ms, self.servos[0].move_time)
+        self.assertEqual(self.packet_bytes(acceleration_ms, time_ms, 2000),
+                         self.raw(1, cfg.ADDR_PROFILE_ACCELERATION, 12))
+        self.assertEqual({1: 2000}, self.handler.last_goal)
+
+    def test_a_small_step_takes_the_move_time_and_a_far_goal_longer(self):
+        servo = self.servos[0]
+        self.handler.move_servo_to_pos(1, 2000)
+        self.bus.packets.clear()
+        servo.target_position = 2020
+        self.assertTrue(self.handler.move_to_angles([1]))
+        self.assertEqual((0, 15, 2020), self.goal_packet(1))
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1])], self.bus.packets)
+
+        servo.target_position = 1000  # 1020 positions back
+        self.assertTrue(self.handler.move_to_angles([1]))
+        time_ms, acceleration_ms = servo.goal_timing(1020)
+        self.assertGreater(time_ms, 15)
+        self.assertEqual((acceleration_ms, time_ms, 1000), self.goal_packet(1))
+        self.assertEqual({1: 1000}, self.handler.last_goal)
+
+    def test_the_distance_is_to_the_previous_goal_and_not_to_the_servo(self):
+        self.handler.move_servo_to_pos(1, 2000)
+        self.bus.set_position(1, 0)  # far from where the servo is, which doesn't matter
+        self.servos[0].target_position = 2010
+        self.handler.move_to_angles([1])
+        self.assertEqual((0, 15, 2010), self.goal_packet(1))
+
+    def test_a_goal_that_was_not_sent_is_not_the_last_goal(self):
+        self.handler.move_servo_to_pos(1, 2000)
+        with mock.patch.object(dxl.GroupSyncWrite, 'txPacket', return_value=dxl.COMM_TX_FAIL), \
+                self.assertLogs(servo_handler_module.logger, 'WARNING'):
+            self.assertFalse(self.handler.move_servo_to_pos(1, 3000))
+            self.assertFalse(self.handler.move_servo_to_pos(2, 3000))
+        self.assertEqual({1: 2000}, self.handler.last_goal)
+
+    def test_time_based_goals_are_clamped_like_the_others(self):
+        self.servos[0].target_position = 5000
+        with self.assertLogs(servo_handler_module.logger, 'WARNING'):
+            self.handler.move_to_angles([1])
+        self.assertEqual(cfg.MAX_POSITION, self.goal_packet(1)[2])
+        self.assertEqual({1: cfg.MAX_POSITION}, self.handler.last_goal)
+
+    def test_a_time_based_raw_position_is_not_clamped(self):
+        self.assertTrue(self.handler.move_servo_to_pos(1, -50))
+        self.assertEqual(-50, self.goal_packet(1)[2])
+        self.assertEqual({1: -50}, self.handler.last_goal)
+
+    def test_servos_of_both_kinds_are_written_with_two_packets_and_the_time_based_ones_first(self):
+        for servo, target in zip(self.servos, (1000, 1100, 1200, 1300)):
+            servo.target_position = target
+        self.assertTrue(self.handler.move_to_angles())
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1, 3]),
+                          ('sync_write', cfg.ADDR_GOAL_POSITION, [2, 4])], self.bus.packets)
+        self.assertEqual([1000, 1100, 1200, 1300], [self.bus.get(servo_id, cfg.ADDR_GOAL_POSITION, 4)
+                                                    for servo_id in range(1, 5)])
+        self.assertEqual({1: 1000, 2: 1100, 3: 1200, 4: 1300}, self.handler.last_goal)
+        self.assertEqual(self.servos[2].goal_timing(4096)[0], self.bus.get(3, cfg.ADDR_PROFILE_VELOCITY, 4))
+
+    def test_a_mixed_call_is_only_true_when_everything_was_sent(self):
+        results = [dxl.COMM_SUCCESS, dxl.COMM_TX_FAIL]  # the time-based packet goes first
+        with mock.patch.object(dxl.GroupSyncWrite, 'txPacket', side_effect=results), \
+                self.assertLogs(servo_handler_module.logger, 'WARNING'):
+            self.assertFalse(self.handler.move_to_angles([1, 2]))
+        self.assertEqual({1: 0}, self.handler.last_goal)
+
+    def test_hold_current_position_sends_the_move_time_and_no_acceleration_time(self):
+        for servo_id, position in ((1, 1500), (2, 2500), (3, 3000), (4, 1100)):
+            self.bus.set_position(servo_id, position)
+        self.handler.move_servo_to_pos(1, 100)  # the servo is far from its last goal
+        self.bus.packets.clear()
+        self.assertTrue(self.handler.hold_current_position())
+        self.assertEqual([('sync_read', cfg.ADDR_PRESENT_POSITION, [1, 2]),
+                          ('sync_read', cfg.ADDR_PRESENT_POSITION, [3, 4]),
+                          ('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1, 3]),
+                          ('sync_write', cfg.ADDR_GOAL_POSITION, [2, 4])], self.bus.packets)
+        self.assertEqual((0, 15, 1500), self.goal_packet(1))
+        self.assertEqual((0, 20, 3000), self.goal_packet(3))
+        self.assertEqual([2500, 1100], [self.bus.get(servo_id, cfg.ADDR_GOAL_POSITION, 4) for servo_id in (2, 4)])
+        self.assertEqual([1500, 2500, 3000, 1100], [servo.target_position for servo in self.servos])
+        self.assertEqual({1: 1500, 2: 2500, 3: 3000, 4: 1100}, self.handler.last_goal)
+
+    def test_the_step_of_the_gain_tuning_has_no_profile(self):
+        self.handler.set_profile_velocity_and_acceleration()
+        self.bus.packets.clear()
+        self.assertTrue(self.handler.step_servo_to_pos(1, 3000))
+        self.assertEqual([('sync_write', cfg.ADDR_PROFILE_ACCELERATION, [1])], self.bus.packets)
+        self.assertEqual(self.packet_bytes(0, 0, 3000), self.raw(1, cfg.ADDR_PROFILE_ACCELERATION, 12))
+        self.assertEqual({1: 3000}, self.handler.last_goal)
+        # the same for a velocity-based servo, and not clamped
+        self.assertTrue(self.handler.step_servo_to_pos(2, -100))
+        self.assertEqual((0, 0, -100), self.goal_packet(2))
+        self.assertEqual({1: 3000, 2: -100}, self.handler.last_goal)
+        # the profile registers stay 0 until they are restored
+        self.assertEqual({1: (0, 0), 2: (0, 0)}, self.handler.read_profile([1, 2]))
+        self.assertTrue(self.handler.set_profile_velocity_and_acceleration([1, 2]))
+        self.assertEqual({1: (15, 0), 2: (250, 100)}, self.handler.read_profile([1, 2]))
+
+    def test_the_goal_after_a_step_is_timed_from_the_step(self):
+        self.handler.step_servo_to_pos(1, 3000)
+        self.servos[0].target_position = 3010
+        self.handler.move_to_angles([1])
+        self.assertEqual((0, 15, 3010), self.goal_packet(1))
+
+
 if __name__ == '__main__':
     unittest.main()

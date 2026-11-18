@@ -1,10 +1,14 @@
 import math
+import types
 import unittest
+from unittest import mock
 
+from src.global_constants import POSITION_CONTROL_MODE
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.calibration import wrist_roll_limits
 from src.robot_controllers.dynamixel_robot.calibration.wrist_roll_limits import MoveResult, Stop, WristRollTest, \
     profile_time, recommend
+from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
 
 DT = 0.002  # seconds per read, like the servo
@@ -206,6 +210,36 @@ class RunTests(unittest.TestCase):
         with self.assertRaisesRegex(Stop, 'did not get back to its start'):
             handler.position = 2200
             test.back_to(2048, 200, 50, 90.0)
+
+
+class MainTests(unittest.TestCase):
+
+    @staticmethod
+    def config(**servo_arguments):
+        servo = Servo(0, 4095, -math.pi, math.pi, POSITION_CONTROL_MODE, **servo_arguments)
+        return types.SimpleNamespace(servos={6: servo})
+
+    def test_a_time_based_servo_is_refused_before_anything_is_touched(self):
+        with mock.patch.object(wrist_roll_limits, 'load_servo_config', return_value=self.config(move_time=15)), \
+                mock.patch.object(wrist_roll_limits, 'setup_dynamixel_handlers') as setup, \
+                mock.patch.object(wrist_roll_limits, 'ServoHandler') as handler, \
+                mock.patch('builtins.input', side_effect=AssertionError('read from stdin')), \
+                mock.patch('builtins.print') as printed:
+            self.assertEqual(1, wrist_roll_limits.main(['--servo', '6', '--yes']))
+        # the port was not even opened, so nothing was written and no torque was enabled
+        setup.assert_not_called()
+        handler.assert_not_called()
+        printed.assert_called_once()
+        self.assertIn('servo 6 uses the time-based profile (move_time in servo_config.yaml)', printed.call_args.args[0])
+        self.assertIn('only works with the velocity-based one', printed.call_args.args[0])
+
+    def test_a_velocity_based_servo_goes_on_to_open_the_port(self):
+        with mock.patch.object(wrist_roll_limits, 'load_servo_config', return_value=self.config()), \
+                mock.patch.object(wrist_roll_limits, 'setup_dynamixel_handlers',
+                                  side_effect=RuntimeError('port opened')) as setup:
+            with self.assertRaisesRegex(RuntimeError, 'port opened'):
+                wrist_roll_limits.main(['--servo', '6', '--yes'])
+        setup.assert_called_once()
 
 
 if __name__ == '__main__':

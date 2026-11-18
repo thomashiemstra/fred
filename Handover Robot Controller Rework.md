@@ -113,6 +113,45 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
     below 1: a profile velocity of 0 is unlimited.
   - `move_servo_to_pos` / `DynamixelRobotController.set_servo_position` (debug, used by the calibration scripts)
     write the raw position unclamped; only `move_servos`, `move_servo` and `set_gripper` are clamped.
+  - The time-based profile (new, tested offline only: nothing in `servo_config.yaml` uses it yet, so every servo still
+    runs the velocity-based profile exactly as before). A servo with `move_time: <ms>` under `profile:` in the yaml (and
+    optionally `ff1: <gain>` under `pid:`, the velocity feedforward, 0 to 16383, default 0) runs in the servo's
+    time-based mode: bit 2 of the drive mode register (eeprom, address 10) is set, and the profile velocity register
+    (112) is then the time of the move in ms and the profile acceleration register (108) the acceleration time in ms
+    (at most half of the time, 0 = none). The PC streams a goal every 10 ms, so with a `move_time` of about 15 ms the
+    servo interpolates between the streamed goals.
+    - Drive mode: `initialize_servos` runs `set_drive_mode` (`ServoHandler.set_configured_drive_mode`) after the
+      operating mode and before the profile, because it decides what the profile registers mean. It reads the register
+      and writes only when the time-based bit differs from the yaml (the other bits are kept), so it is a no-op while
+      the servos hold their position. The register can only be written with the torque of that servo off: a servo that
+      needs a change with the torque on (or one whose torque can't be read) is not written, an error naming the servo
+      is logged and `initialize_servos` fails (it raises with `perform_safety_checks`). The write is acknowledged and
+      read back. The order is now control mode, drive mode, profile, pid, feedforward (`set_feedforward`, the velocity
+      gain `ff1`, the acceleration gain 0), goal current; the feedforward is also written for the servos without `ff1`
+      (0, the factory value).
+    - Profile registers: `set_profile_velocity_and_acceleration` writes `move_time` and 0 for a time-based servo (one
+      packet, as before). `set_profile(servo_id, a, b)` still writes the raw register values: for a time-based servo
+      the time and the acceleration time in ms.
+    - The time of a goal: a goal that is far away, sent with a 15 ms move time, would be a violent step, so every goal
+      written to a time-based servo (`move_to_angles`, `move_servo_to_pos`) carries a time from its distance to the
+      previous goal sent to that servo (`ServoHandler.last_goal`, the goal and not the present position), computed by
+      `Servo.goal_timing`: a streamed step that the top speed (`profile_velocity` of the yaml) covers in `move_time`
+      gets `move_time` and no acceleration time; a far goal gets a trapezoid with the top speed and the acceleration
+      of the yaml, so a long time. The first goal of a servo counts as 4096 positions (a full turn) away, so it is
+      slow, never a jump. Acceleration time, time and goal are written in one 12 byte sync write at address 108; a
+      call with servos of both kinds makes two writes, the time-based ones first. `hold_current_position` sends the
+      present positions with `move_time` and no acceleration time (the goal is where the servo already is).
+    - Speed percentage: `set_profile_velocity_percentage` (`/xbox/speed`) can't write a velocity to a time-based
+      servo; it stores `ServoHandler.speed_factor` (percentage / 100) instead, which scales the top speed in
+      `goal_timing`, so it changes the time of the goals that are far away but not of the streamed steps.
+    - `step_servo_to_pos(servo_id, position)` is a deliberate step for the gain tuning: one 12 byte write with
+      acceleration 0, time 0 and the goal, a step in either drive mode (0 is no profile). It leaves both profile
+      registers at 0, so the caller restores them with `set_profile_velocity_and_acceleration`. It is not clamped.
+    - `move_servos` writes the goals first and reads the positions for the recorder after, so a failed read (10-20 ms)
+      doesn't delay the goal. The `print_position_error` block still runs before the write, for debugging only.
+    - `calibration/wrist_roll_limits.py` sweeps profile velocities, which a time-based servo doesn't have: it prints
+      that the servo uses the time-based profile and returns 1 before the port is opened, so nothing is written and
+      no torque enabled.
 - `dynamixel_utils.py`: `BlockingPortHandler` (1ms read timeout instead of polling; `perf_counter` timeouts because
   the sdk uses `time.time()`, which ticks every 15.6ms on Windows up to Python 3.12; packet timeout from the real
   latency timer with a 10ms minimum because the sdk formula ignores the return delay), latency timer detection
@@ -131,8 +170,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   - `enable_servos` refuses when the positions, hardware errors or temperatures can't be read, when a servo has a
     hardware error or is too warm, or when an arm servo is outside its calibrated range; it sets the goal positions
     to the present positions before enabling the torque and disables all servos again when one fails.
-  - `move_servos(angles)`: `angles` is a 7-element array indexed by servo id, index 0 unused. It stores the commanded
-    angles as `_current_angles`, passes the whole array to `set_target_position_from_angle(angle, all_angles)` of
+  - `move_servos(angles)`: `angles` is a 7-element array indexed by servo id, index 0 unused. It passes the whole array to `set_target_position_from_angle(angle, all_angles)` of
     servos 1-6 (the hook for the gravity compensation, unused by the plain `Servo` the yaml produces) and writes
     positions 1-6 in one sync write. The gripper is moved separately by `set_gripper`.
   - A reboot (the only way to clear a hardware error) disables the torque and wipes pid, profile and goal current;
@@ -369,8 +407,8 @@ The fixes of 20 and 21 October were only tested offline:
   29 1-2 px differently, which moves the pose of marker 17. Check the poses of the boards and the markers at
   measured positions. The calibration scripts are ported but have never run; recalibrate if the camera that made
   `src/camera/calibration/calibration_data.json` is gone.
-- Failed reads: cut the servo power during a move, it should stop with a `MovementException` (or a
-  `DynamixelError` from `move_to_pose`) and the arm should hold.
+- Failed reads: cut the servo power during a move, it should stop with a `MovementException` and the arm should
+  hold. (`move_to_pose` no longer reads the angles first, so it doesn't raise a `DynamixelError` for unknown angles.)
 - `enable_servos` refuses with a logged error when an arm servo rests more than 5 degrees outside its calibrated
   range: check the message with the arm resting outside the range, and that a drooped arm at rest stays inside it.
 - The Arduino angle sensor (COM5), if it is used again: `ArduinoAngleReader.stop()` was only tested on a loopback

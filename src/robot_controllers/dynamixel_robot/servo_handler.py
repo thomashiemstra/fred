@@ -28,6 +28,8 @@ Field = tuple[int, int, bool]
 SYNC_READ_ATTEMPTS = 3
 # a failed read that took at least this fraction of the packet timeout ran into the timeout
 LATE_FRACTION = 0.9
+# positions of a full turn: how far a time-based servo counts its first goal to be, so that goal is slow, never a jump
+FULL_TURN_POSITIONS = 4096
 
 
 class ServoState(NamedTuple):
@@ -77,10 +79,13 @@ class ServoHandler(object):
         if bus_ids != sorted(servos):
             raise ValueError("every servo should be on exactly one bus, got buses %s for servos %s"
                              % (self.buses, sorted(servos)))
-        # adjacent registers are written in a single packet, see set_profile_velocity_and_acceleration and set_pid
+        # adjacent registers are written in a single packet, see set_profile_velocity_and_acceleration, set_pid,
+        # set_feedforward and the goal writes (acceleration, velocity and goal position)
         if (config.ADDR_PROFILE_ACCELERATION + config.LEN_PROFILE_ACCELERATION != config.ADDR_PROFILE_VELOCITY or
-                config.ADDR_D + config.LEN_PID != config.ADDR_I or config.ADDR_I + config.LEN_PID != config.ADDR_P):
-            raise ValueError("the profile or pid registers in the config are not adjacent")
+                config.ADDR_PROFILE_VELOCITY + config.LEN_PROFILE_VELOCITY != config.ADDR_GOAL_POSITION or
+                config.ADDR_D + config.LEN_PID != config.ADDR_I or config.ADDR_I + config.LEN_PID != config.ADDR_P or
+                config.ADDR_FEEDFORWARD_2ND_GAIN + config.LEN_FEEDFORWARD_GAIN != config.ADDR_FEEDFORWARD_1ST_GAIN):
+            raise ValueError("the profile, pid or feedforward registers in the config are not adjacent")
         # the state block of read_state runs from the realtime tick to the temperature
         if (config.ADDR_PRESENT_TEMPERATURE + config.LEN_PRESENT_TEMPERATURE - config.ADDR_REALTIME_TICK
                 != config.LEN_STATE_BLOCK):
@@ -92,6 +97,11 @@ class ServoHandler(object):
         self.failed_reads = 0
         self.late_reads = 0
         self.failed_reads_by_bus: dict[tuple[int, ...], int] = {}  # the bus (its servo ids) to its failed reads
+        # the part of the top speed a goal of a time-based servo may use, see set_profile_velocity_percentage
+        self.speed_factor = 1.0
+        # the last goal position written to every servo: the time of the next goal of a time-based servo follows from
+        # its distance to this one
+        self.last_goal: dict[int, int] = {}
 
     def get_servo(self, servo_id: int) -> Servo:
         """return the servo object corresponding to the id"""
@@ -170,21 +180,74 @@ class ServoHandler(object):
         return utils.write_1_byte(self.packet_handler, self.port_handler, self.config.ADDR_OPERATING_MODE,
                                   servo_id, mode)
 
+    def read_drive_mode(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
+        """returns a mapping of servo id to the value of its drive mode register, or None on failure"""
+        return self.__sync_read(self.config.ADDR_DRIVE_MODE, self.config.LEN_DRIVE_MODE, self.__ids(servo_ids))
+
+    @synchronized_with_lock("bus_lock")
+    def set_configured_drive_mode(self, servo_ids: Iterable[int] | None = None) -> bool:
+        """
+        set the time-based profile bit of the drive mode of every servo to what its configuration says (the other
+        bits are kept), returns True when every servo has the drive mode it should have
+
+        The drive mode is in the eeprom and can only be written while the torque of that servo is off, so nothing is
+        written when it already is what it should be. This allows reinitializing while the servos are holding their
+        position. A servo that needs a change with its torque on (or with a torque that can't be read) is not
+        written, it counts as failed. It decides what the profile registers mean, so it is set before the profile.
+        """
+        success = True
+        # don't stop at the first failure, the other servos can still be set
+        for servo_id in self.__ids(servo_ids):
+            success &= self.__set_drive_mode(servo_id)
+        return success
+
+    def __set_drive_mode(self, servo_id: int) -> bool:
+        c = self.config
+        present = utils.read_1_byte(self.packet_handler, self.port_handler, c.ADDR_DRIVE_MODE, servo_id)
+        if present is None:
+            return False
+        if self.servo_map[servo_id].time_based:
+            wanted = present | c.DRIVE_MODE_TIME_BASED_PROFILE
+        else:
+            wanted = present & ~c.DRIVE_MODE_TIME_BASED_PROFILE
+        if present == wanted:
+            return True
+        torque = utils.read_1_byte(self.packet_handler, self.port_handler, c.ADDR_TORQUE_ENABLE, servo_id)
+        if torque is None or torque:
+            logger.error("servo %d has drive mode %d and should have %d, but the torque of this servo has to be off "
+                         "to change it (%s)", servo_id, present, wanted,
+                         "it can't be read" if torque is None else "it is on")
+            return False
+        if not utils.write_1_byte(self.packet_handler, self.port_handler, c.ADDR_DRIVE_MODE, servo_id, wanted):
+            return False
+        # the write is acknowledged, the read back catches a servo that dropped it anyway
+        if utils.read_1_byte(self.packet_handler, self.port_handler, c.ADDR_DRIVE_MODE, servo_id) != wanted:
+            logger.error("servo %d did not take the drive mode %d (it had %d)", servo_id, wanted, present)
+            return False
+        logger.info("the drive mode of servo %d changed from %d to %d", servo_id, present, wanted)
+        return True
+
     def set_profile_velocity_and_acceleration(self, servo_ids: Iterable[int] | None = None) -> bool:
-        """set the velocity profile of the servos, this get's wiped after a reboot"""
+        """set the profile of the servos, this get's wiped after a reboot
+
+        A servo with a move_time is in the time-based profile and gets its move time and no acceleration time between
+        goals, the others their profile velocity and acceleration.
+        """
         # the acceleration and velocity registers are adjacent, so they are written in a single packet
         data = {}
         for servo_id in self.__ids(servo_ids):
-            servo = self.servo_map[servo_id]
-            data[servo_id] = (utils.to_bytes(servo.profile_acceleration, self.config.LEN_PROFILE_ACCELERATION) +
-                              utils.to_bytes(servo.profile_velocity, self.config.LEN_PROFILE_VELOCITY))
+            velocity, acceleration = self.servo_map[servo_id].profile_registers()
+            data[servo_id] = (utils.to_bytes(acceleration, self.config.LEN_PROFILE_ACCELERATION) +
+                              utils.to_bytes(velocity, self.config.LEN_PROFILE_VELOCITY))
         return self.__sync_write(self.config.ADDR_PROFILE_ACCELERATION,
                                  self.config.LEN_PROFILE_ACCELERATION + self.config.LEN_PROFILE_VELOCITY, data)
 
     def set_profile(self, servo_id: int, velocity: int, acceleration: int) -> bool:
         """
         set the profile of one servo to the given values instead of the configured ones, the Servo object keeps
-        its configured profile so set_profile_velocity_and_acceleration restores it; 0 means unlimited
+        its configured profile so set_profile_velocity_and_acceleration restores it; 0 means unlimited. The values are
+        written to the registers as they are: for a time-based servo they are the time of the move and the
+        acceleration time, in ms.
         """
         if velocity < 0 or acceleration < 0:
             raise ValueError("the profile velocity and acceleration can't be negative")
@@ -197,16 +260,26 @@ class ServoHandler(object):
         """
         set the profile velocity as percentage of the maximum configured
         :param percentage: a value between 0 and 100
-        :return:
+        :return: whether the write was sent, True when there was nothing to write
+
+        A time-based servo has no profile velocity register to write: its register is the time of the move. For
+        those servos the percentage is kept in speed_factor, which sets the time of the goals that are written to them
+        from now on (see move_to_angles).
         """
         if not (0 < percentage <= 100):
             raise ValueError("A percentage outside the range (0,100]!? I don't think so!")
 
         values = {}
+        time_based = False
         for servo_id in self.__ids(servo_ids):
             servo = self.servo_map[servo_id]
+            if servo.time_based:
+                time_based = True
+                continue
             # a profile velocity of 0 means unlimited velocity, so never go below 1
             values[servo_id] = max(1, int((servo.profile_velocity / 100) * percentage))
+        if time_based:
+            self.speed_factor = percentage / 100
 
         return self.__sync_write_values(self.config.ADDR_PROFILE_VELOCITY, self.config.LEN_PROFILE_VELOCITY, values)
 
@@ -232,6 +305,30 @@ class ServoHandler(object):
         configured values, so set_pid restores them"""
         return self.__write_pid({servo_id: (p, i, d)})
 
+    def set_feedforward(self, servo_ids: Iterable[int] | None = None) -> bool:
+        """set the configured feedforward of the servos (the velocity gain ff1, the acceleration gain is 0), this
+        get's wiped after a reboot"""
+        feedforward = {}
+        for servo_id in self.__ids(servo_ids):
+            feedforward[servo_id] = (self.servo_map[servo_id].ff1, 0)
+        return self.__write_feedforward(feedforward)
+
+    def set_feedforward_single_servo(self, servo_id: int, first: int, second: int = 0) -> bool:
+        """set the velocity (first) and acceleration (second) feedforward gain of a single servo, this get's wiped
+        after a reboot; the Servo object keeps the configured value, so set_feedforward restores it"""
+        return self.__write_feedforward({servo_id: (first, second)})
+
+    def read_feedforward(self, servo_ids: Iterable[int] | None = None) -> dict[int, tuple[int, int]] | None:
+        """returns a mapping of servo id to the (1st, 2nd) feedforward gain the servo has, or None on failure"""
+        c = self.config
+        fields: Sequence[Field] = ((c.ADDR_FEEDFORWARD_1ST_GAIN, c.LEN_FEEDFORWARD_GAIN, False),
+                                   (c.ADDR_FEEDFORWARD_2ND_GAIN, c.LEN_FEEDFORWARD_GAIN, False))
+        values = self.__sync_read_fields(c.ADDR_FEEDFORWARD_2ND_GAIN, 2 * c.LEN_FEEDFORWARD_GAIN, fields,
+                                         self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: (value[0], value[1]) for servo_id, value in values.items()}
+
     def set_goal_pwm(self, servo_id: int, value: int) -> bool:
         """
         set the goal pwm of one servo: in position mode a limit on the pwm output, so on the torque, between
@@ -242,17 +339,29 @@ class ServoHandler(object):
         return self.__sync_write_values(self.config.ADDR_GOAL_PWM, self.config.LEN_GOAL_PWM, {servo_id: value})
 
     def move_to_angles(self, servo_ids: Iterable[int] | None = None) -> bool:
-        """set the physical servos to their target position"""
+        """set the physical servos to their target position
+
+        A time-based servo gets the time of its move with the goal, from the distance to the previous goal and the
+        speed percentage: a small step takes its move time, a goal far away takes long (see Servo.goal_timing).
+        """
         values = {}
         for servo_id in self.__ids(servo_ids):
             self.__clamp_target_position(servo_id)
             values[servo_id] = self.servo_map[servo_id].target_position
-        return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION, values)
+        return self.__write_goals(values)
 
     # debug function to move a single servo to a raw position, this is not clamped to the calibrated range
     def move_servo_to_pos(self, servo_id: int, position: int) -> bool:
-        return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION,
-                                        {servo_id: position})
+        return self.__write_goals({servo_id: position})
+
+    def step_servo_to_pos(self, servo_id: int, position: int) -> bool:
+        """
+        a deliberate step of one servo to a raw position (not clamped) for the gain tuning: one write of the
+        acceleration, the velocity and the goal, the first two 0, which is a step in either drive mode (0 is no
+        profile, in the time-based mode too). It leaves both profile registers at 0, restore them with
+        set_profile_velocity_and_acceleration when done.
+        """
+        return self.__write_timed_goals({servo_id: (position, 0, 0)})
 
     def read_current_pos(self, servo_ids: Iterable[int] | None = None) -> bool:
         """update the current_position parameter of the servo objects
@@ -278,13 +387,21 @@ class ServoHandler(object):
         servo_ids = self.__ids(servo_ids)
         if not self.read_current_pos(servo_ids):
             return False
-        values = {}
+        timed = {}
+        plain = {}
         for servo_id in servo_ids:
             servo = self.servo_map[servo_id]
             servo.target_position = servo.current_position
             servo.compensation_positions = 0  # the present position is held as it is, nothing was added to it
-            values[servo_id] = servo.current_position
-        return self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION, values)
+            if servo.time_based:
+                # the goal is where the servo already is, so it gets its move time and no acceleration time, not a
+                # time for the distance from the previous goal
+                timed[servo_id] = (servo.current_position, servo.profile_registers()[0], 0)
+            else:
+                plain[servo_id] = servo.current_position
+        # both writes are made, also when the first one fails
+        timed_sent = self.__write_timed_goals(timed)
+        return self.__write_plain_goals(plain) and timed_sent
 
     def read_current_pos_single_servo(self, servo_id: int) -> int | None:
         """update the current_position parameter of a single servo, returns the position or None on failure"""
@@ -445,6 +562,65 @@ class ServoHandler(object):
                               utils.to_bytes(i, self.config.LEN_PID) +
                               utils.to_bytes(p, self.config.LEN_PID))
         return self.__sync_write(self.config.ADDR_D, 3 * self.config.LEN_PID, data)
+
+    def __write_feedforward(self, feedforward: dict[int, tuple[int, int]]) -> bool:
+        """write a mapping of servo id to (1st gain, 2nd gain)"""
+        # the 2nd and 1st gain registers are adjacent (in that order), so they are written in a single packet
+        data = {}
+        for servo_id, (first, second) in feedforward.items():
+            for name, gain in (('first', first), ('second', second)):
+                # the servos drop a gain outside their range silently, the sync write isn't acknowledged
+                if not 0 <= gain <= self.config.MAX_GAIN:
+                    raise ValueError("[ID:%03d] the %s feedforward gain %d is outside 0..%d" % (
+                        servo_id, name, gain, self.config.MAX_GAIN))
+            data[servo_id] = (utils.to_bytes(second, self.config.LEN_FEEDFORWARD_GAIN) +
+                              utils.to_bytes(first, self.config.LEN_FEEDFORWARD_GAIN))
+        return self.__sync_write(self.config.ADDR_FEEDFORWARD_2ND_GAIN, 2 * self.config.LEN_FEEDFORWARD_GAIN, data)
+
+    @synchronized_with_lock("bus_lock")
+    def __write_goals(self, goals: dict[int, int]) -> bool:
+        """write a mapping of servo id to goal position, returns True when everything was sent
+
+        A velocity-based servo gets the goal in its register. A time-based servo gets the acceleration time, the time
+        of the move and the goal in one packet, with the time from the distance to its previous goal.
+        """
+        timed = {}
+        plain = {}
+        for servo_id, goal in goals.items():
+            servo = self.servo_map[servo_id]
+            if servo.time_based:
+                # a servo that got no goal yet counts as a full turn away: that is slow, never a jump
+                distance = abs(goal - self.last_goal[servo_id]) if servo_id in self.last_goal else FULL_TURN_POSITIONS
+                time_ms, acceleration_ms = servo.goal_timing(distance, self.speed_factor)
+                timed[servo_id] = (goal, time_ms, acceleration_ms)
+            else:
+                plain[servo_id] = goal
+        # the time-based ones first, both writes are made, also when the first one fails
+        timed_sent = self.__write_timed_goals(timed)
+        return self.__write_plain_goals(plain) and timed_sent
+
+    def __write_plain_goals(self, goals: dict[int, int]) -> bool:
+        """write goal positions to the goal position register, and remember them in last_goal when they were sent"""
+        sent = self.__sync_write_values(self.config.ADDR_GOAL_POSITION, self.config.LEN_GOAL_POSITION, goals)
+        if sent:
+            self.last_goal.update(goals)
+        return sent
+
+    def __write_timed_goals(self, goals: dict[int, tuple[int, int, int]]) -> bool:
+        """
+        write a mapping of servo id to (goal position, time of the move, acceleration time) in one packet: the
+        acceleration, velocity and goal position registers are adjacent. The profile registers are left as written.
+        """
+        c = self.config
+        data = {servo_id: (utils.to_bytes(acceleration, c.LEN_PROFILE_ACCELERATION) +
+                           utils.to_bytes(time_ms, c.LEN_PROFILE_VELOCITY) +
+                           utils.to_bytes(goal, c.LEN_GOAL_POSITION))
+                for servo_id, (goal, time_ms, acceleration) in goals.items()}
+        sent = self.__sync_write(c.ADDR_PROFILE_ACCELERATION,
+                                 c.LEN_PROFILE_ACCELERATION + c.LEN_PROFILE_VELOCITY + c.LEN_GOAL_POSITION, data)
+        if sent:
+            self.last_goal.update({servo_id: goal for servo_id, (goal, _, _) in goals.items()})
+        return sent
 
     def __sync_write_values(self, address: int, length: int, values: dict[int, int]) -> bool:
         """write a mapping of servo id to value to the given address"""

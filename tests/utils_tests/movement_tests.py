@@ -16,7 +16,6 @@ from src.utils.movement import SplineMovement, PoseToPoseMovement, Movement, pla
     plan_move_to_angles, move_between_poses, move_from_current_angles, get_curve_val, get_spline_step_arrays, \
     get_angles_center, get_adjustments_and_stop_pose
 from src.utils.movement_exception import MovementException
-from src.utils.robot_controller_utils import get_recommended_wait_time
 
 test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
 
@@ -374,19 +373,6 @@ class MovementTests(unittest.TestCase):
             PoseToPoseMovement(poses, 0.5).move(controller)
         test.assert_allclose(angles_of(poses[0]), controller.sent_angles[0], atol=1e-9)
         test.assert_allclose(angles_of(poses[-1]), controller.sent_angles[-1], atol=1e-9)
-
-
-class RecommendedWaitTimeTests(unittest.TestCase):
-
-    def test_slowest_joint_at_the_maximum_speed_determines_the_time(self):
-        current = np.array([0, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0])
-        new = np.array([0, 0.7, 0.0, 0.1, 0.0, 0.0, -0.4])
-        self.assertAlmostEqual(1.0 / global_constants.recommended_max_servo_speed,
-                               get_recommended_wait_time(current, new))
-
-    def test_no_wait_without_movement(self):
-        angles = np.array([0, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0])
-        self.assertEqual(0, get_recommended_wait_time(angles, angles))
 
 
 if __name__ == '__main__':
