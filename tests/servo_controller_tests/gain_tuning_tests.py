@@ -19,14 +19,14 @@ import math
 
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
     FF_CRUISE_HOLD, FF_RAMP, MIN_BIN_SAMPLES, AbortLimits, BinSide, Criteria, CruiseStatistics, LineFit, RestMetrics,
-    Sample, StepMetrics, SweepBin, SweepSample, abort_reason, bin_sweep, choose_d, choose_p, clip_gain,
+    Sample, StepMetrics, SweepBin, SweepSample, SweepStep, abort_reason, bin_sweep, choose_d, choose_p, clip_gain,
     cruise_statistics, d_ladder, environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth,
     p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size,
     tracking_metrics)
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import (
     FF_SAMPLE_FIELDS, SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep, TuningSession, compared_d,
     d_candidates, d_grid, d_progress, feedforward_refusal, grid_is_done, joint_knee_at, joint_p_at, knee_trial,
-    parse_pose, position_sign, recommend, swept_d_values)
+    parse_pose, position_sign, recommend, stream_sweep, swept_d_values)
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
 from tests.servo_controller_tests.static_load_scripts_tests import FakeRobot
@@ -2071,6 +2071,92 @@ class FeedforwardStageTests(unittest.TestCase):
             tune_servo_gains.print_feedforward(4, servo, rough)
         self.assertIn('rougher', out.getvalue())
         self.assertIn('10, 20, 30 degrees/s', out.getvalue())
+
+
+class StreamSweepTests(unittest.TestCase):
+    """the loop that streams a sweep keeps time with the clock, and a late step does not make the next ones hurry"""
+    DT = 0.01
+    READ_TIME = 0.003  # three reads fit between two writes, then 1 ms of sleep is left
+
+    def stream(self, steps=60, stalled_writes=None, stalled_reads=None, read_time=READ_TIME):
+        """
+        stream a sweep of steps with distinct angles on a fake clock. stalled_writes maps the number of a step to the
+        seconds its write takes, stalled_reads maps it to the seconds of the first read after its write.
+        Returns the times the steps were written, the angles written, the sleeps asked for and the samples recorded.
+        """
+        stalled_writes, stalled_reads = stalled_writes or {}, stalled_reads or {}
+        now = [0.0]
+        written, sent, sleeps, reads_of_step = [], [], [], {}
+
+        def clock():
+            return now[0]
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        def move_servos(angles):
+            written.append(now[0])
+            sent.append(angles[0])
+            now[0] += stalled_writes.get(len(written) - 1, 0.0)
+
+        def read(goal, time_written):
+            number = reads_of_step[len(written)] = reads_of_step.get(len(written), 0) + 1
+            now[0] += read_time + (stalled_reads.get(len(written) - 1, 0.0) if number == 1 else 0.0)
+            return samples([0])[0]
+
+        robot = mock.Mock()
+        robot.move_servos.side_effect = move_servos
+        servo = mock.Mock(target_position=2048, compensation_positions=0)
+        steps_of_sweep = [SweepStep(index * self.DT, 0.0, 1, False) for index in range(steps)]
+        angles = np.tile(np.arange(steps, dtype=np.float64)[:, np.newaxis], (1, 7))
+        recorded = []
+        reason = stream_sweep(robot, servo, steps_of_sweep, angles, read, lambda time_written: None, recorded,
+                              clock, sleep)
+        self.assertIsNone(reason)
+        return written, sent, sleeps, recorded
+
+    def test_without_a_stall_the_steps_follow_the_clock_and_the_servo_is_read_between_them(self):
+        written, sent, sleeps, recorded = self.stream()
+        np.testing.assert_allclose(written, np.arange(60) * self.DT, atol=1e-9)
+        np.testing.assert_allclose(sleeps, 0.001, atol=1e-9)
+        self.assertEqual(60, len(sleeps))
+        self.assertEqual(3 * 60, len(recorded))
+        self.assertEqual(list(range(60)), sent)
+
+    def test_a_step_that_is_a_little_early_does_not_sleep_and_keeps_the_time_of_the_step(self):
+        # the last read ends 0.01 ms before the next write is due: no sleep for that, and the time is not reset
+        written, _, sleeps, _ = self.stream(steps=5, read_time=0.00333)
+        self.assertEqual([], sleeps)
+        for index, seconds in enumerate(written):
+            self.assertLessEqual(seconds, index * self.DT + 1e-9)
+            self.assertGreater(seconds, index * self.DT - 1e-4)
+
+    def check_stall(self, written, sent, sleeps, late, stall):
+        gaps = np.diff(written)
+        # the next step goes out when the stall is over (after the read it started), then the period is back
+        self.assertAlmostEqual(stall + self.READ_TIME, gaps[late], places=9)
+        np.testing.assert_allclose(gaps[late + 1:], self.DT, atol=1e-9)
+        np.testing.assert_allclose(gaps[:late], self.DT, atol=1e-9)
+        self.assertGreaterEqual(gaps.min(), self.DT - 1e-9, 'no two steps are written back to back')
+        # what is asked for after the stall is the rest of a period, as before it, not nothing
+        self.assertEqual(len(written) - 1, len(sleeps), 'only the late step has no sleep')
+        np.testing.assert_allclose(sleeps, 0.001, atol=1e-9)
+        self.assertEqual(list(range(len(written))), sent, 'every step is written, in order')
+
+    def test_a_stall_in_a_write_does_not_make_the_next_steps_hurry(self):
+        written, sent, sleeps, _ = self.stream(stalled_writes={20: 0.25})
+        self.check_stall(written, sent, sleeps, 20, 0.25)
+
+    def test_a_stall_in_a_read_does_not_make_the_next_steps_hurry(self):
+        written, sent, sleeps, _ = self.stream(stalled_reads={30: 0.25})
+        self.check_stall(written, sent, sleeps, 30, 0.25)
+
+    def test_every_step_is_written_in_order_after_several_stalls(self):
+        written, sent, _, recorded = self.stream(stalled_writes={5: 0.25, 6: 0.02, 40: 1.0}, stalled_reads={20: 0.1})
+        self.assertEqual(list(range(60)), sent)
+        self.assertGreaterEqual(np.diff(written).min(), self.DT - 1e-9)
+        self.assertEqual(60, len({sample.step.time for sample in recorded}))
 
 
 class PositionSignTests(unittest.TestCase):

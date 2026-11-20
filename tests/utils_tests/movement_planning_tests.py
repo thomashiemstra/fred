@@ -385,6 +385,63 @@ class ExecuteMoveTests(unittest.TestCase):
         clock = self.run_with_fake_clock(standing_still(resting_angles, steps), time_to_send_a_step=1.5 * dt)
         self.assertAlmostEqual(steps * 1.5 * dt, clock.time)
 
+    @staticmethod
+    def run_with_stall(steps, stalls):
+        """
+        execute_move of a move whose steps have distinct angles on a fake clock; stalls maps the number of a step to
+        the seconds its write takes. Returns the clock, the times the steps were written and the angles written.
+        """
+        move = PlannedMove('ramp', np.tile(np.arange(steps, dtype=np.float64)[:, np.newaxis], (1, 7)), 1.0)
+        clock = FakeClock()
+        written, sent = [], []
+
+        def move_servos(angles):
+            written.append(clock.time)
+            sent.append(angles[0])
+            clock.time += stalls.get(len(written) - 1, 0.0)
+
+        fake = mock.Mock()
+        fake.move_servos.side_effect = move_servos
+        with mock.patch.object(movement, 'perf_counter', clock.perf_counter), \
+                mock.patch.object(movement, 'sleep', clock.sleep):
+            execute_move(fake, move)
+        return clock, written, sent
+
+    def test_a_stall_does_not_make_the_next_steps_hurry(self):
+        dt = 1.0 / global_constants.steps_per_second
+        steps, late = 60, 20
+        clock, written, sent = self.run_with_stall(steps, {late: 0.25})
+
+        gaps = np.diff(written)
+        # the next step goes out when the stall is over, every other step is one period after the one before it
+        self.assertAlmostEqual(0.25, gaps[late])
+        np.testing.assert_allclose(np.delete(gaps, late), dt, atol=1e-9, err_msg='no step is written back to back')
+        # what is asked for after the stall is a full period, not nothing
+        self.assertEqual(steps - 1, len(clock.sleeps), 'only the late step has no sleep')
+        np.testing.assert_allclose(clock.sleeps[late:], dt, atol=1e-9)
+        # the stalled write took the place of a period, the rest of the move was not shortened to make up for it
+        self.assertAlmostEqual((steps - 1) * dt + 0.25, clock.time)
+
+    def test_every_step_is_still_sent_in_order_after_a_stall(self):
+        steps = 60
+        _, _, sent = self.run_with_stall(steps, {10: 0.25, 11: 0.03, 40: 1.0})
+        self.assertEqual(list(range(steps)), sent)
+
+    def test_without_a_stall_the_sleeps_are_the_remainder_of_every_period(self):
+        dt = 1.0 / global_constants.steps_per_second
+        steps, time_to_send = 40, 0.003
+        clock, written, _ = self.run_with_stall(steps, {n: time_to_send for n in range(steps)})
+        # what the loop asked for before a late step stopped counting as lost time
+        reference = []
+        now, next_step = 0.0, 0.0
+        for _ in range(steps):
+            now += time_to_send
+            next_step += dt
+            reference.append(max(0.0, next_step - now))
+            now += reference[-1]
+        self.assertEqual(reference, clock.sleeps)
+        np.testing.assert_allclose(np.diff(written), dt, atol=1e-9)
+
 
 class PlanMoveToAnglesTests(unittest.TestCase):
     """joint space moves get the same checks as the straight lines"""

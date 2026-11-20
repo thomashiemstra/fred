@@ -156,9 +156,10 @@ fifth more by motor current than on 17 November.
 
 A stall of the PC becomes a kick: on the video of one run both the camera recorder and the arm stopped for about a
 quarter second during the first move, after which the arm moved at twice its planned speed and rang at 6 Hz for
-0.7 s. `execute_move` (`src/utils/movement.py`) and `stream_sweep` (`tune_servo_gains.py`) send the steps that are
-late back to back; the gamepad loop was changed on 18 November to carry on from where it is instead. Open: the
-same change in those two loops, and what stalls.
+0.7 s. `execute_move` (`src/utils/movement.py`) and `stream_sweep` (`tune_servo_gains.py`) sent the steps that were
+late back to back. Since 20 November they carry on from where the move is, one period between the steps, as the
+gamepad loop does since 18 November: the arm pauses for as long as the PC stalls and the move ends that much
+later. Not checked on the robot yet. Open: what stalls (it happened with and without the camera recorder running).
 
 One position of error is about 0.5 mm at the gripper tip for joint 3 (34 cm) and up to 0.9 mm for joint 2 (57 cm).
 Also open: the cos_phi term of joint 3 is a shift of 3.3 degrees, which is

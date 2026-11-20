@@ -372,9 +372,11 @@ def stream_sweep(robot: DynamixelRobotController | CombinedRobot, servo: Servo, 
                  sleep: Callable[[float], None] = time.sleep) -> str | None:
     """
     stream the steps of a sweep to the robot against the clock, as execute_move does, and read the servo as often as
-    fits between two writes: the next step is written at its time on the clock without drift (the time of every
-    step follows from the start, not from the previous write), and the servo is read again only when a read still
-    fits before that. The loop knows nothing about the tuning or the recording: what a read does and what ends the
+    fits between two writes: while the loop keeps up, the next step is written at its time on the clock (the time of
+    every step follows from the start, not from the previous write) and the servo is read again only when a read
+    still fits before that. When a step is late (a stall of the PC, a read that took too long) the next ones do not
+    hurry to catch up, the loop carries on from there with one period between the steps, so the sweep ends later and
+    no step is skipped. The loop knows nothing about the tuning or the recording: what a read does and what ends the
     sweep early are the callables.
     :param servo: the servo under test, its target position and compensation are noted with every sample
     :param steps: the steps of the sweep, made for a period of 1 / global_constants.steps_per_second
@@ -405,8 +407,12 @@ def stream_sweep(robot: DynamixelRobotController | CombinedRobot, servo: Servo, 
             # another sample only when a read still fits before the next write is due
             if now + (now - began) >= next_step:
                 break
-        if next_step - clock() > 1e-4:  # a shorter sleep is not worth it
+        remaining = next_step - clock()
+        if remaining > 1e-4:  # a shorter sleep is not worth it
             sleep(next_step - clock())
+        elif remaining <= 0:
+            # the next step is overdue: a stall must not become a burst of steps, the arm would kick and ring
+            next_step = clock()
     return None
 
 

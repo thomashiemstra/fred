@@ -112,7 +112,9 @@ def check_move(move: PlannedMove, robot: AbstractRobotController, current_angles
 def execute_move(robot: AbstractRobotController, move: PlannedMove,
                  should_stop: Callable[[], bool] | None = None) -> bool:
     """
-    send every step of a planned movement to the robot, at src.global_constants.steps_per_second
+    send every step of a planned movement to the robot, at src.global_constants.steps_per_second. A step that goes
+    out late (a stall of the PC) does not make the next ones hurry: they follow one period after it, so the movement
+    ends later by the stall and no step is skipped.
     :param move: the PlannedMove to be executed
     :param should_stop: optional function that is checked before every step, the movement stops when it returns True
     :return: True if the whole movement was executed, False if it was stopped
@@ -124,7 +126,12 @@ def execute_move(robot: AbstractRobotController, move: PlannedMove,
             return False
         robot.move_servos(angles)
         next_step += dt
-        sleep(max(0.0, next_step - perf_counter()))
+        time_to_sleep = next_step - perf_counter()
+        if time_to_sleep > 0:
+            sleep(time_to_sleep)
+        else:
+            # a stall must not become a burst of steps: the arm would kick to catch up and ring afterwards
+            next_step = perf_counter()
     return True
 
 
