@@ -40,9 +40,16 @@ few poses, because the sag and the friction band both scale with 1/P. D, the fee
 enter the static error at all (at rest the D and feedforward terms are zero), so they can be tuned after the fit. A
 change of operating mode resets the gains and changes what the loop output is, so it means recording again.
 
+What the step tests of the script do not see (20 November 2026): joint 2 swings at its own resonance, 6 to 7 Hz,
+while it moves, most going down, and how much depends on P and on the belt tension, not on D. The knee of the step
+tests put it at P 2500; sweeps with raw samples at several gains showed P 2000 halves the swing, and a tighter belt
+raises the resonance and lowers the swing further. The numbers are in the revision at the top of
+`Handover Gravity and Spring Compensation.md` and in the yaml comment of servo 2. For a belt joint: check the belt
+tension first, then judge P by a slow sweep down with raw samples as well as by the steps.
+
 Two more reasons to settle P first: the hysteresis band (2021: about 20 positions on servo 3, 1.8 degrees) is the
-part no model removes, and only P shrinks it; and the up/down split of the compensation needs a final approach that
-doesn't ring, since an overshoot flips the direction the pose was approached from.
+part no model removes, and only P shrinks it; and where a pose comes to rest inside that band depends on the
+direction it was approached from, which an overshoot flips.
 
 ## Why I stays 0
 
@@ -60,7 +67,7 @@ exact gravity model. It says nothing about accuracy when K drifts by 10-20 % wit
   the band produces stick-slip hunting (Olsson and Astrom) or a slow creep, and an integrator with a deadband wider
   than half the band never fires there. It buys nothing where the feedforward stops.
 - Moves. An integrator accumulates the tracking lag during a move and returns it as overshoot at the end, which
-  also corrupts the up/down direction logic of the compensation.
+  also changes the side of the friction band the joint comes to rest on.
 
 ROBOTIS itself recommends P, then D, then a small I last for residual error under load, so I = 0 is a design choice,
 not a theorem. What would change it is payload: the feedforward has no payload term. A trim for unknown masses in the

@@ -5,6 +5,171 @@ references are to the state after the controller rework (`Handover Robot Control
 2026: the spring was removed from the robot (Step 3) and the friction of joint 2 was measured; the gains come first,
 see `Tuning the servo gains.md`.
 
+## Revision of 18 November 2026: pwm units, sweeps, and how large the sag still is
+
+This section is newer than the rest of the document and wins where they disagree. The gains table, the temperature
+limits and the "fit in positions" of the sections below are from October.
+
+How large the sag is now. The P gains are 2.5 to 3 times those of October (joint 2: 1000 to 2500, joint 3: 1500 to
+4710), and the sag shrinks in proportion. From the tuning recordings of 17 and 18 November, without a payload:
+
+| Joint | P | Sag (positions) | Holding drive (pwm units) | Where |
+|---|---|---|---|---|
+| 2 shoulder | 2500 | 2.3 | about 45 | pose `reach`, mean of the two step directions |
+| 3 elbow | 4710 | 3.2 | 118 | upper arm horizontal, mean of both sweep directions |
+| 5 wrist 2 | 760 | about 5 | 26 to 36 | sweep around its tuning pose |
+
+That is 1 to 2 mm per joint at the gripper tip. The lag while moving (5 to 15 positions) is larger. The encoder does
+not see flex of the printed parts, so the true sag at the tip is larger than these numbers.
+
+What the literature does, and how this code relates to it:
+
+- The gravity torque of a joint is linear in the first moments (mass times centre of mass) of the links beyond it,
+  so it is fitted with linear least squares. `static_compensation.py` is that, with the simplification that the
+  gripper's centre of mass lies on the roll axis and joint 6 is at 0 (joint 4 has one term; its drive is about 6 pwm
+  units, so this is left as it is).
+- Measuring: either at rest at many poses (Ma and Hollerbach, ICRA 1996), or, more common, while one joint moves
+  slowly at constant speed in both directions: the mean of the two directions is gravity, half the difference is
+  friction. Approaching a pose from both sides and averaging (the 2021 scripts, `record_static_load.py`) is the
+  at-rest form of the second.
+- Applying: the textbook form is a torque added to a PD loop. For a joint that acts like a spring the equivalent
+  is a shifted position reference, `goal = q + g(q) / K` (Tomei 1991, PD control of robots with elastic joints).
+  The spring here is the P gain of the servo, and `Servo.set_target_position_from_angle` adds exactly that.
+
+What changed in the code on 18 November:
+
+- The coefficients are the holding drive in pwm units, no longer positions. The servo drives with
+  `pwm = P / 128 * (goal - present)`, so `positions = drive * 128 / P`, and `StaticCompensation.positions` takes
+  the P gain of the servo. A fit stays valid when a gain is retuned. Checked against the data: joint 3 held at
+  -118 pwm measured, and 3.2 positions times 4710 / 128 is 118.
+- `fit_static_load.py` fits `error - compensation`, the whole load. Before, a recording made with a compensation
+  active would have been fitted as if its remaining sag were the whole load. It converts every row with the P gain
+  in its `p` column, and reports the measured pwm against the drive computed from the error.
+- `record_static_load.py` logs the gains, the measured pwm, and the mean of several readings per row, and lowers
+  the arm to the rest pose at the end.
+- New: `calibration/record_load_sweep.py`, the measurement at constant speed (next paragraph).
+- 19 November: the model is written out as one formula per joint (`joint_2_drive` to `joint_5_drive` in
+  `static_compensation.py`), which `StaticCompensation.drive` calls with the yaml coefficients by name; the fit
+  derives its columns from the same formulas. The spring term, kept as an option since October, is gone from the
+  code, the yaml and the fit script.
+
+Sweeps. A joint at rest sits somewhere inside its friction band, and where depends on how the move ended: in the
+step tests joint 3 came to rest at 3.0 positions from both sides, joint 2 at 3.6 and 1.0. A joint that moves at
+constant speed has no such freedom. `record_load_sweep.py --joint N` drives one joint through a span and back at
+two slow speeds while the others hold, at a few poses of the others, and writes per 5 degree bin the mean error and
+pwm of each direction, in the csv format of `record_static_load.py`, so `fit_static_load.py` reads both. Only the
+moving joint is measured; the rows of the others carry their angles and a blank error. From the feedforward sweeps
+of 18 November, binned the same way: joint 3 gives -116 to -122 pwm in every bin at 10 and at 30 degrees/s, joint 2
+the same slope along the sweep at 5 and 15 degrees/s. Joint 5 gives -36 at 10 degrees/s and -26 at 30: its friction
+is not the same in both directions, so the two speeds of a recording are compared and a disagreement of more than
+a position is warned about.
+
+Gravity only. Since 19 November the compensation has one set of coefficients per joint and no direction: the
+same pose always gets the same correction. The optional `up`/`down` blocks (carried over from the 2021 scripts,
+never used on the robot) and `--split` of the fit script are removed, and a yaml with `up` or `down` is refused.
+They were a friction compensation, which is the later stage (see "Motion and friction"), to be built on the
+commanded speed. The recorders still measure both directions, because the mean of the two is the gravity load; the
+fit reports half the difference as the friction it does not compensate.
+
+The procedure for a joint, joint 3 first (its load depends on `phi` only):
+
+1. `python -m src.robot_controllers.dynamixel_robot.calibration.record_load_sweep --joint 3`, with no
+   compensation in the yaml. Its summary prints the sag per sweep.
+2. `python -m src.robot_controllers.dynamixel_robot.calibration.fit_static_load <the csv> --joints 3`, and paste
+   the block under servo 3 in `servo_config.yaml`.
+3. Record the same sweeps again. The `error` column is now the sag that remains; the summary should print about 0
+   where it printed about 3 positions. A wrong sign shows as twice the sag.
+4. The check at rest: `record_static_load.py --joints 3` with a dozen poses, before and after.
+
+Joint 3, 19 November 2026 (`calibration/tuning/load_sweep_joint3_20261119_before.csv` and `_after.csv`, 8 sweeps
+and 148 bins each, P 4710):
+
+- Before: the sag (mean of both directions) was 3.0 to 3.2 positions with the upper arm horizontal and 1.5 at 57
+  degrees up or down, the same at 5 and at 10 degrees/s to 0.08 position, and it followed `phi` (with the lower arm
+  at 60 degrees the peak sat at joint 3 = 30 degrees). The fit: constant 3.9, sin_phi -108.7, cos_phi 6.7,
+  wrist_reach -8.7 pwm units, leaving 2.1 pwm units on the fitted bins and 2.9 on the held out ones (under 0.1
+  position). The measured pwm was 1.00 times the drive computed from the error.
+- After, with that block in the yaml (`max_positions: 15`): the sag is -0.02 positions on average, 0.21 rms,
+  between -0.4 and +0.5. What is left is mostly the rounding of the compensation to whole positions (it steps from
+  -2 to -3). The error while moving went from +2.6..+5.4 (up) and +0.1..+1.4 (down) to +0.9..+2.5 and -2.3..-0.9:
+  the worst error in either direction halved, 5.4 to 2.5 positions, and the errors are now centred on zero.
+- Half the up/down difference did not change (1.7 to 1.8 positions): friction and the lag of the speed, about 1.3
+  positions of it friction, and more where the load is larger (1.1 positions at 57 degrees, 1.75 horizontal).
+  Friction is now the larger part of the error of joint 3.
+- A fit of the second recording (made with the compensation active) gives the same coefficients within their
+  standard errors (sin_phi -108.3, cos_phi 7.1, wrist_reach -9.2), so `error - compensation` is handled right.
+
+Joint 5, 19 November 2026 (`calibration/tuning/load_sweep_joint5_20261119_before.csv`, 6 sweeps, 182 bins,
+P 760), recorded but NOT compensated:
+
+- Gravity (the mean of both directions) is up to about 30 pwm units, 5 positions; the fit (constant -10.2,
+  wrist_pitch -21.7) leaves 0.6 to 0.8 position, and the two speeds disagree by up to 2.3 positions.
+- Friction is as large as the load and grows with it: moving up takes about twice the gravity drive (up to 58 pwm
+  units, 10 positions), moving down takes almost none at any load (0 to 5). So the joint rests up to 10 positions
+  short after moving up and about on its goal after moving down.
+- A gravity block would centre that band (worst case about 10 to 6 positions) and make the down direction worse
+  than it is. The gripper is 12 cm long, so a position of joint 5 is 0.18 mm at the tip: the whole error is under
+  2 mm there. No block has been put in the yaml for joint 5 (whether to is still open); it is the joint to try a
+  friction term on later.
+- Not explained: after the lower turning point of the sweeps the first 25 degrees upward (5 degrees/s; less at 10)
+  took much less drive than the model gives, in two of three poses, with nothing touching the gripper on the
+  video. The recorder keeps bins, not samples, so this needs a recording of the raw samples to look into.
+- Worth a mechanical look: since November the servo sits directly on the wrist joint. Friction equal to the load
+  could be the weight of the gripper hanging on the output shaft of the servo; not checked.
+
+Joint 2, 20 November 2026 (`calibration/tuning/load_sweep_joint2_20261120_p2000.csv`, `_p2000_bent.csv` and the
+two `_p2000_after` files; P 2000, see below for why not 2500):
+
+- Before: the sag was up to 3.6 positions, the same at 5 and 10 degrees/s. All default poses of joint 2 have the
+  wrist straight, where `wrist_reach` equals `sin_phi` and a fit splits one number over the two; two more sweeps
+  with the wrist bent 60 degrees either way (`--pose 90,0,0,0,60,0 90,0,0,0,-60,0 --span=50:110`) separate them.
+- The block in the yaml has four terms: cos_q2 52.9, sin_phi 16.2, cos_phi 0.5, wrist_reach 1.6, leaving 2.4 pwm
+  units (0.15 position). A constant and sin_q2 make the fit no better (2.1) and come out as +21 and -20: they cancel
+  inside the recorded 43 to 118 degrees of joint 2 and not outside it, so they are left out. `fit_static_load.py`
+  fits all six and has no option to leave terms out; the four were fitted by hand with `fit_joint(names=...)`.
+- Cross-check with joint 3: its sin_phi of 108.7 pwm units, divided by the 3:1 belt and by the larger torque per
+  pwm unit of the XM540 (10.6 against 4.1 N.m at stall), predicts about 14 for joint 2; the fit gives 16.2.
+- After: the sag is 0.0 on average, 0.26 rms, between -0.5 and +0.7 positions. The errors while moving are centred
+  now (-9.1 going up, +9.1 going down at 5 to 10 degrees/s, where they were -10.6 and +7.6). They are the lag of the
+  speed and the friction, 8 mm at the tip at full reach: the velocity lead of `Handover Velocity Lead on the PC.md`
+  is what addresses that.
+- cos_q2 was 48.5 in the recordings of the same afternoon at a looser belt, 52.9 after it was tightened. Gravity
+  did not change: about a tenth of the mean of the two directions is friction that is not the same lifting and
+  lowering, and it follows the belt. Record joint 2 again after the belt is retensioned.
+
+Joint 2 swings while it moves (20 November, `calibration/tuning/joint2_ringing_20261120*.csv`, raw samples of
+sweeps of 10 degrees either side of the folded pose at 10 degrees/s, eight gain settings each): at its own
+resonance, whatever the speed, and most going down, where gravity does the work and there is hardly any motor
+torque on the belt. The size of the swing going down in positions at P 2500 / 2000 / 1500 (D 250):
+
+| Belt | Resonance | P 2500 | P 2000 | P 1500 |
+|---|---|---|---|---|
+| as on 17 November | 6.6 Hz | 1.9-2.4 | 1.2 | 0.75 |
+| loosened | 6.0 Hz | 2.7-2.8 | 2.4 | 1.0 |
+| tightened further (kept) | 7.2 Hz | 1.2-1.5 | 0.66 | 0.34 |
+
+Going up it is 0.5 to 0.7 at the kept tension, about the floor of the measurement. D 0, 250, 640 and 1640 made no
+difference at any tension (the swing is one position at 7 Hz, a count every 20 ms: the D term of the servo sees
+nothing most of the time and a spike at each count). So the belt tension sets how much P the joint takes, and the
+step tests of the gain tuning do not see this. Joint 2 is at P 2000 since. The tighter belt costs friction: about a
+fifth more by motor current than on 17 November.
+
+A stall of the PC becomes a kick: on the video of one run both the camera recorder and the arm stopped for about a
+quarter second during the first move, after which the arm moved at twice its planned speed and rang at 6 Hz for
+0.7 s. `execute_move` (`src/utils/movement.py`) and `stream_sweep` (`tune_servo_gains.py`) send the steps that are
+late back to back; the gamepad loop was changed on 18 November to carry on from where it is instead. Open: the
+same change in those two loops, and what stalls.
+
+One position of error is about 0.5 mm at the gripper tip for joint 3 (34 cm) and up to 0.9 mm for joint 2 (57 cm).
+Also open: the cos_phi term of joint 3 is a shift of 3.3 degrees, which is
+either its centre of mass off the axis of the link or a zero error of the angle (servo 3 has no offset measured in
+the jig); a zero error of 3 degrees would be about 2 cm at the tip.
+
+Still open: the check at rest with `record_static_load.py`; joint 4; the wrist model is the simplified
+one; what the encoder does not see (flex) needs an outside reference, see Step 6. A webcam with aruco markers on
+the arm (`aruco_markers_a4.pdf`) records the runs since 19 November, as a check of what happened, not as a
+measurement.
+
 ## Summary
 
 The arm sags at rest because the position loop of the servos runs with I gain 0 (`pid: {i: 0}` for every servo in
@@ -25,11 +190,11 @@ path.
   squares in positions, per joint.
 - Spring: removed from the robot on 23 October 2026. With it servo 3 tripped its overload protection holding the
   upper arm horizontal, without it the same hold ran for minutes and joint 2 holds the stretched arm at 15 % of its
-  stall current (Step 3). The model is gravity plus residual; the code keeps the spring term as an option for a
-  yaml with a `spring` section.
+  stall current (Step 3). The model is gravity plus residual; the spring term was taken out of the code on 19
+  November 2026.
 - Friction: on joint 2 the Coulomb friction is nearly as large as the gravity load (about 100 against 150 units
-  of current, 23 October), so the static load has to be recorded from both directions and fitted as up/down or as
-  the mean, never from one direction, and final poses should be approached from a consistent direction.
+  of current, 23 October), so the static load has to be recorded from both directions and fitted as their mean,
+  never from one direction, and final poses should be approached from a consistent direction.
 - Residual: a low order polynomial or a grid on (q2, q3) for what the physics misses.
 - Expected outcome: static sag below the friction deadband per joint, roughly 0.1-0.3 degrees (1-3 positions) on
   joints 2 and 3 when a pose is approached from a fixed direction, up to half the hysteresis otherwise.
@@ -171,9 +336,8 @@ the perpendicular and wrist terms.
 Spring (removed). The spring ran from the housing of servo 2, on the base plate, to the housing of servo 3, which is
 part of the upper arm, so its length was `L(q2, q3)` and it loaded both joints. For a linear spring the torque on
 joint j is `k (L - L0) dL/dqj`; the `k L dL/dqj` part pulls like a mass and is absorbed by the gravity terms, only
-`dL/dqj` is a column of its own (`spring_dl` in the code, coefficient `-k L0`). The term is still in
-`static_compensation.py` behind `term_names(joint, spring=True)` and a `spring` section in the yaml, off by
-default since 23 October 2026.
+`dL/dqj` is a column of its own (coefficient `-k L0`). That term (`spring_dl`, with a `spring` section in the
+yaml) was in `static_compensation.py` until 19 November 2026; a yaml with a `spring` section is now refused.
 
 Residual. What the physics leaves over on (q2, q3), maybe q5: a low order polynomial or a
 `scipy.interpolate.RegularGridInterpolator` on a q2 x q3 grid. An MLP is more than a few hundred poses support.
@@ -205,9 +369,9 @@ term with `c = d6`; this needs K.
 
 ## Step 2: fit the gravity model
 
-The code: the terms live in `static_compensation.py` (`term_values`, `regressor_row`; the names are `constant`,
-`cos_q2`, `sin_q2`, `sin_phi`, `cos_phi`, `wrist_reach`, `wrist_pitch`, `wrist_roll`, and `spring_dl` only with a
-`spring` section in the yaml) and
+The code: the model is one explicit formula per joint in `static_compensation.py` (`joint_2_drive` to
+`joint_5_drive`, the coefficients are their keyword arguments: `constant`, `cos_q2`, `sin_q2`, `sin_phi`, `cos_phi`,
+`wrist_reach`, `wrist_pitch`, `wrist_roll`; `term_values` and `regressor_row` are derived from the formulas) and
 `calibration/fit_static_load.py` does what the snippet below shows, per joint, with hold-out poses and standard
 errors. The snippet is the idea in 30 lines:
 
@@ -255,8 +419,8 @@ Measured by hand on the robot on 23 October, raw register reads:
   of the XM540, about 4.8 N.m at the joint through the 3:1 belt). Comfortable, the spring is not needed.
 
 Decision: the spring is off the robot. The anchor measurements, k and L0 and the consistency check of the fitted
-`-k L0` between the two joints are no longer needed. The code keeps the term optional (a `spring` section in
-`servo_config.yaml`, `--no-spring` in the fit script to leave it out even then) should a spring return.
+`-k L0` between the two joints are no longer needed. The code kept the term as an option until 19 November 2026,
+when it was removed (the `spring` section of the yaml, `--no-spring` of the fit script, `SpringGeometry`).
 
 ## Step 4: the residual
 
@@ -275,10 +439,9 @@ Where it plugs into the code (implemented on 19 October, see the work list at th
   and adding `constant_offset`, the `compensation` of the servo (a `StaticCompensation`) gives the positions for
   `all_angles` and they are added; `compensation_positions` keeps what was added. `move_servos` passes the
   commanded angles, so the model input is the target pose, not the measured one.
-- Parameters in the yaml: the optional `compensation` field of a servo (`max_positions`, `terms`, optional `up` and
-  `down`), validated by `servo_config.py`; a top level `spring` section (the two anchors) is still accepted and
-  switches the spring term on, the yaml has none since 23 October. The basis is one module shared with the fit
-  script.
+- Parameters in the yaml: the optional `compensation` field of a servo (`max_positions` and `terms`), validated
+  by `servo_config.py`, with the coefficients in pwm units since 18 November. The model is one module shared with
+  the fit script.
 - Clamping: `Servo.clamp_target_position` clamps the uncompensated position to the calibrated range and adds the
   compensation back, so the compensation is kept at the ends of the range and the goal may exceed the calibrated
   range by at most `max_positions`; `servo_handler` then clamps to 0-4095. The physical range has to allow that
@@ -290,13 +453,12 @@ Where it plugs into the code (implemented on 19 October, see the work list at th
   subtract it to show the residual.
 - Rate: `move_servos` runs every step (100 Hz in `execute_move` and the xbox loop); a few sin/cos per step cost
   nothing. No separate loop, no change to the servos' own 1 kHz loop.
-- Direction: keep the 2021 split as an option: fit up and down separately, use the mean for static targets and the
-  direction of the last commanded change to pick the side (`ServoWithOffsetFunction` did this with
-  `_last_commanded_angle`). The basis needs a constant term for that: Coulomb friction is a fixed number of
-  positions whose sign follows the direction, which no sin/cos term can carry. On joint 2 this is not optional:
-  with friction at about two thirds of the gravity load (23 October), a mean fit leaves half the band, and a pose
-  approached from the wrong direction sits a whole band off. Use the split, or approach final poses from one
-  consistent direction, or both.
+- Direction: none. The 2021 split (one set of coefficients for moving up and one for moving down, picked by the
+  direction of the last commanded change) was kept as an option until 19 November 2026 and then removed: it is a
+  friction compensation, not a gravity one. What it was for still holds: with friction at about two thirds of the
+  gravity load on joint 2 (23 October), a mean fit leaves half the band, and a pose approached from the wrong
+  direction sits a whole band off. Until the friction stage exists, approach final poses from one consistent
+  direction.
 - Safety: clamp the compensation magnitude (60 positions is 5 degrees), enable it one joint at a time with the arm
   supported, and check the sign by reading `present - target` before and after: the error has to shrink. A wrong sign
   doubles it.
@@ -337,7 +499,8 @@ and its remaining error is measured.
    the Feedforward gain registers of the servos.
 4. Trajectories are already smooth: the planner uses a minimum jerk profile and the profile velocity/acceleration
    per servo are set from the yaml.
-5. Resting deadband: approach final positions from a consistent direction, or the up/down split of Step 5.
+5. Resting deadband: approach final positions from a consistent direction. (A split of the compensation by
+   direction existed as an unused option until 19 November 2026; the friction term of item 2 replaces the idea.)
 
 Limit: this is for slow moves. Fast motion or heavy payloads need inverse dynamics with link inertias, which this plan
 does not identify.
@@ -389,10 +552,9 @@ the csv of `record_static_load.py` (it doesn't log them, so a fit can't tell whi
 
 Work to do (the code of 19 October 2026 is in `src/robot_controllers/dynamixel_robot/static_compensation.py`,
 `calibration/record_static_load.py`, `calibration/fit_static_load.py` and the `compensation` field of
-`servo_config.yaml`; the `spring` section stays supported but unused; the static load has not been recorded yet):
+`servo_config.yaml`; see the revision of 18 November at the top for what changed since and what was recorded):
 
-- [x] 23 October: the spring removed, the spring term off by default in the code (`term_names(joint, spring=True)`
-  and a `spring` section in the yaml switch it on).
+- [x] 23 October: the spring removed from the robot; 19 November: its term removed from the code.
 - [x] `tune_servo_gains.py` ran on joint 6 on 21-23 October: the pwm per position of error matched P / 128, the pwm
   noise criterion was fixed to ignore the pwm that follows an encoder flicker. Servo 3 overloaded in a static hold
   after run `0039` (with the spring); the script checks the hardware error status before every trial but not after
@@ -408,11 +570,11 @@ Work to do (the code of 19 October 2026 is in `src/robot_controllers/dynamixel_r
   within plus or minus 90 degrees by default, `--range` and `--floor` to change the ranges and the floor).
 - [x] Fit: `python -m src.robot_controllers.dynamixel_robot.calibration.fit_static_load static_load.csv` prints the
   coefficients with their standard errors, the condition number, the hold-out error, the hysteresis, and the yaml
-  blocks (negated, so they cancel the error); `--split` adds the up/down blocks.
+  blocks (since 18 November in pwm units, not negated; `--split` and its up/down blocks went on 19 November).
 - [x] `Servo` compensation with the yaml field and tests. Decisions taken: the calibrated range clamps the target
   before the compensation (the goal may exceed it by the compensation, `max_positions` caps that, the handler clamps
-  to 0-4095); the up/down direction only turns around after the commanded angle came back more than 3 positions, so
-  a dithering target doesn't flip it every step; `hold_current_position` drops the compensation.
+  to 0-4095); `hold_current_position` drops the compensation. (The direction tracking for the up/down split was
+  removed with the split on 19 November.)
 - [ ] Residual model, if the hold-out error asks for it.
 - [ ] Record on the robot, fit, put the blocks in the yaml, enable one joint at a time with the arm supported and
   check the sign with `_print_position_error`.

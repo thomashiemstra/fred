@@ -418,9 +418,10 @@ The fixes of 20 and 21 October were only tested offline:
 
 - Fast Sync Read (sdk 4.1 `fastSyncRead`); whether firmware 45/48/51 supports it is unchecked.
 - Lowering the return delay time of the servos.
-- Gravity/spring compensation: see `Handover Gravity and Spring Compensation.md`. The code is in place
-  (`static_compensation.py`, the `compensation` field of the yaml, the two calibration scripts) but nothing has
-  been recorded on the robot yet, so no servo has a compensation configured and the behaviour is unchanged.
+- Gravity compensation: see `Handover Gravity and Spring Compensation.md`. Since 19 November 2026 joint 3 has a
+  `compensation` in the yaml, fitted from sweeps recorded with `calibration/record_load_sweep.py` (its sag went
+  from about 3 positions to about 0); joints 2, 4 and 5 have none yet. The coefficients are in pwm units and are
+  converted with the P gain of the servo, and the spring model is gone from the code.
 - Raise `temperature_limit` to ~65C once every part around the servos is PETG-CF.
 - `calibration/measure_offsets.py` measures the offsets of the servos a jig holds; the direction check (does the
   position go up with the angle) is still by hand.

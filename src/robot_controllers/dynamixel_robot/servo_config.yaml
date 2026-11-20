@@ -19,20 +19,17 @@
 #                               starts, which needs the torque of that servo off
 #   pid                         the gains of the position controller of the servo, with the optional velocity
 #                               feedforward gain ff1 (calibration/tune_servo_gains.py --ff measures it)
-#   compensation                the static load compensation of the joint (optional, joints 2-5), the positions
-#                               added to every target for gravity at the commanded pose, fitted by
-#                               calibration/fit_static_load.py from the data of calibration/record_static_load.py,
-#                               see static_compensation.py and Handover Gravity and Spring Compensation.md:
-#                                 max_positions: 60                           the compensation is clipped to this
-#                                 terms: {constant: 1.0, cos_q2: 12.0, ...}   coefficient per term in positions
-#                                 up: {...}, down: {...}                      optional, per direction of the joint
+#   compensation                the static load compensation of the joint (optional, joints 2-5): the holding drive
+#                               in pwm units for gravity at the commanded pose. It is converted to positions with
+#                               the P gain of the servo (positions = drive * 128 / p) and added to every target.
+#                               Fitted by calibration/fit_static_load.py from the data of
+#                               calibration/record_static_load.py, see static_compensation.py and Handover Gravity
+#                               and Spring Compensation.md:
+#                                 max_positions: 60                           clip of the compensation, in positions
+#                                 terms: {constant: 1.0, cos_q2: 12.0, ...}   coefficient per term in pwm units
 #                               the terms: joint 2 constant, cos_q2, sin_q2, sin_phi, cos_phi, wrist_reach;
 #                               joint 3 constant, sin_phi, cos_phi, wrist_reach; joint 4 constant, wrist_roll;
 #                               joint 5 constant, wrist_pitch
-#
-# The spring between the servo 2 and servo 3 housings was removed on 23 October 2026 (it overloaded servo 3). A
-# top level `spring` section (base_anchor: [radial, up] cm from the joint 2 axis, arm_anchor: [along, perp] cm from
-# the joint 3 axis) is still accepted and adds the spring_dl term to joints 2 and 3, should a spring return.
 
 # The robot is printed in PLA, which softens around 55-65C. A servo that is warmer than the warning temperature is
 # logged, and the robot is stopped while all servos still work when one is warmer than the limit. The servos measure
@@ -75,7 +72,28 @@ servos:
     # After the belt was tightened that evening (run tune_joint2_20261117_2259, D 250 only): P 3080 passed at all
     # three poses and 3820 overshot with the elbow out only (2.9 positions, the limit is 2); the friction and the
     # resting error did not change. 0.65 times 3820 is 2480, rounded up to 2500
-    pid: {p: 2500, i: 0, d: 250}
+    # 20 November 2026: the step tests above did not see that the joint swings while it moves, most going down
+    # (gravity then does the work and there is hardly any motor torque on the belt): at its own resonance, whatever
+    # the speed. Sweeps of 10 degrees/s at the folded pose (calibration/tuning/joint2_ringing_20261120*.csv), the
+    # swing going down in positions at P 2500 / 2000 / 1500, D 250:
+    #   belt as on 17 November   6.6 Hz   1.9-2.4 / 1.2  / 0.75
+    #   belt loosened            6.0 Hz   2.7-2.8 / 2.4  / 1.0
+    #   belt tightened further   7.2 Hz   1.2-1.5 / 0.66 / 0.34   (the tension it has now)
+    # Going up it is 0.5 to 0.7 at this tension. D 0, 250, 640 and 1640 made no difference at any tension, only
+    # noisier drive at 1640. So the belt tension sets how much P the joint takes: check the tension before the gains
+    # when it swings again. P 2000 makes going down as smooth as going up; the lag while moving is a quarter larger
+    # than at 2500 (9.9 / 12.0 positions at 10 degrees/s)
+    pid: {p: 2000, i: 0, d: 250}
+    # 20 November 2026, from sweeps at 5 and 10 degrees/s at P 2000 and the belt tension of that evening
+    # (calibration/tuning/load_sweep_joint2_20261120_p2000.csv and _p2000_bent.csv, 116 bins: the elbow at 0, 45 and
+    # -30 degrees and the wrist bent 60 degrees either way): the sag was up to 3.6 positions, the same at both speeds,
+    # and this fit leaves 2.4 pwm units (0.15 position). A fit with a constant and sin_q2 as well is no better (2.1)
+    # and gives +21 and -20 for them, which cancel inside the recorded 43 to 118 degrees and not outside it, so they
+    # are left out. The recordings of that afternoon at the earlier belt tension gave 48.5 for cos_q2: record again
+    # after the belt is retensioned
+    compensation:
+      max_positions: 15
+      terms: {cos_q2: 52.860, sin_phi: 16.153, cos_phi: 0.482, wrist_reach: 1.570}
   3:
     name: elbow
     model: XM430-W350
@@ -87,6 +105,13 @@ servos:
     # 17 November 2026, with the heavier wrist: 8 position steps overshoot by more than 2 positions from P 7240,
     # at D 350, 640 and 1020 alike
     pid: {p: 4710, i: 0, d: 350}
+    # 19 November 2026, from sweeps at 5 and 10 degrees/s at four poses (calibration/tuning/
+    # load_sweep_joint3_20261119_before.csv, 148 bins): the sag was 3.0 to 3.2 positions with the upper arm
+    # horizontal and 1.5 at 57 degrees up or down, the same at both speeds, and the fit leaves 2 to 3 pwm units
+    # (under 0.1 position). The largest drive is 114 pwm units, 3.1 positions at P 4710, so the clip is far away
+    compensation:
+      max_positions: 15
+      terms: {constant: 3.904, sin_phi: -108.714, cos_phi: 6.748, wrist_reach: -8.721}
   4:
     name: wrist 1
     model: XC430-W150
