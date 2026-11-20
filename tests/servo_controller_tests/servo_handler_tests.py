@@ -456,6 +456,16 @@ class TestServoHandlerCommunication(unittest.TestCase):
         self.bus.unresponsive = {2}
         self.assertIsNone(self.handler.read_present_current())
 
+    def test_present_pwm_is_read_signed_with_a_packet_per_bus(self):
+        self.bus.memory[1][cfg.ADDR_PRESENT_PWM:cfg.ADDR_PRESENT_PWM + 2] = (-300 & 0xFFFF).to_bytes(2, 'little')
+        self.bus.memory[3][cfg.ADDR_PRESENT_PWM:cfg.ADDR_PRESENT_PWM + 2] = (120).to_bytes(2, 'little')
+        self.assertEqual({1: -300, 2: 0, 3: 120, 4: 0}, self.handler.read_present_pwm())
+        self.assertEqual([('sync_read', cfg.ADDR_PRESENT_PWM, [1, 2]),
+                          ('sync_read', cfg.ADDR_PRESENT_PWM, [3, 4])], self.bus.packets)
+        self.assertEqual({3: 120}, self.handler.read_present_pwm([3]))
+        self.bus.unresponsive = {2}
+        self.assertIsNone(self.handler.read_present_pwm())
+
     def test_the_compensation_is_kept_at_the_end_of_the_calibrated_range(self):
         # servo 1: positions 1024-3072 with offset 100, a target beyond the range with 40 positions of compensation
         servo = self.servos[0]

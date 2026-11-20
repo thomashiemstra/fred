@@ -2,8 +2,8 @@
 The arithmetic of calibration/tune_servo_gains.py: the size of a test step, the metrics of a step response and of a
 rest period, the acceptance criteria that mark the knee of a gain sweep, the live abort rules, and the choice of the
 gains from the trials, and the feedforward stage: the sweep of the joint, the statistics of its cruise parts, the line
-fit of the lag against the speed and the gain it gives. Pure functions on lists of samples, nothing here talks to the
-robot.
+fit of the lag against the speed and the gain it gives, and the binning of a slow sweep by the angle of the joint that
+calibration/record_load_sweep.py uses. Pure functions on lists of samples, nothing here talks to the robot.
 
 A Sample is one read of the state block of the servo under test (ServoHandler.read_state) with the host time and the
 goal position the host last wrote. The quantities are in the units of the servo registers: positions (4096 per turn),
@@ -24,7 +24,7 @@ from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 
 # the pwm of the position controller per position of error is P / 128 according to the manual, in units that it
 # doesn't give; the script measures it (pwm_per_position) and uses this to size the steps before it has
-PWM_PER_POSITION_PER_P = 1.0 / 128.0
+PWM_PER_POSITION_PER_P = cfg.PWM_PER_POSITION_PER_P
 
 
 class Sample(NamedTuple):
@@ -524,23 +524,27 @@ class _Leg(NamedTuple):
 
 
 def ff_sweep(amplitude: float, speed: float, dt: float, ramp: float = FF_RAMP,
-             cruise_hold: float = FF_CRUISE_HOLD) -> list[SweepStep]:
+             cruise_hold: float = FF_CRUISE_HOLD, round_trips: int = 2) -> list[SweepStep]:
     """
     the steps of one sweep of the feedforward stage: the joint goes from the pose to +amplitude, to -amplitude, to
-    +amplitude, to -amplitude and back to the pose, every leg rest to rest with the speed ramping linearly up over
-    `ramp` seconds, cruising at the speed and ramping down again (a triangle when the leg is too short to reach the
-    speed, without cruise steps). The first step is at the pose at time 0, the last one at the pose at the end.
+    +amplitude, to -amplitude and back to the pose (two round trips), every leg rest to rest with the speed ramping
+    linearly up over `ramp` seconds, cruising at the speed and ramping down again (a triangle when the leg is too
+    short to reach the speed, without cruise steps). The first step is at the pose at time 0, the last one at the
+    pose at the end.
     :param amplitude: degrees either side of the pose
     :param speed: degrees per second of the cruise
     :param dt: seconds between the steps
     :param cruise_hold: seconds the speed has to have been at its full value before a step counts as cruise
+    :param round_trips: how often the joint goes to +amplitude and -amplitude before it returns to the pose, at least 1
     """
     if amplitude <= 0 or speed <= 0 or dt <= 0 or ramp <= 0:
         raise ValueError('the amplitude, the speed, the step time and the ramp of a sweep have to be positive')
+    if round_trips < 1:
+        raise ValueError('a sweep needs at least 1 round trip, got {}'.format(round_trips))
     acceleration = speed / ramp
     legs: list[_Leg] = []
     start, origin = 0.0, 0.0
-    for target in (amplitude, -amplitude, amplitude, -amplitude, 0.0):
+    for target in (amplitude, -amplitude) * round_trips + (0.0,):
         distance = abs(target - origin)
         full = distance >= speed * ramp
         peak = speed if full else math.sqrt(distance * acceleration)
@@ -660,3 +664,82 @@ def rougher_speeds(before: Sequence[CruiseStatistics], after: Sequence[CruiseSta
                    limit: float = FF_ROUGHNESS) -> list[int]:
     """the indexes of the speeds where the std of the lag grew by more than the limit"""
     return [i for i, (b, a) in enumerate(zip(before, after)) if a.lag_std - b.lag_std > limit]
+
+
+# the load sweep: the cruise samples of a slow sweep binned by the angle of the joint
+
+MIN_BIN_SAMPLES = 30  # per direction, fewer than this and the mean of a bin is too uncertain to be paired
+
+
+class BinSide(NamedTuple):
+    """the samples of one direction in a bin"""
+    error: float  # mean error in positions
+    pwm: float  # mean measured pwm
+    samples: int
+
+
+class SweepBin(NamedTuple):
+    """a bin of the angle of the joint that was passed in both directions"""
+    angle: float  # degrees, the centre of the bin
+    up: BinSide  # the angle was rising
+    down: BinSide  # the angle was falling
+
+    @property
+    def sag(self) -> float:
+        """the mean of the errors of the two directions, in positions: the sag under the load, with the lag of the
+        speed and the friction, which both flip sign with the direction, taken out"""
+        return (self.up.error + self.down.error) / 2.0
+
+    @property
+    def half_difference(self) -> float:
+        """half the difference of the errors of the up and the down direction, in positions: minus the friction and
+        the lag of the speed for a servo whose positions rise with its angle (a joint that trails its trajectory has
+        an error against the direction it moves in), plus them for a servo mounted reversed"""
+        return (self.up.error - self.down.error) / 2.0
+
+
+def bin_index(angles: Sequence[float] | np.ndarray, bin_degrees: float) -> np.ndarray:
+    """the number k of the bin of every angle (degrees): bin k covers [k * bin_degrees, (k + 1) * bin_degrees), so
+    the bins are a fixed grid and those of two sweeps line up whatever their speed or span"""
+    if bin_degrees <= 0:
+        raise ValueError('the bins have to be wider than 0 degrees, got {}'.format(bin_degrees))
+    return np.floor(np.asarray(angles, dtype=float) / bin_degrees).astype(int)
+
+
+def bin_sweep(angles: Sequence[float] | np.ndarray, directions: Sequence[int] | np.ndarray,
+              errors: Sequence[float] | np.ndarray, pwms: Sequence[float] | np.ndarray, bin_degrees: float,
+              minimum: int = MIN_BIN_SAMPLES) -> list[SweepBin]:
+    """
+    pair the two directions of a sweep per bin of the angle of the joint. Pass the cruise samples only: the legs
+    ramp up and down with a speed, and so a lag, of their own.
+    :param angles: the measured angle of the joint of every sample, degrees
+    :param directions: 1 when the ANGLE of the joint was rising at the sample, -1 when it was falling (not the
+        direction of the position, which is the other way round for a servo mounted reversed); other values leave
+        the sample out
+    :param errors: the error of every sample, positions
+    :param pwms: the measured pwm of every sample
+    :param bin_degrees: the width of a bin, see bin_index; its centre is (k + 0.5) * bin_degrees
+    :param minimum: the samples a direction needs in a bin (at least 1) for the bin to be returned
+    :return: the bins that have at least `minimum` samples going both ways, sorted by angle
+    """
+    count = len(angles)
+    if not len(directions) == len(errors) == len(pwms) == count:
+        raise ValueError('angles, directions, errors and pwms need the same number of samples, got {}, {}, {}, {}'
+                         .format(count, len(directions), len(errors), len(pwms)))
+    index = bin_index(angles, bin_degrees)
+    direction = np.asarray(directions)
+    error = np.asarray(errors, dtype=float)
+    pwm = np.asarray(pwms, dtype=float)
+    minimum = max(minimum, 1)
+    bins = []
+    for k in np.unique(index):
+        in_bin = index == k
+        sides = []
+        for mask in (in_bin & (direction > 0), in_bin & (direction < 0)):
+            samples = int(mask.sum())
+            if samples < minimum:
+                break
+            sides.append(BinSide(float(error[mask].mean()), float(pwm[mask].mean()), samples))
+        else:
+            bins.append(SweepBin((float(k) + 0.5) * bin_degrees, sides[0], sides[1]))
+    return bins

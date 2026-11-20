@@ -508,6 +508,14 @@ class ServoHandler(object):
         return {servo_id: utils.to_signed(value, self.config.LEN_PRESENT_CURRENT)
                 for servo_id, value in values.items()}
 
+    def read_present_pwm(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
+        """returns a mapping of servo id to the signed value of its present pwm register (885 is 100 % duty), or None
+        on failure"""
+        values = self.__sync_read(self.config.ADDR_PRESENT_PWM, self.config.LEN_PRESENT_PWM, self.__ids(servo_ids))
+        if values is None:
+            return None
+        return {servo_id: utils.to_signed(value, self.config.LEN_PRESENT_PWM) for servo_id, value in values.items()}
+
     def read_temperatures(self, servo_ids: Iterable[int] | None = None) -> dict[int, int] | None:
         """returns a mapping of servo id to temperature in degrees celsius, or None on failure"""
         return self.__sync_read(self.config.ADDR_PRESENT_TEMPERATURE, self.config.LEN_PRESENT_TEMPERATURE,

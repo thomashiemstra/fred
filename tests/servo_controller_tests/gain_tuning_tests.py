@@ -18,10 +18,11 @@ from src.robot_controllers.dynamixel_robot.calibration import gain_tuning, tune_
 import math
 
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    FF_CRUISE_HOLD, FF_RAMP, AbortLimits, Criteria, CruiseStatistics, LineFit, RestMetrics, Sample, StepMetrics,
-    SweepSample, abort_reason, choose_d, choose_p, clip_gain, cruise_statistics, d_ladder, environmental_abort,
-    evaluate, feedforward_change, ff_sweep, fit_line, lag_growth, p_values, p_values_down, pwm_clamp,
-    pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size, tracking_metrics)
+    FF_CRUISE_HOLD, FF_RAMP, MIN_BIN_SAMPLES, AbortLimits, BinSide, Criteria, CruiseStatistics, LineFit, RestMetrics,
+    Sample, StepMetrics, SweepBin, SweepSample, abort_reason, bin_sweep, choose_d, choose_p, clip_gain,
+    cruise_statistics, d_ladder, environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth,
+    p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size,
+    tracking_metrics)
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import (
     FF_SAMPLE_FIELDS, SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep, TuningSession, compared_d,
     d_candidates, d_grid, d_progress, feedforward_refusal, grid_is_done, joint_knee_at, joint_p_at, knee_trial,
@@ -1584,6 +1585,131 @@ class SweepTests(unittest.TestCase):
         for arguments in ((0, 10, 0.01), (10, 0, 0.01), (10, 10, 0)):
             with self.assertRaises(ValueError):
                 ff_sweep(*arguments)
+        for round_trips in (0, -1):
+            with self.assertRaises(ValueError):
+                ff_sweep(15, 10, self.DT, round_trips=round_trips)
+
+    def test_two_round_trips_are_the_default_and_unchanged(self):
+        self.assertEqual(ff_sweep(15, 20, self.DT), ff_sweep(15, 20, self.DT, round_trips=2))
+
+    def test_the_joint_goes_to_both_ends_as_often_as_the_round_trips(self):
+        for round_trips in (1, 2, 3):
+            steps = ff_sweep(15, 20, self.DT, round_trips=round_trips)
+            legs = [direction for direction, _ in itertools.groupby(s.direction for s in steps)]
+            self.assertEqual([1, -1] * round_trips + [1], legs, 'to +A and -A each time, and back to the pose')
+            numbers = [leg for leg, _ in itertools.groupby(s.leg for s in steps)]
+            self.assertEqual(list(range(2 * round_trips + 1)), numbers)
+            self.assertEqual(0.0, steps[0].offset)
+            self.assertAlmostEqual(0.0, steps[-1].offset, places=9)
+            self.assertAlmostEqual(15, max(s.offset for s in steps), delta=0.01)
+            self.assertAlmostEqual(-15, min(s.offset for s in steps), delta=0.01)
+            # 60 degrees per round trip at 20 degrees per second, and the ramps of every leg add their time
+            self.assertAlmostEqual(3.0 * round_trips + (2 * round_trips + 1) * FF_RAMP, steps[-1].time, delta=self.DT)
+
+    def test_one_round_trip_cruises_both_ways(self):
+        steps = ff_sweep(15, 20, self.DT, round_trips=1)
+        self.assertEqual({1, -1}, {s.direction for s in steps if s.cruise})
+        # the first and the last leg are half a span, the one between them the whole span
+        self.assertEqual([0, 1, 2], sorted({s.leg for s in steps if s.cruise}))
+
+
+class BinSweepTests(unittest.TestCase):
+    """pairing the two directions of a sweep per bin of the angle"""
+
+    @staticmethod
+    def passes(angle, direction, error, pwm=0.0, count=MIN_BIN_SAMPLES, spread=1.0):
+        """count samples within +-spread degrees of the angle going the direction, as bin_sweep takes them:
+        (angles, directions, errors, pwms)"""
+        angles = list(angle + np.linspace(-spread, spread, count))
+        return angles, [direction] * count, [error] * count, [pwm] * count
+
+    @staticmethod
+    def stack(*groups):
+        return tuple(sum((list(group[i]) for group in groups), []) for i in range(4))
+
+    def test_the_bins_are_a_grid_of_multiples_of_the_width(self):
+        # 12.6 to 14.6 lie in [10, 15), 15.5 to 17.5 in [15, 20): the centres are 12.5 and 17.5
+        data = self.stack(self.passes(13.6, 1, 2.0), self.passes(13.6, -1, 4.0), self.passes(16.5, 1, 6.0),
+                          self.passes(16.5, -1, 8.0))
+        bins = bin_sweep(*data, bin_degrees=5.0)
+        self.assertEqual([12.5, 17.5], [b.angle for b in bins])
+        self.assertEqual([(2.0, 4.0), (6.0, 8.0)], [(b.up.error, b.down.error) for b in bins])
+        # another width is another grid, from 0 again: [10, 20) has all four passes, its centre is 15
+        (wide,) = bin_sweep(*data, bin_degrees=10.0)
+        self.assertEqual(15.0, wide.angle)
+        self.assertEqual((60, 60), (wide.up.samples, wide.down.samples))
+        self.assertAlmostEqual(4.0, wide.up.error)
+        self.assertAlmostEqual(6.0, wide.down.error)
+
+    def test_sweeps_over_different_spans_share_the_bins(self):
+        wide = self.stack(*(self.passes(a, d, 1.0) for a in (-12.5, -2.5, 7.5, 17.5) for d in (1, -1)))
+        narrow = self.stack(*(self.passes(a, d, 2.0) for a in (-2.5, 7.5) for d in (1, -1)))
+        wide_bins, narrow_bins = bin_sweep(*wide, bin_degrees=5.0), bin_sweep(*narrow, bin_degrees=5.0)
+        self.assertEqual([-12.5, -2.5, 7.5, 17.5], [b.angle for b in wide_bins])
+        self.assertEqual([-2.5, 7.5], [b.angle for b in narrow_bins])
+
+    def test_negative_angles_and_the_edges_of_the_bins(self):
+        # a bin covers [k * width, (k + 1) * width): -5 belongs to [-5, 0), 0 to [0, 5)
+        angles = [-5.0, -0.1, 0.0, 4.9, -5.0001]
+        index = gain_tuning.bin_index(angles, 5.0)
+        self.assertEqual([-1, -1, 0, 0, -2], list(index))
+        data = self.stack(self.passes(-2.5, 1, 1.0), self.passes(-2.5, -1, 1.0), self.passes(-7.5, 1, 1.0),
+                          self.passes(-7.5, -1, 1.0))
+        self.assertEqual([-7.5, -2.5], [b.angle for b in bin_sweep(*data, bin_degrees=5.0)])
+        edge = ([-5.0] * 30 + [-0.0001] * 30, [1] * 30 + [-1] * 30, [0.0] * 60, [0.0] * 60)
+        self.assertEqual([-2.5], [b.angle for b in bin_sweep(*edge, bin_degrees=5.0)], 'both ends of [-5, 0)')
+
+    def test_a_bin_needs_both_directions_with_enough_samples(self):
+        data = self.stack(self.passes(2.5, 1, 1.0), self.passes(2.5, -1, 1.0),  # both: kept
+                          self.passes(7.5, 1, 1.0),  # only up
+                          self.passes(12.5, -1, 1.0),  # only down
+                          self.passes(17.5, 1, 1.0, count=MIN_BIN_SAMPLES - 1),  # too few going up
+                          self.passes(17.5, -1, 1.0),
+                          self.passes(22.5, 1, 1.0, count=MIN_BIN_SAMPLES),  # exactly the minimum: kept
+                          self.passes(22.5, -1, 1.0, count=MIN_BIN_SAMPLES))
+        self.assertEqual([2.5, 22.5], [b.angle for b in bin_sweep(*data, bin_degrees=5.0)])
+        self.assertEqual(30, MIN_BIN_SAMPLES)
+        # the minimum is a parameter
+        self.assertEqual([2.5, 17.5, 22.5], [b.angle for b in bin_sweep(*data, bin_degrees=5.0, minimum=29)])
+        self.assertEqual([2.5, 22.5], [b.angle for b in bin_sweep(*data, bin_degrees=5.0, minimum=MIN_BIN_SAMPLES)])
+        self.assertEqual([], bin_sweep(*data, bin_degrees=5.0, minimum=31))
+        # a minimum of 0 does not make a bin of a direction nobody passed in
+        self.assertEqual([2.5, 17.5, 22.5], [b.angle for b in bin_sweep(*data, bin_degrees=5.0, minimum=0)])
+
+    def test_the_means_and_the_counts(self):
+        rng = np.random.default_rng(0)
+        up_errors, down_errors = rng.normal(-3.0, 1.0, 50), rng.normal(5.0, 1.0, 40)
+        up_pwms, down_pwms = rng.normal(100.0, 5.0, 50), rng.normal(-60.0, 5.0, 40)
+        data = (list(rng.uniform(10, 15, 50)) + list(rng.uniform(10, 15, 40)), [1] * 50 + [-1] * 40,
+                list(up_errors) + list(down_errors), list(up_pwms) + list(down_pwms))
+        (found,) = bin_sweep(*data, bin_degrees=5.0)
+        self.assertEqual(12.5, found.angle)
+        self.assertAlmostEqual(up_errors.mean(), found.up.error)
+        self.assertAlmostEqual(down_errors.mean(), found.down.error)
+        self.assertAlmostEqual(up_pwms.mean(), found.up.pwm)
+        self.assertAlmostEqual(down_pwms.mean(), found.down.pwm)
+        self.assertEqual((50, 40), (found.up.samples, found.down.samples))
+        self.assertAlmostEqual((up_errors.mean() + down_errors.mean()) / 2, found.sag)
+        self.assertAlmostEqual((up_errors.mean() - down_errors.mean()) / 2, found.half_difference)
+        self.assertIsInstance(found, SweepBin)
+        self.assertIsInstance(found.up, BinSide)
+
+    def test_the_bins_are_sorted_by_angle_whatever_the_order_of_the_samples(self):
+        groups = [self.passes(a, d, a) for a in (32.5, -7.5, 12.5, 2.5) for d in (-1, 1)]
+        bins = bin_sweep(*self.stack(*groups), bin_degrees=5.0)
+        self.assertEqual([-7.5, 2.5, 12.5, 32.5], [b.angle for b in bins])
+        self.assertEqual([-7.5, 2.5, 12.5, 32.5], [b.up.error for b in bins])
+
+    def test_other_directions_are_left_out_and_bad_arguments_raise(self):
+        data = self.stack(self.passes(2.5, 1, 1.0), self.passes(2.5, -1, 1.0), self.passes(2.5, 0, 99.0))
+        (found,) = bin_sweep(*data, bin_degrees=5.0)
+        self.assertEqual((1.0, 1.0), (found.up.error, found.down.error))
+        self.assertEqual([], bin_sweep([], [], [], [], 5.0))
+        with self.assertRaises(ValueError):
+            bin_sweep([1.0, 2.0], [1], [0.0, 0.0], [0.0, 0.0], 5.0)
+        for width in (0, -5.0):
+            with self.assertRaises(ValueError):
+                bin_sweep(*data, bin_degrees=width)
 
 
 def cruise_rows(direction, lag, drive, speed, count=20, gravity_lag=0.0, gravity_pwm=0.0, cruise=True, start=0.0,

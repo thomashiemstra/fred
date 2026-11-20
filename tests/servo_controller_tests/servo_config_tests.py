@@ -263,12 +263,10 @@ class LoadServoConfigTests(unittest.TestCase):
 
 
 class CompensationConfigTests(unittest.TestCase):
-    """the compensation of a servo and the spring section"""
-
-    SPRING = {'base_anchor': [-4.0, -6.0], 'arm_anchor': [2.0, 3.0]}
+    """the compensation of a servo"""
 
     def parse(self, **changes):
-        return parse_servo_config(config_with(**changes), a2=20.0)
+        return parse_servo_config(config_with(**changes))
 
     def test_compensation_is_parsed(self):
         config = self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'cos_q2': 12.0, 'sin_phi': 5}}))
@@ -276,22 +274,20 @@ class CompensationConfigTests(unittest.TestCase):
         self.assertEqual(2, compensation.joint)
         self.assertEqual({'cos_q2': 12.0, 'sin_phi': 5.0}, compensation.terms)
         self.assertEqual(60, compensation.max_positions)
-        self.assertEqual({}, compensation.directional)
         self.assertIsNone(config.servos[1].compensation)
-        self.assertIsNone(config.spring)
 
-    def test_directional_compensation(self):
-        config = self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'cos_q2': 12.0},
-                                                   'up': {'cos_q2': 14.0}, 'down': {'cos_q2': 10.0}}))
-        self.assertEqual({'up': {'cos_q2': 14.0}, 'down': {'cos_q2': 10.0}}, config.servos[2].compensation.directional)
-
-    def test_spring_and_spring_terms(self):
-        config = self.parse(s=(None, 'spring', self.SPRING),
-                            c=(2, 'compensation', {'max_positions': 60, 'terms': {'spring_dl': 1.5, 'cos_q2': -0.1}}))
-        self.assertEqual([-4.0, -6.0], list(config.spring.base_anchor))
-        self.assertEqual([2.0, 3.0], list(config.spring.arm_anchor))
-        self.assertEqual(20.0, config.spring.a2)
-        self.assertIs(config.spring, config.servos[2].compensation.spring)
+    def test_per_direction_blocks_are_refused_with_an_explanation(self):
+        blocks = {'up': {'cos_q2': 14.0}, 'down': {'cos_q2': 10.0}}
+        for given in (['up'], ['down'], ['up', 'down']):
+            compensation = {'max_positions': 60, 'terms': {'cos_q2': 12.0}, **{name: blocks[name] for name in given}}
+            with self.assertRaisesRegex(ServoConfigError, 'per-direction blocks.*removed.*is for gravity only',
+                                        msg=repr(given)) as raised:
+                self.parse(c=(2, 'compensation', compensation))
+            for name in given:
+                self.assertIn(name, str(raised.exception))
+        # also when the rest of the block is wrong: the removed option is the first thing to say
+        with self.assertRaisesRegex(ServoConfigError, 'per-direction blocks'):
+            self.parse(c=(2, 'compensation', {'max_positions': 60, 'up': {'cos_q2': 1.0}}))
 
     def test_models_are_kept(self):
         config = self.parse(m=(1, 'model', 'XM430-W350'))
@@ -306,8 +302,7 @@ class CompensationConfigTests(unittest.TestCase):
             {'max_positions': 60, 'terms': {'nope': 1.0}},
             {'max_positions': 60, 'terms': {'cos_q2': 'one'}},
             {'max_positions': 60, 'terms': [1.0]},
-            {'max_positions': 60, 'terms': {'cos_q2': 1.0}, 'up': {'cos_q2': 1.0}},  # up without down
-            {'max_positions': 60, 'terms': {'spring_dl': 1.0}},                 # no spring section
+            {'max_positions': 60, 'terms': {'spring_dl': 1.0}},                 # the term of the removed spring
             {'max_positions': 60, 'terms': {'cos_q2': 1.0}, 'sideways': {}},
         ]
         for compensation in invalid:
@@ -319,17 +314,17 @@ class CompensationConfigTests(unittest.TestCase):
         with self.assertRaises(ServoConfigError):
             self.parse(c=(7, 'compensation', {'max_positions': 60, 'terms': {}}))
 
-    def test_invalid_spring(self):
-        for spring in ({'base_anchor': [0, 0]}, {'base_anchor': [0, 0], 'arm_anchor': [1]},
-                       {'base_anchor': [0, 0], 'arm_anchor': [1, 'a']}, [1, 2],
-                       {'base_anchor': [0, 0], 'arm_anchor': [1, 2], 'k': 3}):
-            with self.assertRaises(ServoConfigError, msg=repr(spring)):
-                self.parse(s=(None, 'spring', spring))
-
-    def test_spring_takes_a2_from_the_robot_config_by_default(self):
-        from src.robot_config import load_robot_configs
-        config = parse_servo_config(config_with(s=(None, 'spring', self.SPRING)))
-        self.assertEqual(load_robot_configs()['dynamixel_robot'].a2, config.spring.a2)
+    def test_a_spring_section_is_rejected_since_the_model_was_removed(self):
+        spring = {'base_anchor': [-4.0, -6.0], 'arm_anchor': [2.0, 3.0]}
+        for section in (spring, {}, [1, 2]):
+            with self.assertRaisesRegex(ServoConfigError, 'spring model was removed.*delete the spring section',
+                                        msg=repr(section)):
+                self.parse(s=(None, 'spring', section))
+        # a term of the spring in a compensation is an unknown term like any other
+        with self.assertRaisesRegex(ServoConfigError, 'unknown terms spring_dl'):
+            self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'spring_dl': 1.0}}))
+        with self.assertRaisesRegex(ServoConfigError, 'servo_config.yaml'):
+            parse_servo_config(dict(config_with(), spring=spring), 'servo_config.yaml')
 
 
 if __name__ == '__main__':

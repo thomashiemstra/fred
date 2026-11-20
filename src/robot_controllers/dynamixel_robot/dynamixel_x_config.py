@@ -62,6 +62,9 @@ LEN_STATE_BLOCK         = 27  # addresses 120 to 146, read in one packet by Serv
 # the position and feedforward gains are 0 to 16383, a servo drops a larger value silently in a sync write
 MAX_GAIN                = 16383
 MAX_PWM                 = 885  # 100% duty, 0.113% per unit
+# in position mode the pwm of the servo is P / 128 per position of error, in the units of the pwm registers (the
+# manual doesn't give them, calibration/tune_servo_gains.py measures it)
+PWM_PER_POSITION_PER_P  = 1.0 / 128.0
 MAX_RETURN_DELAY_TIME   = 254  # 2 us per unit
 MAX_PROFILE_TIME        = 32737  # ms, the largest time the two profile registers accept in time-based mode
 # one velocity unit of the profile is 0.229 rev/min, a revolution is 4096 positions

@@ -1,209 +1,188 @@
 """
 Static load compensation: the positions a servo has to be commanded beyond the target of an angle to hold the arm
-there against gravity (and a spring, if the robot has one: the spring between servos 2 and 3 was removed on 23
-October 2026, the spring term stays available for a yaml with a `spring` section). See Handover Gravity and Spring
-Compensation.md.
+there against gravity. See Handover Gravity and Spring Compensation.md. (A spring between the housings of servos 2 and
+3 was removed from the robot on 23 October 2026 and its term from the code on 19 November 2026.)
 
-The holding load of every joint is a linear combination of a few sin/cos terms of the joint angles, the basis
-below, in the conventions of src/kinematics/kinematics.py: angles are indexed by servo id in radians, angle 2 = 0 is
-the lower arm horizontal and phi = angle 2 + angle 3 = pi/2 is the upper arm in line with the lower arm. The
-coefficients are fitted in positions per joint by calibration/fit_static_load.py from the data of
-calibration/record_static_load.py, so they absorb the stiffness of the servo, and live under `compensation` of the
-servo in servo_config.yaml. A Servo with a compensation adds its positions to every target it gets together with
-all the angles (DynamixelRobotController.move_servos passes them).
+This compensates gravity only, and gravity does not depend on the direction a joint moves in. A joint also rests off
+its goal by its friction, with the sign of the direction it arrived from; that is not compensated here. The recorders
+measure every pose from both directions so the fit can take their mean, which is the gravity load.
+
+The holding load of every joint is a linear combination of a few sin/cos terms of the joint angles, written out as
+one function per joint below (joint_2_drive to joint_5_drive), in the conventions of src/kinematics/kinematics.py:
+angles are indexed by servo id in radians, angle 2 = 0 is the lower arm horizontal and phi = angle 2 + angle 3 is
+the angle of the upper arm: pi/2 is the upper arm horizontal, 0 is it hanging straight down. The functions are the
+only definition of the model: the names of the terms of a joint are the names of its coefficient arguments, and
+term_values and regressor_row (the columns of the fit) are computed by calling the function with one coefficient at
+1.0 and the others at 0.0.
+
+The coefficients are the holding drive per joint in pwm units: the pwm the servo needs to hold the pose, positive
+drives towards higher positions (885 is full drive). They are fitted by calibration/fit_static_load.py from the data
+of calibration/record_static_load.py and live under `compensation` of the servo in servo_config.yaml. The servo
+holds a load with a steady position error because its position loop has only a P gain: pwm = P / 128 * error. So
+the positions to add to the goal follow from the drive with the P gain the servo runs with, positions = drive * 128
+/ P, and a fit stays valid when the gains are retuned (a fit in positions would only be valid for the P it was
+recorded at). A Servo with a compensation adds those positions to every target it gets together with all the angles
+(DynamixelRobotController.move_servos passes them).
 
 Terms per joint (h = mass times centre of mass of a link, a along the link, p perpendicular to it in the arm plane):
-    constant: the same number of positions at every pose; in the up/down fits that is the friction deadband, in
-              the mean fit an offset of the zero of the servo
+    constant: the same drive at every pose: friction that is not the same in both directions, or a term the model
+              lacks (not an offset of the zero of the servo: the error is present minus goal in the frame of the
+              servo itself, which a zero offset does not change)
     joint 2:  cos_q2 (lower arm h2a + everything beyond joint 3 times a2), sin_q2 (-h2p), and the terms of joint 3
     joint 3:  sin_phi (h3a), cos_phi (h3p), wrist_reach (the gripper, m6 c6)
     joint 5:  wrist_pitch (the gripper)
     joint 4:  wrist_roll (the gripper when the wrist is bent and rolled, small)
-    spring_dl on joints 2 and 3, only with a SpringGeometry: dL/dq of the spring length, coefficient -k L0 (in
-              positions)
-
-A linear spring of stiffness k and free length L0 loads a joint with k (L - L0) dL/dq. The k L dL/dq part is a spring
-of zero free length, and such a spring pulls exactly like a mass does: its torque is a combination of the same
-sin/cos terms as gravity (the regressor of L dL/dq is collinear with the gravity terms, condition numbers of 1e11).
-So that part is absorbed by the gravity coefficients and only dL/dq is a term of its own.
 """
-from collections.abc import Mapping, Sequence
+import inspect
+from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
 
-UP = 'up'
-DOWN = 'down'
-DIRECTIONS = (UP, DOWN)
-
-SPRING_TERMS = ('spring_dl',)
-SPRING_JOINTS = (2, 3)  # the joints a spring between the servo 2 and 3 housings loads
-# the terms of the gravity model; the spring terms are added for SPRING_JOINTS when a spring is given
-TERMS_OF_JOINT = {
-    2: ('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach'),
-    3: ('constant', 'sin_phi', 'cos_phi', 'wrist_reach'),
-    4: ('constant', 'wrist_roll'),
-    5: ('constant', 'wrist_pitch'),
-}
+from src.robot_controllers.dynamixel_robot.dynamixel_x_config import PWM_PER_POSITION_PER_P
 
 
-class SpringGeometry:
-    """
-    The spring between the housing of servo 2, on the base plate, and the housing of servo 3, which turns with the
-    upper arm, so its length depends on angle 2 and angle 3 and it loads both joints.
-
-    All lengths in cm, in the vertical plane of the arm.
-    :param base_anchor: (radial, up) of the anchor on the servo 2 housing relative to the axis of joint 2, radial
-        is away from the base axis
-    :param arm_anchor: (along, perpendicular) of the anchor on the servo 3 housing relative to the axis of joint 3,
-        along the upper arm towards the wrist, perpendicular is the direction the upper arm turns towards when
-        angle 3 increases
-    :param a2: the length of the lower arm (joint 2 to joint 3)
-    """
-
-    def __init__(self, base_anchor: Sequence[float] | np.ndarray, arm_anchor: Sequence[float] | np.ndarray,
-                 a2: float) -> None:
-        self.base_anchor = np.array(base_anchor, dtype=np.float64)
-        self.arm_anchor = np.array(arm_anchor, dtype=np.float64)
-        self.a2 = float(a2)
-        if self.base_anchor.shape != (2,) or self.arm_anchor.shape != (2,):
-            raise ValueError('the anchors of the spring are (radial, up) and (along, perpendicular) pairs')
-
-    def length(self, q2: float, q3: float) -> float:
-        """the length of the spring at the angles, in cm"""
-        phi = q2 + q3
-        along, perpendicular = self.arm_anchor
-        # the elbow, then along the upper arm (sin phi, -cos phi) and perpendicular to it (cos phi, sin phi)
-        anchor = np.array([self.a2 * np.cos(q2) + along * np.sin(phi) + perpendicular * np.cos(phi),
-                           self.a2 * np.sin(q2) - along * np.cos(phi) + perpendicular * np.sin(phi)])
-        return float(np.linalg.norm(anchor - self.base_anchor))
-
-    def length_and_gradient(self, q2: float, q3: float, h: float = 1e-6) -> tuple[float, float, float]:
-        """returns the length and its derivatives to angle 2 and angle 3, in cm and cm per radian"""
-        length = self.length(q2, q3)
-        d_q2 = (self.length(q2 + h, q3) - self.length(q2 - h, q3)) / (2 * h)
-        d_q3 = (self.length(q2, q3 + h) - self.length(q2, q3 - h)) / (2 * h)
-        return length, d_q2, d_q3
-
-    def __eq__(self, other: object) -> bool:
-        return (isinstance(other, SpringGeometry) and np.array_equal(self.base_anchor, other.base_anchor)
-                and np.array_equal(self.arm_anchor, other.arm_anchor) and self.a2 == other.a2)
+def joint_2_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0, cos_q2: float = 0.0,
+                  sin_q2: float = 0.0, sin_phi: float = 0.0, cos_phi: float = 0.0, wrist_reach: float = 0.0) -> float:
+    """the pwm that holds joint 2: the lower arm and everything beyond it, hanging on the shoulder"""
+    phi = q2 + q3  # pi/2 is the upper arm horizontal
+    gripper_reach = np.sin(phi) * np.cos(q5) + np.cos(phi) * np.cos(q4) * np.sin(q5)
+    return float(constant
+                 + cos_q2 * np.cos(q2)  # the lower arm's weight along the link, and all that is beyond joint 3 on a2
+                 + sin_q2 * np.sin(q2)  # the lower arm's weight off the axis of the link
+                 + sin_phi * np.sin(phi)  # the upper arm's weight along the link, and the wrist at its end
+                 + cos_phi * np.cos(phi)  # its weight off the axis of the link
+                 + wrist_reach * gripper_reach)  # the gripper beyond the wrist
 
 
-def term_names(joint: int, spring: bool = False) -> tuple[str, ...]:
-    """
-    the names of the terms of the holding load of the joint, in the order of regressor_row
-    :param spring: include the spring terms (joints 2 and 3), for a robot with the spring
-    """
+def joint_3_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0, sin_phi: float = 0.0,
+                  cos_phi: float = 0.0, wrist_reach: float = 0.0) -> float:
+    """the pwm that holds joint 3: the upper arm and everything beyond it, hanging on the elbow"""
+    phi = q2 + q3  # pi/2 is the upper arm horizontal
+    gripper_reach = np.sin(phi) * np.cos(q5) + np.cos(phi) * np.cos(q4) * np.sin(q5)
+    return float(constant
+                 + sin_phi * np.sin(phi)  # the upper arm's weight along the link
+                 + cos_phi * np.cos(phi)  # its weight off the axis of the link
+                 + wrist_reach * gripper_reach)  # the gripper beyond the wrist
+
+
+def joint_4_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0,
+                  wrist_roll: float = 0.0) -> float:
+    """the pwm that holds joint 4, the first wrist joint: the gripper, when the wrist is bent and rolled"""
+    phi = q2 + q3  # pi/2 is the upper arm horizontal
+    return float(constant
+                 + wrist_roll * (np.sin(q4) * np.sin(q5) * np.sin(phi)))  # the gripper's weight off the roll axis
+
+
+def joint_5_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0,
+                  wrist_pitch: float = 0.0) -> float:
+    """the pwm that holds joint 5, the wrist pitch: the gripper hanging on it"""
+    phi = q2 + q3  # pi/2 is the upper arm horizontal
+    return float(constant
+                 + wrist_pitch * (np.cos(phi) * np.sin(q5)
+                                  + np.cos(q4) * np.cos(q5) * np.sin(phi)))  # the gripper's reach beyond the wrist
+
+
+# the formula of every joint that has a static load, called with the angles q2 to q5 and the coefficients by name
+JOINT_DRIVES: dict[int, Callable[..., float]] = {2: joint_2_drive, 3: joint_3_drive, 4: joint_4_drive,
+                                                 5: joint_5_drive}
+_ANGLE_ARGUMENTS = ('q2', 'q3', 'q4', 'q5')
+# the terms of every joint in the order of regressor_row: the coefficient arguments of its formula
+TERMS_OF_JOINT: dict[int, tuple[str, ...]] = {
+    joint: tuple(name for name in inspect.signature(formula).parameters if name not in _ANGLE_ARGUMENTS)
+    for joint, formula in JOINT_DRIVES.items()}
+
+
+def term_names(joint: int) -> tuple[str, ...]:
+    """the names of the terms of the holding load of the joint, in the order of regressor_row"""
     if joint not in TERMS_OF_JOINT:
         raise ValueError('joint {} has no static load terms, only joints {} have'.format(joint, sorted(TERMS_OF_JOINT)))
-    names = TERMS_OF_JOINT[joint]
-    return names + SPRING_TERMS if spring and joint in SPRING_JOINTS else names
+    return TERMS_OF_JOINT[joint]
 
 
-def term_values(joint: int, angles: np.ndarray, spring: SpringGeometry | None = None) -> dict[str, float]:
+def _joint_angles(angles: np.ndarray) -> tuple[float, float, float, float]:
+    """q2 to q5 from the angles of all joints, indexed by servo id"""
+    return float(angles[2]), float(angles[3]), float(angles[4]), float(angles[5])
+
+
+def term_values(joint: int, angles: np.ndarray) -> dict[str, float]:
     """
-    the value of every term of the joint at the angles
+    the value of every term of the joint at the angles: the formula of the joint with only that coefficient at 1.0
     :param joint: 2 to 5
     :param angles: the angles of all joints, indexed by servo id, in radians
-    :param spring: a SpringGeometry, without it the spring terms are left out
     :return: mapping of term name to value
     """
-    q2, q3, q4, q5 = (float(angles[i]) for i in (2, 3, 4, 5))
-    phi = q2 + q3
-    values = {
-        'constant': 1.0,
-        'cos_q2': np.cos(q2),
-        'sin_q2': np.sin(q2),
-        'sin_phi': np.sin(phi),
-        'cos_phi': np.cos(phi),
-        # the radial reach of the gripper beyond the wrist centre, per cm of gripper
-        'wrist_reach': np.sin(phi) * np.cos(q5) + np.cos(phi) * np.cos(q4) * np.sin(q5),
-        'wrist_pitch': np.cos(phi) * np.sin(q5) + np.cos(q4) * np.cos(q5) * np.sin(phi),
-        'wrist_roll': np.sin(q4) * np.sin(q5) * np.sin(phi),
-    }
-    if spring is not None and joint in SPRING_JOINTS:
-        _, d_q2, d_q3 = spring.length_and_gradient(q2, q3)
-        values['spring_dl'] = d_q2 if joint == 2 else d_q3
-    return {name: values[name] for name in term_names(joint, spring is not None)}
+    names = term_names(joint)
+    q2, q3, q4, q5 = _joint_angles(angles)
+    return {name: JOINT_DRIVES[joint](q2, q3, q4, q5, **{term: 1.0 if term == name else 0.0 for term in names})
+            for name in names}
 
 
-def regressor_row(joint: int, angles: np.ndarray, spring: SpringGeometry | None = None,
-                  names: Sequence[str] | None = None) -> np.ndarray:
+def regressor_row(joint: int, angles: np.ndarray, names: Sequence[str] | None = None) -> np.ndarray:
     """
     the values of the terms of the joint as a row of the regressor
-    :param names: the terms to include, by default all terms of the joint (the spring ones when a spring is given)
+    :param names: the terms to include, by default all terms of the joint
     """
-    values = term_values(joint, angles, spring)
+    values = term_values(joint, angles)
     if names is None:
         names = tuple(values)
     missing = [name for name in names if name not in values]
     if missing:
-        raise ValueError('joint {} has no terms {} (a spring is needed for the spring terms)'.format(joint, missing))
+        raise ValueError('joint {} has no terms {}, it has {}'.format(joint, missing, list(values)))
     return np.array([values[name] for name in names], dtype=np.float64)
 
 
 class StaticCompensation:
     """
-    The positions to add to the target of a servo for the static load of the pose.
+    The holding drive of a joint for the gravity load of the pose, and the positions to add to the target of the
+    servo to produce it. Friction is not compensated, see the top of this module.
 
     :param joint: the joint (servo id) the compensation is for, 2 to 5
-    :param terms: mapping of term name to coefficient in positions, the static load fitted on the mean of both
-        directions
-    :param max_positions: the compensation is clipped to this magnitude, so a wrong model near the end of a range
-        can't command a big jump
-    :param up: optional mapping of term name to coefficient used when the joint moves up (the angle increases)
-    :param down: the same for moving down; with up and down the friction hysteresis is compensated too. Both are
-        needed, without a direction (the first command) the mean terms are used
-    :param spring: a SpringGeometry, needed for the spring terms
+    :param terms: mapping of term name to coefficient in pwm units, the holding drive fitted on the mean of both
+        directions: the pwm the servo needs to hold the pose, positive drives towards higher positions
+    :param max_positions: the compensation is clipped to this magnitude in positions (not pwm units), so a wrong
+        model near the end of a range can't command a big jump
     """
 
-    directional: dict[str | None, dict[str, float]]
-
-    def __init__(self, joint: int, terms: Mapping[str, float], max_positions: int,
-                 up: Mapping[str, float] | None = None, down: Mapping[str, float] | None = None,
-                 spring: SpringGeometry | None = None) -> None:
+    def __init__(self, joint: int, terms: Mapping[str, float], max_positions: int) -> None:
         self.joint = joint
         self.max_positions = int(max_positions)
-        self.spring = spring
         if self.max_positions <= 0:
             raise ValueError('max_positions should be positive, got {}'.format(max_positions))
-        if (up is None) != (down is None):
-            raise ValueError('up and down have to be given together')
         self.terms = self._checked(terms)
-        self.directional = {UP: self._checked(up), DOWN: self._checked(down)} if up is not None else {}  # type: ignore[arg-type]  # down is given when up is
 
     def _checked(self, terms: Mapping[str, float]) -> dict[str, float]:
-        if self.spring is None and any(name in SPRING_TERMS for name in terms):
-            raise ValueError('the spring terms of joint {} need the spring geometry'.format(self.joint))
-        names = term_names(self.joint, self.spring is not None)
+        names = term_names(self.joint)
         unknown = [name for name in terms if name not in names]
         if unknown:
             raise ValueError('joint {} has no terms {}, it has {}'.format(self.joint, unknown, list(names)))
         return {name: float(coefficient) for name, coefficient in terms.items()}
 
-    def coefficients(self, direction: str | None = None) -> dict[str, float]:
-        """the coefficients used for a direction, the mean terms without one or without a directional fit"""
-        return self.directional.get(direction, self.terms)
-
-    def positions(self, angles: np.ndarray, direction: str | None = None) -> int:
+    def drive(self, angles: np.ndarray) -> float:
         """
-        the positions to add to the target for the static load at the angles
+        the holding drive for the gravity load at the angles: the formula of the joint, joint_2_drive to joint_5_drive
         :param angles: the commanded angles of all joints, indexed by servo id, in radians
-        :param direction: UP or DOWN, the direction the joint moves in, or None
-        :return: whole positions, clipped to +- max_positions
+        :return: the pwm the servo needs to hold the pose, not rounded, 0.0 without coefficients
         """
-        coefficients = self.coefficients(direction)
-        if not coefficients:
+        q2, q3, q4, q5 = _joint_angles(angles)
+        return JOINT_DRIVES[self.joint](q2, q3, q4, q5, **self.terms)
+
+    def positions(self, angles: np.ndarray, p: float) -> int:
+        """
+        the positions to add to the target for the gravity load at the angles: the holding drive divided by the
+        pwm the servo gives per position of error, P / 128
+        :param angles: the commanded angles of all joints, indexed by servo id, in radians
+        :param p: the P gain the servo runs with
+        :return: whole positions, clipped to +- max_positions; 0 when p is not positive
+        """
+        if p <= 0:
             return 0
-        values = term_values(self.joint, angles, self.spring)
-        total = sum(coefficient * values[name] for name, coefficient in coefficients.items())
-        return int(np.clip(np.rint(total), -self.max_positions, self.max_positions))
+        positions = self.drive(angles) / (p * PWM_PER_POSITION_PER_P)
+        return int(np.clip(np.rint(positions), -self.max_positions, self.max_positions))
 
     def __eq__(self, other: object) -> bool:
         return (isinstance(other, StaticCompensation) and self.joint == other.joint and self.terms == other.terms
-                and self.max_positions == other.max_positions and self.directional == other.directional
-                and self.spring == other.spring)
+                and self.max_positions == other.max_positions)
 
     def __repr__(self) -> str:
-        return 'StaticCompensation(joint={}, terms={}, max_positions={}, directional={})'.format(
-            self.joint, self.terms, self.max_positions, self.directional)
+        return 'StaticCompensation(joint={}, terms={}, max_positions={})'.format(
+            self.joint, self.terms, self.max_positions)

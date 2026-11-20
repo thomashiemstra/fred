@@ -2,17 +2,31 @@
 Fits the static load compensation of the arm servos to the data of record_static_load.py and prints the
 `compensation` blocks for servo_config.yaml:
     python -m src.robot_controllers.dynamixel_robot.calibration.fit_static_load static_load.csv [more.csv ...]
-        [--joints 2 3 5] [--holdout 0.2] [--seed 0] [--split] [--max-positions 60]
+        [--joints 2 3 5] [--holdout 0.2] [--seed 0] [--max-positions 60]
 
-For every joint the mean of the errors of the two directions at a pose is its static load, half the difference is
-the friction hysteresis. The static load is fitted with linear least squares on the basis of static_compensation.py
-(gravity; the spring terms only when servo_config.yaml has a spring section, which it hasn't since the spring was
-removed from the robot on 23 October 2026). A share of the poses is held out to report how
-well the fit generalises, in positions and degrees. --split fits the two directions separately as well and prints
-them as the up and down blocks, which compensates the hysteresis too.
+The fit is in pwm units, the holding drive of the joint, so it stays valid when the P gain is retuned (a fit in
+positions would only hold for the P it was recorded at). The csv has per servo, pose and direction the error, present
+minus the UNCOMPENSATED goal in positions, and the compensation in positions that was added to the goal. With a
+compensation active the error is only the sag that remains: the whole load is error - compensation, and that is what
+is fitted. The servos run a P-only position loop, so they drive with pwm = P / 128 * (goal sent - present), where
+goal sent - present = -(error - compensation). Every row is converted with its own P (column p of the csv, the gain the
+servo ran with), so recordings at different gains can be fitted together:
+    drive = -(error - compensation) * p / 128
+The drive is positive towards higher positions. A row with an error needs a p, a csv recorded before the gains were
+logged can't be fitted. A row without an error (a servo that was not measured) only gives the angle of its joint to
+the pose, and a joint has a sample at a pose only when it has an error in both directions.
+
+For every joint the mean of the drives of the two directions at a pose is its static load, which is gravity: friction
+rests the joint off its goal with the sign of the direction it arrived from, so it cancels in the mean. Half the
+difference is the friction, reported to show how large it is; it is not compensated (the compensation is for gravity
+only). The static load is fitted with linear least squares on the basis of static_compensation.py. A share of the
+poses is held out to report how well the fit generalises. The report gives the errors in pwm units and, at the P of
+the joint in the csv (the mean when there are several), in positions and degrees. When the csv has the measured
+present pwm, the report compares it to the drive computed from the position error, which checks the factor 128.
 """
 import argparse
 import csv
+import math
 import sys
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -20,30 +34,32 @@ from typing import Any
 
 import numpy as np
 
-from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
-from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names, \
-    UP, DOWN, SpringGeometry
+from src.robot_controllers.dynamixel_robot.dynamixel_x_config import PWM_PER_POSITION_PER_P
+from src.robot_controllers.dynamixel_robot.calibration.load_directions import DOWN, UP
+from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names
 
 DEGREES_PER_POSITION = 360.0 / 4096
 DEFAULT_JOINTS = (2, 3, 5)
 
 
 class Sample:
-    """one pose with the error of every servo: the static load (mean of both directions) and the hysteresis"""
+    """one pose with the drive of every servo: the static load (mean of both directions) and the friction"""
 
     def __init__(self, angles: np.ndarray, static: dict[int, float], hysteresis: dict[int, float],
-                 by_direction: dict[str, dict[int, float]]) -> None:
+                 pwm: dict[int, float] | None = None) -> None:
         self.angles = angles  # 7 element array, radians
-        self.static = static  # mapping of servo id to the mean error in positions
-        self.hysteresis = hysteresis  # mapping of servo id to half the difference between the directions
-        self.by_direction = by_direction  # mapping of direction to mapping of servo id to error
+        self.static = static  # mapping of servo id to the mean drive in pwm units
+        # mapping of servo id to half the difference between the directions in pwm units: the friction, which is
+        # not compensated
+        self.hysteresis = hysteresis
+        self.pwm = pwm if pwm is not None else {}  # mapping of servo id to the mean measured pwm of both directions
 
 
 MAX_CONDITION = 1000.0  # above this the fit is warned about: some terms can't be told apart in the data
 
 
 class Fit:
-    """the result of fitting one joint"""
+    """the result of fitting one joint, in pwm units"""
 
     def __init__(self, joint: int, names: Sequence[str], coefficients: np.ndarray, standard_errors: np.ndarray,
                  condition: float, rms_train: float, rms_holdout: float | None, train_count: int,
@@ -85,53 +101,94 @@ def read_rows(paths: Iterable[str]) -> list[dict[str, str]]:
     return rows
 
 
+def _blank(value: str | None) -> bool:
+    return value is None or value.strip() == ''
+
+
+def _gain(row: dict[str, str]) -> float:
+    """the P gain of the servo of a row that has an error; raises a ValueError naming the file when it has none"""
+    try:
+        p = float(row['p']) if not _blank(row.get('p')) else 0.0
+    except ValueError:
+        p = 0.0
+    if not math.isfinite(p) or p <= 0:
+        raise ValueError('{}: pose {} servo {} has an error but no usable p, the csv was recorded before the gains '
+                         'were logged: record it again with the current record_static_load.py'.format(
+                             row.get('file', 'the csv'), row.get('pose'), row.get('servo')))
+    return p
+
+
+def _drive(row: dict[str, str], p: float) -> float:
+    """the holding drive in pwm units of a row: the servo drives with P / 128 * (goal sent - present), and that
+    difference is minus the error once the compensation, which was added to the goal, is taken out of it"""
+    compensation = 0.0 if _blank(row.get('compensation')) else float(row['compensation'])
+    return -(float(row['error']) - compensation) * p * PWM_PER_POSITION_PER_P
+
+
+def gains_of_joints(rows: Iterable[dict[str, str]]) -> dict[int, list[float]]:
+    """mapping of servo id to the P gain of every row of that servo that has an error"""
+    gains: defaultdict[int, list[float]] = defaultdict(list)
+    for row in rows:
+        if not _blank(row.get('error')):
+            gains[int(row['servo'])].append(_gain(row))
+    return dict(gains)
+
+
 def samples_from_rows(rows: Iterable[dict[str, str]]) -> list[Sample]:
     """
-    group the rows per pose: the angles of the pose and the error per servo for both directions. Poses without
-    both directions are left out. The pose index only counts within a file, so rows need a 'file' field when they
-    come from more than one file.
+    group the rows per pose: the angles of the pose and the holding drive per servo for both directions. Poses
+    without both directions are left out, and so are poses where no servo has an error in both. A row without an
+    error only gives the angle of its servo. The pose index only counts within a file, so rows need a 'file' field
+    when they come from more than one file.
+    :raises ValueError: for a row with an error and without a P gain
     """
-    by_pose: defaultdict[tuple[str, int], defaultdict[str, dict[int, float]]] = defaultdict(lambda: defaultdict(dict))  # (file, pose) -> direction -> servo -> error
+    # (file, pose) -> direction -> servo -> drive in pwm units, and the same for the measured pwm
+    drives: defaultdict[tuple[str, int], defaultdict[str, dict[int, float]]] = defaultdict(lambda: defaultdict(dict))
+    pwms: defaultdict[tuple[str, int], defaultdict[str, dict[int, float]]] = defaultdict(lambda: defaultdict(dict))
     angles_of_pose: dict[tuple[str, int], np.ndarray] = {}
     for row in rows:
         key = (row.get('file', ''), int(row['pose']))
         servo = int(row['servo'])
-        by_pose[key][row['direction']][servo] = float(row['error'])
         angles_of_pose.setdefault(key, np.zeros(7))[servo] = float(row['angle'])
+        if _blank(row.get('error')):
+            continue
+        drives[key][row['direction']][servo] = _drive(row, _gain(row))
+        if not _blank(row.get('pwm')):
+            pwms[key][row['direction']][servo] = float(row['pwm'])
 
     samples = []
-    for key, directions in by_pose.items():
+    for key, directions in drives.items():
         if UP not in directions or DOWN not in directions:
             continue
         servos = set(directions[UP]) & set(directions[DOWN])
+        if not servos:
+            continue
         static = {servo: (directions[UP][servo] + directions[DOWN][servo]) / 2.0 for servo in servos}
         hysteresis = {servo: (directions[UP][servo] - directions[DOWN][servo]) / 2.0 for servo in servos}
-        samples.append(Sample(angles_of_pose[key], static, hysteresis, directions))
+        pwm = {servo: (pwms[key][UP][servo] + pwms[key][DOWN][servo]) / 2.0 for servo in servos
+               if servo in pwms[key][UP] and servo in pwms[key][DOWN]} if key in pwms else {}
+        samples.append(Sample(angles_of_pose[key], static, hysteresis, pwm))
     return samples
 
 
-def fit_joint(joint: int, samples: Sequence[Sample], spring: SpringGeometry | None = None, holdout: float = 0.2,
-              rng: np.random.Generator | None = None, direction: str | None = None,
+def fit_joint(joint: int, samples: Sequence[Sample], holdout: float = 0.2, rng: np.random.Generator | None = None,
               names: Sequence[str] | None = None) -> Fit:
     """
     fit the terms of a joint to the samples
-    :param spring: SpringGeometry, with it the spring terms are fitted too
     :param holdout: share of the poses kept out of the fit to measure the error on
-    :param direction: fit the errors of one direction instead of the static load
     :param names: the terms to fit, by default all terms of the joint
-    :return: Fit
+    :return: Fit, in pwm units like the samples
     """
     rng = rng if rng is not None else np.random.default_rng(0)
     if names is None:
-        names = term_names(joint, spring is not None)
+        names = term_names(joint)
     rows: Any = []
     targets: Any = []
     for sample in samples:
-        errors = sample.static if direction is None else sample.by_direction[direction]
-        if joint not in errors:
+        if joint not in sample.static:
             continue
-        rows.append(regressor_row(joint, sample.angles, spring, names))
-        targets.append(errors[joint])
+        rows.append(regressor_row(joint, sample.angles, names))
+        targets.append(sample.static[joint])
     if len(rows) < len(names):
         raise ValueError('joint {} has {} samples, at least {} are needed for {} terms'.format(
             joint, len(rows), len(names), len(names)))
@@ -159,12 +216,26 @@ def _rms(residuals: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(residuals)))) if len(residuals) else 0.0
 
 
-def yaml_block(fits: dict[int, Fit], max_positions: int, directional: dict[int, dict[str, Fit]] | None = None) -> str:
+def pwm_ratio(joint: int, samples: Iterable[Sample]) -> float | None:
     """
-    the compensation blocks for servo_config.yaml. The fits describe the error (present minus goal) and the
-    compensation is added to the goal to cancel it, so the coefficients in the yaml are the negated fits.
+    the least squares ratio of the measured pwm (mean of both directions) to the drive computed from the position
+    error, 1.0 when the factor P / 128 is right; None without measured pwm or without any drive
+    """
+    pairs = [(sample.pwm[joint], sample.static[joint]) for sample in samples if joint in sample.pwm]
+    if not pairs:
+        return None
+    measured, computed = np.array(pairs).T
+    denominator = float(np.sum(np.square(computed)))
+    return float(np.sum(measured * computed)) / denominator if denominator > 0 else None
+
+
+def yaml_block(fits: dict[int, Fit], max_positions: int) -> str:
+    """
+    the compensation blocks for servo_config.yaml. The fits are of the holding drive in pwm units (positive towards
+    higher positions, the sign is in the conversion of the rows), which is what the compensation takes: its
+    coefficients are the fitted ones as they are.
     :param fits: mapping of joint to Fit of the static load
-    :param directional: optional mapping of joint to {UP: Fit, DOWN: Fit}
+    :param max_positions: the clamp of the compensation, in positions
     """
     lines = []
     for joint in sorted(fits):
@@ -172,29 +243,37 @@ def yaml_block(fits: dict[int, Fit], max_positions: int, directional: dict[int, 
         lines.append('    compensation:')
         lines.append('      max_positions: {}'.format(max_positions))
         lines.append('      terms: {}'.format(_terms_line(fits[joint].coefficients)))
-        if directional and joint in directional:
-            for direction in (UP, DOWN):
-                lines.append('      {}: {}'.format(direction, _terms_line(directional[joint][direction].coefficients)))
     return '\n'.join(lines) + '\n'
 
 
-def _terms_line(error_coefficients: dict[str, float]) -> str:
-    """the coefficients of the compensation: minus the coefficients of the error"""
-    return '{' + ', '.join('{}: {:.3f}'.format(name, -value) for name, value in error_coefficients.items()) + '}'
+def _terms_line(coefficients: dict[str, float]) -> str:
+    """the coefficients of the compensation in pwm units, as fitted"""
+    return '{' + ', '.join('{}: {:.3f}'.format(name, value) for name, value in coefficients.items()) + '}'
 
 
-def describe(fit: Fit) -> str:
-    """one paragraph about a fit"""
+def in_positions(drive: float, p: float | None) -> str:
+    """a drive in pwm units as positions and degrees at the P gain, e.g. ' (1.2 positions, 0.11 degrees at P 1000)';
+    empty without a P"""
+    if p is None:
+        return ''
+    positions = drive / (p * PWM_PER_POSITION_PER_P)
+    return ' ({:.1f} positions, {:.2f} degrees at P {:g})'.format(positions, positions * DEGREES_PER_POSITION, p)
+
+
+def describe(fit: Fit, p: float | None = None) -> str:
+    """
+    one paragraph about a fit
+    :param p: the P gain of the joint in the recording; with it the errors are also given in positions and degrees
+    """
     lines = ['joint {}: {} poses fitted, {} held out, condition {:.1f}'.format(
         fit.joint, fit.train_count, fit.holdout_count, fit.condition)]
     for name, value in fit.coefficients.items():
-        lines.append('  {:12s} {:+9.3f} positions (standard error {:.3f}){}'.format(
+        lines.append('  {:12s} {:+9.3f} pwm (standard error {:.3f}){}'.format(
             name, value, fit.standard_errors[name], '  <- not determined' if name in fit.undetermined() else ''))
-    lines.append('  rms error on the fitted poses {:.1f} positions ({:.2f} degrees)'.format(
-        fit.rms_train, fit.rms_train * DEGREES_PER_POSITION))
+    lines.append('  rms error on the fitted poses {:.1f} pwm{}'.format(fit.rms_train, in_positions(fit.rms_train, p)))
     if fit.rms_holdout is not None:
-        lines.append('  rms error on the held out poses {:.1f} positions ({:.2f} degrees)'.format(
-            fit.rms_holdout, fit.rms_holdout * DEGREES_PER_POSITION))
+        lines.append('  rms error on the held out poses {:.1f} pwm{}'.format(
+            fit.rms_holdout, in_positions(fit.rms_holdout, p)))
     for warning in fit.warnings():
         lines.append('  warning: ' + warning)
     return '\n'.join(lines)
@@ -206,43 +285,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--joints', type=int, nargs='+', default=list(DEFAULT_JOINTS))
     parser.add_argument('--holdout', type=float, default=0.2, help='share of the poses held out of the fit')
     parser.add_argument('--seed', type=int, default=0, help='seed of the hold-out selection')
-    parser.add_argument('--split', action='store_true', help='also fit the two directions separately')
     parser.add_argument('--max-positions', type=int, default=60, help='clamp of the compensation in the yaml')
-    parser.add_argument('--no-spring', action='store_true',
-                        help='fit without the spring terms even when the yaml has a spring section')
     args = parser.parse_args(argv)
 
-    samples = samples_from_rows(read_rows(args.files))
+    rows = read_rows(args.files)
+    try:
+        samples = samples_from_rows(rows)
+        gains = gains_of_joints(rows)
+    except ValueError as e:
+        print(e)
+        return 1
     if not samples:
         print('no poses with both directions in {}'.format(args.files))
         return 1
-    spring = None if args.no_spring else load_servo_config().spring
-    print('{} poses with both directions, spring {}'.format(len(samples), 'from servo_config.yaml' if spring else 'not modelled'))
+    print('{} poses with both directions'.format(len(samples)))
 
-    fits, directional = {}, {}
+    fits = {}
     for joint in args.joints:
         hysteresis = [abs(sample.hysteresis[joint]) for sample in samples if joint in sample.hysteresis]
         if not hysteresis:
             print('\njoint {}: no data'.format(joint))
             continue
-        fits[joint] = fit_joint(joint, samples, spring, args.holdout, np.random.default_rng(args.seed))
+        # the fit converts every row with its own P, the report with the mean of them
+        p_seen = sorted(set(gains.get(joint, [])))
+        p = float(np.mean(gains[joint])) if joint in gains else None
+        fits[joint] = fit_joint(joint, samples, args.holdout, np.random.default_rng(args.seed))
         print()
-        print(describe(fits[joint]))
-        print('  hysteresis (half the up/down difference): mean {:.1f}, max {:.0f} positions'.format(
-            np.mean(hysteresis), np.max(hysteresis)))  # type: ignore[str-format]  # numpy floating is not a float for mypy
-        if args.split:
-            directional[joint] = {direction: fit_joint(joint, samples, spring, args.holdout,
-                                                       np.random.default_rng(args.seed), direction)
-                                  for direction in (UP, DOWN)}
-            for direction in (UP, DOWN):
-                fit = directional[joint][direction]
-                print('  {}: rms {:.1f} positions on the fitted poses{}'.format(
-                    direction, fit.rms_train,
-                    '' if fit.rms_holdout is None else ', {:.1f} held out'.format(fit.rms_holdout)))
+        print(describe(fits[joint], p))
+        if p is not None and len(p_seen) > 1:
+            print('  P values seen: {}, the errors in positions use their mean {:.0f}'.format(
+                ', '.join('{:g}'.format(value) for value in p_seen), p))
+        mean_hysteresis, max_hysteresis = float(np.mean(hysteresis)), float(np.max(hysteresis))
+        print('  friction (half the up/down difference, not compensated): mean {:.1f} pwm{}, max {:.0f} pwm{}'.format(
+            mean_hysteresis, in_positions(mean_hysteresis, p), max_hysteresis, in_positions(max_hysteresis, p)))
+        ratio = pwm_ratio(joint, samples)
+        if ratio is not None:
+            print('  measured pwm is {:.2f} times the drive computed from the position error (1.0 expected)'.format(
+                ratio))
 
-    print('\nfor servo_config.yaml (the fits are of the error, present minus goal; the compensation is added to the '
-          'goal to cancel it, so these are the negated fits):')
-    print(yaml_block(fits, args.max_positions, directional if args.split else None))
+    print('\nfor servo_config.yaml (the holding drive in pwm units, positive towards higher positions; the '
+          'compensation converts it to positions with the P gain of the servo):')
+    print(yaml_block(fits, args.max_positions))
     return 0
 
 

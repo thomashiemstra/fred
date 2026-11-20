@@ -8,10 +8,8 @@ import yaml
 
 from src.global_constants import POSITION_CONTROL_MODE, EXTENDED_POSITION_CONTROL, CURRENT_BASED_POSITION_CONTROL_MODE
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
-from src.robot_config import load_robot_configs
 from src.robot_controllers.dynamixel_robot.servo import Servo
-from src.robot_controllers.dynamixel_robot.static_compensation import SpringGeometry, StaticCompensation, \
-    term_names, SPRING_TERMS, UP, DOWN
+from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation, term_names
 
 DEFAULT_SERVO_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'servo_config.yaml')
 
@@ -24,9 +22,9 @@ OPERATING_MODES = {
 _REQUIRED_SERVO_FIELDS = {'name', 'bus', 'mode', 'positions', 'profile', 'pid'}
 _OPTIONAL_SERVO_FIELDS = {'model', 'angles', 'states', 'offset', 'goal_current', 'compensation'}
 _REQUIRED_FIELDS = {'temperature_warning', 'temperature_limit', 'servos'}
-_OPTIONAL_FIELDS = {'spring'}
 _REQUIRED_COMPENSATION_FIELDS = {'max_positions', 'terms'}
-_OPTIONAL_COMPENSATION_FIELDS = {UP, DOWN}
+# the per-direction coefficient sets of an older version, refused with an explanation instead of as unknown fields
+_REMOVED_COMPENSATION_FIELDS = ('up', 'down')
 
 # the register sizes in bytes of the values that are written to the servos, and whether they are signed
 _POSITION_REGISTER = (cfg.LEN_GOAL_POSITION, True)
@@ -45,21 +43,18 @@ class ServoConfig:
     """the servos of the robot and the settings that apply to all of them"""
 
     def __init__(self, servos: dict[int, Servo], names: dict[int, str], buses: tuple[tuple[int, ...], ...],
-                 temperature_warning: float, temperature_limit: float, models: dict[int, str] | None = None,
-                 spring: SpringGeometry | None = None) -> None:
+                 temperature_warning: float, temperature_limit: float, models: dict[int, str] | None = None) -> None:
         self.servos = servos  # mapping of servo id to Servo, ordered by servo id
         self.names = names  # mapping of servo id to name
         self.models = models if models is not None else {}  # mapping of servo id to model name, if given
         self.buses = buses  # tuple of tuples of the servo ids on the same bus
         self.temperature_warning = temperature_warning  # degrees celsius
         self.temperature_limit = temperature_limit  # degrees celsius
-        self.spring = spring  # SpringGeometry of the spring between the servo 2 and 3 housings, or None
 
 
-def load_servo_config(path: str = DEFAULT_SERVO_CONFIG_PATH, a2: float | None = None) -> ServoConfig:
+def load_servo_config(path: str = DEFAULT_SERVO_CONFIG_PATH) -> ServoConfig:
     """
     read the servo configuration, every call returns new Servo objects
-    :param a2: the length of the lower arm in cm for the spring geometry, by default from robot_config.yaml
     :raises ServoConfigError: if the configuration is not valid
     """
     try:
@@ -67,25 +62,19 @@ def load_servo_config(path: str = DEFAULT_SERVO_CONFIG_PATH, a2: float | None = 
             data = yaml.safe_load(config_file)
     except (OSError, yaml.YAMLError) as e:
         raise ServoConfigError('can not read the servo configuration {}: {}'.format(path, e)) from e
-    return parse_servo_config(data, path, a2)
+    return parse_servo_config(data, path)
 
 
-def parse_servo_config(data: Any, source: str = 'servo configuration', a2: float | None = None) -> ServoConfig:
-    """
-    create the servo configuration from the parsed yaml data
-    :param a2: the length of the lower arm in cm for the spring geometry, by default from robot_config.yaml
-    """
-    _check_fields(data, _REQUIRED_FIELDS, _OPTIONAL_FIELDS, source)
+def parse_servo_config(data: Any, source: str = 'servo configuration') -> ServoConfig:
+    """create the servo configuration from the parsed yaml data"""
+    if isinstance(data, dict) and 'spring' in data:
+        raise ServoConfigError('{}: the spring model was removed (the spring was taken off the robot on 23 October '
+                               '2026), delete the spring section'.format(source))
+    _check_fields(data, _REQUIRED_FIELDS, set(), source)
     temperature_warning = _number(data['temperature_warning'], 'temperature_warning', source)
     temperature_limit = _number(data['temperature_limit'], 'temperature_limit', source)
     if temperature_warning > temperature_limit:
         raise ServoConfigError('{}: temperature_warning is higher than temperature_limit'.format(source))
-
-    spring = None
-    if 'spring' in data:
-        if a2 is None:
-            a2 = load_robot_configs()['dynamixel_robot'].a2
-        spring = _parse_spring(data['spring'], source + ', spring', a2)
 
     if not isinstance(data['servos'], dict) or not data['servos']:
         raise ServoConfigError('{}: servos should be a mapping of servo id to servo'.format(source))
@@ -99,17 +88,17 @@ def parse_servo_config(data: Any, source: str = 'servo configuration', a2: float
             raise ServoConfigError('{}: servo id {!r} should be a number from 0 to 252'.format(source, servo_id))
         servo_data = data['servos'][servo_id]
         servo_source = '{}, servo {}'.format(source, servo_id)
-        servos[servo_id] = _parse_servo(servo_data, servo_source, servo_id, spring)
+        servos[servo_id] = _parse_servo(servo_data, servo_source, servo_id)
         names[servo_id] = str(servo_data['name'])
         if 'model' in servo_data:
             models[servo_id] = str(servo_data['model'])
         buses.setdefault(str(servo_data['bus']), []).append(servo_id)
 
     return ServoConfig(servos, names, tuple(tuple(bus) for bus in buses.values()),
-                       temperature_warning, temperature_limit, models, spring)
+                       temperature_warning, temperature_limit, models)
 
 
-def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry | None) -> Servo:
+def _parse_servo(data: Any, source: str, servo_id: int) -> Servo:
     _check_fields(data, _REQUIRED_SERVO_FIELDS, _OPTIONAL_SERVO_FIELDS, source)
 
     if data['mode'] not in OPERATING_MODES:
@@ -149,7 +138,7 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
     if 'compensation' in data:
         if 'angles' not in data:
             raise ServoConfigError('{}: only a servo with angles can have a compensation'.format(source))
-        compensation = _parse_compensation(data['compensation'], source + ', compensation', servo_id, spring)
+        compensation = _parse_compensation(data['compensation'], source + ', compensation', servo_id)
 
     # Servo expects the smallest angle first, the positions follow the angles
     if first > last:
@@ -169,37 +158,28 @@ def _parse_servo(data: Any, source: str, servo_id: int, spring: SpringGeometry |
                  ff1=_register(pid.get('ff1', 0), 'ff1', source, *_PID_REGISTER))
 
 
-def _parse_spring(data: Any, source: str, a2: float) -> SpringGeometry:
-    _check_fields(data, {'base_anchor', 'arm_anchor'}, set(), source)
-    return SpringGeometry(_pair(data['base_anchor'], 'base_anchor', source),
-                          _pair(data['arm_anchor'], 'arm_anchor', source), a2)
-
-
-def _parse_compensation(data: Any, source: str, servo_id: int, spring: SpringGeometry | None) -> StaticCompensation:
-    _check_fields(data, _REQUIRED_COMPENSATION_FIELDS, _OPTIONAL_COMPENSATION_FIELDS, source)
+def _parse_compensation(data: Any, source: str, servo_id: int) -> StaticCompensation:
+    if isinstance(data, dict):
+        removed = [field for field in _REMOVED_COMPENSATION_FIELDS if field in data]
+        if removed:
+            raise ServoConfigError('{}: the per-direction blocks ({}) were removed, the compensation is for gravity '
+                                   'only: delete them and keep the terms fitted on the mean of both directions'.format(
+                                       source, ', '.join(removed)))
+    _check_fields(data, _REQUIRED_COMPENSATION_FIELDS, set(), source)
     try:
-        names = term_names(servo_id, spring is not None)
+        names = term_names(servo_id)
     except ValueError as e:
         raise ServoConfigError('{}: {}'.format(source, e)) from e
     max_positions = _integer(data['max_positions'], 'max_positions', source)
     if max_positions <= 0:
         raise ServoConfigError('{}: max_positions should be positive, not {}'.format(source, max_positions))
-    if (UP in data) != (DOWN in data):
-        raise ServoConfigError('{}: up and down have to be given together'.format(source))
-
-    terms = {}
-    for field in ('terms', UP, DOWN):
-        if field not in data:
-            continue
-        terms[field] = _terms(data[field], '{}, {}'.format(source, field), names, spring)
-    return StaticCompensation(servo_id, terms['terms'], max_positions, terms.get(UP), terms.get(DOWN), spring)
+    terms = _terms(data['terms'], '{}, terms'.format(source), names)
+    return StaticCompensation(servo_id, terms, max_positions)
 
 
-def _terms(data: Any, source: str, names: Sequence[str], spring: SpringGeometry | None) -> dict[str, float]:
+def _terms(data: Any, source: str, names: Sequence[str]) -> dict[str, float]:
     if not isinstance(data, dict):
-        raise ServoConfigError('{}: should be a mapping of term to coefficient in positions'.format(source))
-    if spring is None and any(name in SPRING_TERMS for name in data):
-        raise ServoConfigError('{}: the spring terms need a spring section'.format(source))
+        raise ServoConfigError('{}: should be a mapping of term to coefficient in pwm units'.format(source))
     unknown = set(data) - set(names)
     if unknown:
         raise ServoConfigError('{}: unknown terms {}, the terms are {}'.format(

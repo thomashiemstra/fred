@@ -302,6 +302,11 @@ class DynamixelRobotController(AbstractRobotController):
         could not be read; the unit depends on the model, see ServoHandler.read_present_current"""
         return self.servo_handler.read_present_current(list(servo_ids))
 
+    def get_present_pwms(self, servo_ids: Iterable[int] = ARM_IDS) -> dict[int, int] | None:
+        """returns a mapping of servo id to the signed present pwm register of the servos (885 is 100 % duty), or
+        None if they could not be read"""
+        return self.servo_handler.read_present_pwm(list(servo_ids))
+
     def get_temperatures_and_voltages(self, servo_ids: Iterable[int] = ARM_IDS) -> dict[int, tuple[int, float]] | None:
         """returns a mapping of servo id to (temperature in degrees celsius, input voltage), or None on failure"""
         return self.servo_handler.read_temperature_and_voltage(list(servo_ids))

@@ -11,7 +11,6 @@ from numpy import pi
 
 from src.robot_controllers.dynamixel_robot.dynamixel_x_config import MAX_PROFILE_TIME, \
     POSITIONS_PER_SECOND_PER_VELOCITY_UNIT
-from src.robot_controllers.dynamixel_robot.static_compensation import UP, DOWN
 
 if TYPE_CHECKING:
     from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
@@ -22,7 +21,6 @@ class Servo:
     max_position = 0
     target_position = 0
     current_position = -1  # set by the servo handler
-    DIRECTION_DEADBAND_POSITIONS = 3
 
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
@@ -30,7 +28,7 @@ class Servo:
                  compensation: StaticCompensation | None = None, move_time: int | None = None, ff1: int = 0) -> None:
         """
         :param compensation: a StaticCompensation, the positions it gives for the commanded angles of all joints
-            are added to every target position (see static_compensation.py)
+            and the P gain of this servo are added to every target position (see static_compensation.py)
         :param move_time: ms the servo gets for each small streamed goal step, None for the velocity-based profile;
             profile_velocity and profile_acceleration then limit a goal that is far away
         :param ff1: velocity feedforward gain of the position controller
@@ -51,12 +49,6 @@ class Servo:
         self.move_time = move_time
         self.ff1 = ff1
         self.compensation_positions = 0  # the positions the compensation added to the last target
-        self._direction: str | None = None
-        self._extreme_angle: float | None = None  # the furthest commanded angle in the current direction
-        # the direction only turns around when the commanded angle has come back more than this from the furthest
-        # point, so a target that dithers around a value doesn't flip the up/down compensation every step
-        positions_per_radian = abs(max_position - min_position) / (max_angle - min_angle) if max_angle != min_angle else 0
-        self.direction_deadband = self.DIRECTION_DEADBAND_POSITIONS / positions_per_radian if positions_per_radian else 0.0
 
     def __str__(self) -> str:
         return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
@@ -108,7 +100,7 @@ class Servo:
         """
         :param angle: the angle to move to
         :param all_angles: the commanded angles of all joints, indexed by servo id; with a compensation the
-            positions for the static load of that pose are added to the target
+            positions for the static load of that pose at the P gain of this servo are added to the target
         """
         if angle > self.max_angle:
             logging.debug("input angle is bigger than max input angle")
@@ -119,28 +111,10 @@ class Servo:
                                                      [self.min_position, self.max_position])))
         self.target_position += self.constant_offset
 
-        direction = self._update_direction(angle)
         self.compensation_positions = 0
         if self.compensation is not None and all_angles is not None:
-            self.compensation_positions = self.compensation.positions(all_angles, direction)
+            self.compensation_positions = self.compensation.positions(all_angles, self.p)
             self.target_position += self.compensation_positions
-
-    def _update_direction(self, angle: float) -> str | None:
-        """
-        the direction the commanded angle moves in: UP, DOWN or None before it first moved. The direction only turns
-        around when the angle has come back more than the deadband from the furthest point it reached.
-        """
-        if self._extreme_angle is None:
-            self._extreme_angle = angle
-            return None
-        if self._direction == UP and angle >= self._extreme_angle or \
-                self._direction == DOWN and angle <= self._extreme_angle:
-            self._extreme_angle = angle
-        elif angle > self._extreme_angle + self.direction_deadband:
-            self._direction, self._extreme_angle = UP, angle
-        elif angle < self._extreme_angle - self.direction_deadband:
-            self._direction, self._extreme_angle = DOWN, angle
-        return self._direction
 
     def calibrated_range(self) -> tuple[int, int]:
         """the lowest and the highest raw position of the calibrated range of this servo, offset included"""

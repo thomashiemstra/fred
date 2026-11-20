@@ -20,6 +20,9 @@ class FakeDynamixelRobot:
     def get_present_currents(self, servo_ids=(1, 2)):
         return {servo_id: 10 for servo_id in servo_ids}
 
+    def get_present_pwms(self, servo_ids=(1, 2)):
+        return {servo_id: -20 for servo_id in servo_ids}
+
 
 class FakeSimulatedRobot:
     physics_client = 1
@@ -49,6 +52,7 @@ class CombinedRobotTests(unittest.TestCase):
     def test_everything_else_is_the_physical_robot(self):
         # the servo level of the physical robot, used by the calibration scripts
         self.assertEqual({3: 10}, self.robot.get_present_currents([3]))
+        self.assertEqual({3: -20}, self.robot.get_present_pwms([3]))
         self.assertEqual('the servo config', self.robot.servo_config)
 
     def test_unknown_attributes_raise(self):

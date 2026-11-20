@@ -540,6 +540,16 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.bus.unresponsive = {4}
         self.assertIsNone(self.robot.get_present_currents())
 
+    def test_present_pwms(self):
+        self.bus.memory[2][cfg.ADDR_PRESENT_PWM:cfg.ADDR_PRESENT_PWM + 2] = (-120 & 0xFFFF).to_bytes(2, 'little')
+        self.bus.memory[5][cfg.ADDR_PRESENT_PWM:cfg.ADDR_PRESENT_PWM + 2] = (85).to_bytes(2, 'little')
+        pwms = self.robot.get_present_pwms()
+        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(pwms))
+        self.assertEqual((-120, 85, 0), (pwms[2], pwms[5], pwms[1]))
+        self.assertEqual({5: 85}, self.robot.get_present_pwms([5]))
+        self.bus.unresponsive = {4}
+        self.assertIsNone(self.robot.get_present_pwms())
+
     def test_temperatures_and_voltages(self):
         self.set_temperature(3, 41)
         self.bus.memory[3][cfg.ADDR_PRESENT_INPUT_VOLTAGE:cfg.ADDR_PRESENT_INPUT_VOLTAGE + 2] = (116).to_bytes(2, 'little')
@@ -550,7 +560,8 @@ class TestDynamixelRobotController(unittest.TestCase):
     def test_compensation_is_sent_with_the_goal_and_left_out_of_the_position_error(self):
         from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
         servo = self.servos[1]  # servo 2
-        servo.compensation = StaticCompensation(2, {'cos_q2': 20.0}, 60)
+        # the drive of 20 positions at the P of the servo: pwm = P / 128 * positions
+        servo.compensation = StaticCompensation(2, {'cos_q2': 20.0 * servo.p / 128}, 60)
         angles = np.array([0, 0.5, 0.0, 1.0, 0.2, 0.3, 0.1])  # cos(q2 = 0) = 1: 20 positions
         self.robot.move_servos(angles)
         self.assertEqual(20, servo.compensation_positions)

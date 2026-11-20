@@ -358,6 +358,58 @@ def sweep_angles(pose: np.ndarray, joint: int, speed: float, settings: Settings)
     return steps, angles
 
 
+class StreamedSample(NamedTuple):
+    """a sample of the servo read while a sweep was streamed, with the step and the goal the host had written"""
+    sample: Sample
+    step: SweepStep  # its direction is the direction of the ANGLE, see position_sign
+    goal: int  # the goal position of the servo as the host wrote it, with the compensation in it
+    compensation: int  # the positions the static compensation of the servo added to that goal
+
+
+def stream_sweep(robot: DynamixelRobotController | CombinedRobot, servo: Servo, steps: Sequence[SweepStep],
+                 angles: np.ndarray, read: Callable[[int, float], Sample], check: Callable[[float], str | None],
+                 recorded: list[StreamedSample], clock: Callable[[], float] = time.perf_counter,
+                 sleep: Callable[[float], None] = time.sleep) -> str | None:
+    """
+    stream the steps of a sweep to the robot against the clock, as execute_move does, and read the servo as often as
+    fits between two writes: the next step is written at its time on the clock without drift (the time of every
+    step follows from the start, not from the previous write), and the servo is read again only when a read still
+    fits before that. The loop knows nothing about the tuning or the recording: what a read does and what ends the
+    sweep early are the callables.
+    :param servo: the servo under test, its target position and compensation are noted with every sample
+    :param steps: the steps of the sweep, made for a period of 1 / global_constants.steps_per_second
+    :param angles: the angles of the robot at every step, as sweep_angles makes them
+    :param read: read(goal, written) reads the servo and returns the sample; goal is the goal position the step
+        wrote and written the time on the clock when it was written. It may raise to stop the sweep
+    :param check: check(written) is called after every sample and returns the reason to stop the sweep, or None
+    :param recorded: filled with a StreamedSample per sample as they come, so what was read is kept when a read
+        raises
+    :return: the reason check gave when it stopped the sweep, None when every step was streamed
+    """
+    dt = 1.0 / global_constants.steps_per_second
+    next_step = clock()
+    for step, step_angles in zip(steps, angles):
+        robot.move_servos(step_angles)
+        written = clock()
+        goal = servo.target_position
+        compensation = servo.compensation_positions
+        next_step += dt
+        while True:
+            began = clock()
+            sample = read(goal, written)
+            now = clock()
+            recorded.append(StreamedSample(sample, step, goal, compensation))
+            reason = check(written)
+            if reason is not None:
+                return reason
+            # another sample only when a read still fits before the next write is due
+            if now + (now - began) >= next_step:
+                break
+        if next_step - clock() > 1e-4:  # a shorter sleep is not worth it
+            sleep(next_step - clock())
+    return None
+
+
 def position_sign(servo: Servo) -> int:
     """
     1 when the positions of the servo rise with its angle, -1 when they fall (a servo mounted reversed: servo_config
@@ -1106,41 +1158,28 @@ class TuningSession:
         and stops the stage.
         """
         self.check_servos()
-        dt = 1.0 / global_constants.steps_per_second
         steps, angles = sweep_angles(pose, self.joint, speed, self.settings)
         clamp = self.original_goal_pwm if self.original_goal_pwm is not None else cfg.MAX_PWM
         rows: list[Sample] = []
-        recorded: list[SweepSample] = []
+        streamed: list[StreamedSample] = []
         self.trial_start = self.clock()
         self.last_goal_time = 0.0
         self.sag = 0.0  # the divergence rule of a streamed move allows 120 positions
         sign = position_sign(self.servo)
-        start_voltage = 0.0
+
+        def read(goal: int, written: float) -> Sample:
+            self.last_goal_time = written - self.trial_start
+            return self.sample(rows, goal)
+
+        def check(written: float) -> str | None:
+            return abort_reason(rows, clamp, 0, 0.0, rows[0].voltage, self.last_goal_time, self.settings.limits,
+                                sag=self.sag, streaming=True)
         reason = None
-        next_step = self.clock()
         try:
-            for step, step_angles in zip(steps, angles):
-                self.robot.move_servos(step_angles)
-                self.last_goal_time = self.clock() - self.trial_start
-                goal = self.servo.target_position
-                next_step += dt
-                while True:
-                    began = self.clock()
-                    sample = self.sample(rows, goal)
-                    now = self.clock()
-                    recorded.append(SweepSample(sample, step.direction * sign, step.cruise, step.leg))
-                    if len(rows) == 1:
-                        start_voltage = sample.voltage
-                    reason = abort_reason(rows, clamp, 0, 0.0, start_voltage, self.last_goal_time,
-                                          self.settings.limits, sag=self.sag, streaming=True)
-                    # another sample only when a read still fits before the next write is due
-                    if reason is not None or now + (now - began) >= next_step:
-                        break
-                if reason is not None:
-                    break
-                if next_step - self.clock() > 1e-4:  # a shorter sleep is not worth it
-                    self.sleep(next_step - self.clock())
+            reason = stream_sweep(self.robot, self.servo, steps, angles, read, check, streamed, self.clock,
+                                  self.sleep)
         finally:
+            recorded = [SweepSample(s.sample, s.step.direction * sign, s.step.cruise, s.step.leg) for s in streamed]
             self.write_ff_samples(recorded, ff1, speed)
         if reason is not None:
             if not self.abort(reason):
