@@ -54,9 +54,9 @@ class CombinedRobot(AbstractRobotController):
         self.simulated_robot.move_to_pose_and_give_new_angles(pose)
         return self.dynamixel_robot.move_to_pose_and_give_new_angles(pose)
 
-    def move_servos(self, angles: np.ndarray) -> float | None:
-        self.simulated_robot.move_servos(angles)
-        return self.dynamixel_robot.move_servos(angles)
+    def move_servos(self, angles: np.ndarray, velocities: np.ndarray | None = None) -> float | None:
+        self.simulated_robot.move_servos(angles)  # the simulation has no use for the velocities
+        return self.dynamixel_robot.move_servos(angles, velocities)
 
     def get_current_angles(self) -> np.ndarray | None:
         return self.dynamixel_robot.get_current_angles()

@@ -111,7 +111,7 @@ class OfflineRobot(AbstractRobotController):
     def move_to_pose_and_give_new_angles(self, pose: Pose) -> np.ndarray:
         raise NoHardwareError('move_to_pose_and_give_new_angles')
 
-    def move_servos(self, angles: np.ndarray) -> float | None:
+    def move_servos(self, angles: np.ndarray, velocities: np.ndarray | None = None) -> float | None:
         raise NoHardwareError('move_servos')
 
     def get_current_angles(self) -> np.ndarray | None:

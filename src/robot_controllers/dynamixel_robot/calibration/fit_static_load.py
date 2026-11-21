@@ -6,23 +6,30 @@ Fits the static load compensation of the arm servos to the data of record_static
 
 The fit is in pwm units, the holding drive of the joint, so it stays valid when the P gain is retuned (a fit in
 positions would only hold for the P it was recorded at). The csv has per servo, pose and direction the error, present
-minus the UNCOMPENSATED goal in positions, and the compensation in positions that was added to the goal. With a
-compensation active the error is only the sag that remains: the whole load is error - compensation, and that is what
-is fitted. The servos run a P-only position loop, so they drive with pwm = P / 128 * (goal sent - present), where
-goal sent - present = -(error - compensation). Every row is converted with its own P (column p of the csv, the gain the
-servo ran with), so recordings at different gains can be fitted together:
-    drive = -(error - compensation) * p / 128
+minus the goal of the angle itself (without the compensation and without the velocity lead) in positions, the
+compensation in positions that was added to the goal, and, in a csv recorded with a velocity lead, the lead column: the
+positions the lead added to the goal (0 at rest, signed like the position, so opposite in the two directions; a csv
+without the column or a blank lead means 0). With a compensation active the error is only the sag that remains: the
+whole load is error - compensation, and that is what is fitted. The servos run a P-only position loop, so they drive
+with pwm = P / 128 * (goal sent - present), where goal sent - present = -(error - compensation - lead). Every row is
+converted with its own P (column p of the csv, the gain the servo ran with), so recordings at different gains can be
+fitted together:
+    drive = -(error - compensation - lead) * p / 128
 The drive is positive towards higher positions. A row with an error needs a p, a csv recorded before the gains were
 logged can't be fitted. A row without an error (a servo that was not measured) only gives the angle of its joint to
 the pose, and a joint has a sample at a pose only when it has an error in both directions.
 
 For every joint the mean of the drives of the two directions at a pose is its static load, which is gravity: friction
-rests the joint off its goal with the sign of the direction it arrived from, so it cancels in the mean. Half the
-difference is the friction, reported to show how large it is; it is not compensated (the compensation is for gravity
-only). The static load is fitted with linear least squares on the basis of static_compensation.py. A share of the
-poses is held out to report how well the fit generalises. The report gives the errors in pwm units and, at the P of
-the joint in the csv (the mean when there are several), in positions and degrees. When the csv has the measured
-present pwm, the report compares it to the drive computed from the position error, which checks the factor 128.
+rests the joint off its goal with the sign of the direction it arrived from, so it cancels in the mean. So does the
+lead, which has opposite signs in the two directions: with or without a lead the fitted static load is the same. Half
+the difference is then the whole drive that does not come from gravity: the friction and, in a sweep, the drive the
+motor needs to turn, which the lead supplies. It is reported to show how large it is and is not compensated (the
+compensation is for gravity only). Because the lead is part of the drive here, switching a lead on does not make it
+look as if the friction had shrunk; in a recording at rest the half difference is friction alone. The static load is
+fitted with linear least squares on the basis of static_compensation.py. A share of the poses is held out to report
+how well the fit generalises. The report gives the errors in pwm units and, at the P of the joint in the csv (the mean
+when there are several), in positions and degrees. When the csv has the measured present pwm, the report compares it to
+the drive computed from the position error, which checks the factor 128.
 """
 import argparse
 import csv
@@ -43,14 +50,14 @@ DEFAULT_JOINTS = (2, 3, 5)
 
 
 class Sample:
-    """one pose with the drive of every servo: the static load (mean of both directions) and the friction"""
+    """one pose with the drive of every servo: the static load (mean of both directions) and the rest of the drive"""
 
     def __init__(self, angles: np.ndarray, static: dict[int, float], hysteresis: dict[int, float],
                  pwm: dict[int, float] | None = None) -> None:
         self.angles = angles  # 7 element array, radians
         self.static = static  # mapping of servo id to the mean drive in pwm units
-        # mapping of servo id to half the difference between the directions in pwm units: the friction, which is
-        # not compensated
+        # mapping of servo id to half the difference between the directions in pwm units: the friction and, in a
+        # sweep, the drive of the speed, which are not compensated
         self.hysteresis = hysteresis
         self.pwm = pwm if pwm is not None else {}  # mapping of servo id to the mean measured pwm of both directions
 
@@ -118,11 +125,22 @@ def _gain(row: dict[str, str]) -> float:
     return p
 
 
+def _lead(row: dict[str, str]) -> float:
+    """the positions the velocity lead added to the goal of a row; 0 when the column is missing or blank"""
+    return 0.0 if _blank(row.get('lead')) else float(row['lead'])
+
+
 def _drive(row: dict[str, str], p: float) -> float:
-    """the holding drive in pwm units of a row: the servo drives with P / 128 * (goal sent - present), and that
-    difference is minus the error once the compensation, which was added to the goal, is taken out of it"""
+    """the drive in pwm units of a row: the servo drives with P / 128 * (goal sent - present), and that difference
+    is minus the error once what was added to the goal (the compensation and the velocity lead) is taken out of it.
+    The lead is part of the drive: without it the drive of the speed would be missing from a sweep with a lead"""
     compensation = 0.0 if _blank(row.get('compensation')) else float(row['compensation'])
-    return -(float(row['error']) - compensation) * p * PWM_PER_POSITION_PER_P
+    return -(float(row['error']) - compensation - _lead(row)) * p * PWM_PER_POSITION_PER_P
+
+
+def servos_with_lead(rows: Iterable[dict[str, str]]) -> set[int]:
+    """the servo ids that have a row with an error and a lead that is not 0"""
+    return {int(row['servo']) for row in rows if not _blank(row.get('error')) and _lead(row) != 0}
 
 
 def gains_of_joints(rows: Iterable[dict[str, str]]) -> dict[int, list[float]]:
@@ -299,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         print('no poses with both directions in {}'.format(args.files))
         return 1
     print('{} poses with both directions'.format(len(samples)))
+    leads = servos_with_lead(rows)
 
     fits = {}
     for joint in args.joints:
@@ -316,8 +335,11 @@ def main(argv: list[str] | None = None) -> int:
             print('  P values seen: {}, the errors in positions use their mean {:.0f}'.format(
                 ', '.join('{:g}'.format(value) for value in p_seen), p))
         mean_hysteresis, max_hysteresis = float(np.mean(hysteresis)), float(np.max(hysteresis))
-        print('  friction (half the up/down difference, not compensated): mean {:.1f} pwm{}, max {:.0f} pwm{}'.format(
-            mean_hysteresis, in_positions(mean_hysteresis, p), max_hysteresis, in_positions(max_hysteresis, p)))
+        # with a lead the half difference is the friction and the drive of the speed, which the lead supplies; at rest
+        # and without a lead it is friction alone
+        what = 'friction and speed drive' if joint in leads else 'friction'
+        print('  {} (half the up/down difference, not compensated): mean {:.1f} pwm{}, max {:.0f} pwm{}'.format(
+            what, mean_hysteresis, in_positions(mean_hysteresis, p), max_hysteresis, in_positions(max_hysteresis, p)))
         ratio = pwm_ratio(joint, samples)
         if ratio is not None:
             print('  measured pwm is {:.2f} times the drive computed from the position error (1.0 expected)'.format(

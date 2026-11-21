@@ -201,22 +201,15 @@ class ParseServoConfigTests(unittest.TestCase):
         self.assert_invalid(config_with(change=(1, 'profile', {'velocity': 250, 'acceleration': 100, 'time': 15})),
                             'profile: unknown time')
 
-    def test_ff1(self):
-        config = parse_servo_config(config_with(
-            ff1=(1, 'pid', {'p': 1500, 'i': 0, 'd': 500, 'ff1': 300}),
-            edge=(2, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'ff1': 16383})))
-        self.assertEqual((300, 16383, 0), (config.servos[1].ff1, config.servos[2].ff1, config.servos[7].ff1))
-
-    def test_invalid_ff1(self):
-        for ff1 in (-1, 16384, 1.5, '300', None):
-            with self.subTest(ff1=ff1):
-                self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'ff1': ff1})),
-                                    'servo 1: ff1 should be')
-        self.assert_invalid(config_with(change=(1, 'pid', {'p': 1, 'i': 0, 'd': 0, 'ff1': 16384})),
-                            'ff1 should be from 0 to 16383, not 16384')
+    def test_an_ff1_key_under_pid_is_an_unknown_key(self):
+        for value in (0, 300, 16383, None):
+            with self.subTest(value=value):
+                self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': 0, 'd': 500, 'ff1': value})),
+                                    'servo 1, pid: unknown ff1')
 
     def test_unknown_pid_key_is_still_refused(self):
-        self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'ff2': 5})), 'pid: unknown ff2')
+        self.assert_invalid(config_with(change=(1, 'pid', {'p': 1500, 'i': 0, 'd': 0, 'gain': 5})),
+                            'pid: unknown gain')
 
     def test_invalid_pairs(self):
         self.assert_invalid(config_with(change=(1, 'positions', 1024)), r'positions should be \[first, last\]')
@@ -232,6 +225,89 @@ class ParseServoConfigTests(unittest.TestCase):
         config = copy.deepcopy(VALID_CONFIG)
         config['servos'][2]['bus'] = 'ttl'
         self.assertEqual(((1,), (2, 7)), parse_servo_config(config).buses)
+
+    def test_an_empty_bus_is_refused(self):
+        # config_with removes a field set to None, so the value is put in directly
+        for value in (None, '', ' ', ' \t\n'):
+            with self.subTest(value=value):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][2]['bus'] = value
+                self.assert_invalid(config, 'servo configuration, servo 2: bus is empty, give the connector the servo '
+                                            r'is on \(servos with the same bus are read together\)')
+
+    def test_an_empty_bus_in_yaml_is_refused(self):
+        data = yaml.safe_load('temperature_warning: 45\ntemperature_limit: 50\nservos:\n  3:\n    name: wrist\n'
+                              '    bus:\n    mode: position\n    positions: [1024, 3072]\n    angles: [0, 180]\n'
+                              '    profile: {velocity: 250, acceleration: 100}\n    pid: {p: 1500, i: 0, d: 0}\n')
+        self.assert_invalid(data, 'servo 3: bus is empty')
+
+    def test_a_missing_bus_is_still_refused(self):
+        self.assert_invalid(config_with(change=(1, 'bus', None)), 'servo 1: missing bus')
+
+    def test_any_non_empty_bus_label_is_accepted(self):
+        for label in ('ttl', 'usb adapter 2', 'x', 485):
+            with self.subTest(label=label):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][7]['bus'] = label
+                self.assertEqual(((1, 2), (7,)), parse_servo_config(config).buses)
+
+    def test_an_empty_name_is_refused(self):
+        for value in (None, '', '   '):
+            with self.subTest(value=value):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][2]['name'] = value
+                self.assert_invalid(config, 'servo configuration, servo 2: name is empty$')
+
+    def test_an_empty_model_is_refused(self):
+        for value in (None, '', '   '):
+            with self.subTest(value=value):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][2]['model'] = value
+                self.assert_invalid(config, 'servo configuration, servo 2: model is empty, give the dynamixel model '
+                                            'or leave the line out')
+
+    def test_the_model_is_optional(self):
+        self.assertEqual({}, parse_servo_config(VALID_CONFIG).models)
+
+    def test_whitespace_around_a_name_and_a_model_is_ignored(self):
+        config = copy.deepcopy(VALID_CONFIG)
+        config['servos'][1]['name'] = '  base '
+        config['servos'][1]['model'] = ' XC430-W240 \n'
+        parsed = parse_servo_config(config)
+        self.assertEqual('base', parsed.names[1])
+        self.assertEqual({1: 'XC430-W240'}, parsed.models)
+
+    def test_an_empty_goal_current_is_refused(self):
+        for servo_id in (1, 7):
+            with self.subTest(servo_id=servo_id):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][servo_id]['goal_current'] = None
+                self.assert_invalid(config, 'servo configuration, servo {}: goal_current is empty, give the current in '
+                                            'mA or leave the line out'.format(servo_id))
+
+    def test_a_current_based_position_servo_needs_a_goal_current(self):
+        self.assert_invalid(config_with(change=(7, 'goal_current', None)),
+                            r'servo configuration, servo 7: a servo in current_based_position mode needs a goal_current '
+                            r'\(the most current in mA it may use\)')
+
+    def test_a_servo_in_another_mode_may_leave_the_goal_current_out(self):
+        for mode in ('position', 'extended_position'):
+            with self.subTest(mode=mode):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][1]['mode'] = mode
+                self.assertIsNone(parse_servo_config(config).servos[1].goal_current)
+
+    def test_a_goal_current_on_a_position_servo_is_still_parsed(self):
+        config = copy.deepcopy(VALID_CONFIG)
+        config['servos'][1]['goal_current'] = 300
+        self.assertEqual(300, parse_servo_config(config).servos[1].goal_current)
+
+    def test_whitespace_around_a_bus_label_is_ignored(self):
+        config = copy.deepcopy(VALID_CONFIG)
+        config['servos'][1]['bus'] = 'ttl'
+        config['servos'][2]['bus'] = ' ttl '
+        config['servos'][7]['bus'] = 'rs485'
+        self.assertEqual(((1, 2), (7,)), parse_servo_config(config).buses)
 
 
 class LoadServoConfigTests(unittest.TestCase):
@@ -325,6 +401,112 @@ class CompensationConfigTests(unittest.TestCase):
             self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'spring_dl': 1.0}}))
         with self.assertRaisesRegex(ServoConfigError, 'servo_config.yaml'):
             parse_servo_config(dict(config_with(), spring=spring), 'servo_config.yaml')
+
+
+class VelocityFeedforwardConfigTests(unittest.TestCase):
+    """the velocity feedforward (velocity lead) of a servo"""
+
+    def parse(self, **changes):
+        return parse_servo_config(config_with(**changes))
+
+    def test_velocity_feedforward_is_parsed(self):
+        config = self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
+        velocity_feedforward = config.servos[2].velocity_feedforward
+        self.assertEqual(14.2, velocity_feedforward.pwm_per_degree_per_second)
+        self.assertEqual(30, velocity_feedforward.max_positions)
+
+    def test_a_whole_number_and_zero_are_valid_coefficients(self):
+        for coefficient in (14, 0):
+            config = self.parse(m=(2, 'velocity_feedforward',
+                                   {'max_positions': 30, 'pwm_per_degree_per_second': coefficient}))
+            self.assertEqual(float(coefficient), config.servos[2].velocity_feedforward.pwm_per_degree_per_second)
+
+    def test_a_servo_without_the_block_has_no_velocity_feedforward(self):
+        config = self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
+        self.assertIsNone(config.servos[1].velocity_feedforward)
+        self.assertIsNone(config.servos[7].velocity_feedforward)
+        self.assertIsNone(parse_servo_config(VALID_CONFIG).servos[2].velocity_feedforward)
+
+    def test_velocity_feedforward_and_compensation_go_together(self):
+        config = self.parse(c=(2, 'compensation', {'max_positions': 60, 'terms': {'cos_q2': 12.0}}),
+                            m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
+        self.assertEqual({'cos_q2': 12.0}, config.servos[2].compensation.terms)
+        self.assertEqual(30, config.servos[2].velocity_feedforward.max_positions)
+
+    def test_velocity_feedforward_is_shown_in_the_servo(self):
+        config = self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
+        self.assertIn('VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30)', str(config.servos[2]))
+
+    def test_invalid_velocity_feedforwards(self):
+        invalid = [
+            {'pwm_per_degree_per_second': 14.2},                        # no max_positions
+            {'max_positions': 30},                                      # no pwm_per_degree_per_second
+            {},
+            {'max_positions': 30, 'pwm_per_degree_per_second': -1.0},
+            {'max_positions': 30, 'pwm_per_degree_per_second': -0.001},
+            {'max_positions': 30, 'pwm_per_degree_per_second': float('nan')},
+            {'max_positions': 30, 'pwm_per_degree_per_second': 'fast'},
+            {'max_positions': 30, 'pwm_per_degree_per_second': True},
+            {'max_positions': 30, 'pwm_per_degree_per_second': None},
+            {'max_positions': 0, 'pwm_per_degree_per_second': 14.2},
+            {'max_positions': -3, 'pwm_per_degree_per_second': 14.2},
+            {'max_positions': 30.5, 'pwm_per_degree_per_second': 14.2},
+            {'max_positions': '30', 'pwm_per_degree_per_second': 14.2},
+            {'max_positions': True, 'pwm_per_degree_per_second': 14.2},
+            {'max_positions': 30, 'pwm_per_degree_per_second': 14.2, 'friction': 1.0},   # unknown key
+            {'max_positions': 30, 'velocity': 14.2},                    # the old key
+            [30, 14.2],
+            14.2,
+        ]
+        for velocity_feedforward in invalid:
+            with self.assertRaises(ServoConfigError, msg=repr(velocity_feedforward)):
+                self.parse(m=(2, 'velocity_feedforward', velocity_feedforward))
+
+    def test_the_errors_name_the_servo_and_the_problem(self):
+        source = 'servo 2, velocity_feedforward: '
+        with self.assertRaisesRegex(ServoConfigError, source + 'pwm_per_degree_per_second .* should be 0 or more, not -1.0'):
+            self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': -1.0}))
+        with self.assertRaisesRegex(ServoConfigError, source + 'max_positions should be positive, not 0'):
+            self.parse(m=(2, 'velocity_feedforward', {'max_positions': 0, 'pwm_per_degree_per_second': 14.2}))
+        with self.assertRaisesRegex(ServoConfigError, source + 'max_positions should be a whole number'):
+            self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30.5, 'pwm_per_degree_per_second': 14.2}))
+        with self.assertRaisesRegex(ServoConfigError, source + 'missing pwm_per_degree_per_second'):
+            self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30}))
+        with self.assertRaisesRegex(ServoConfigError, source + 'unknown friction'):
+            self.parse(m=(2, 'velocity_feedforward',
+                          {'max_positions': 30, 'pwm_per_degree_per_second': 14.2, 'friction': 1}))
+
+    def test_the_old_key_velocity_is_refused_and_the_error_names_the_keys_to_write(self):
+        with self.assertRaisesRegex(ServoConfigError,
+                                    'servo 2, velocity_feedforward: unknown velocity, the keys of a '
+                                    'velocity_feedforward block are max_positions and pwm_per_degree_per_second'):
+            self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'velocity': 14.2}))
+
+    def test_a_motion_key_on_the_servo_is_refused_like_any_unknown_field(self):
+        with self.assertRaisesRegex(ServoConfigError, 'servo 2.*unknown.*motion'):
+            self.parse(m=(2, 'motion', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
+
+    def test_a_servo_without_angles_can_not_have_a_velocity_feedforward(self):
+        with self.assertRaisesRegex(ServoConfigError,
+                                    'servo 7.*only a servo with angles can have a velocity_feedforward'):
+            self.parse(m=(7, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
+
+    def test_the_velocity_feedforward_block_in_a_yaml_file_is_loaded(self):
+        data = config_with()
+        data['servos'][2]['velocity_feedforward'] = {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'servos.yaml')
+            with open(path, 'w') as config_file:
+                yaml.safe_dump(data, config_file)
+            config = load_servo_config(path)
+        self.assertEqual(14.2, config.servos[2].velocity_feedforward.pwm_per_degree_per_second)
+
+    def test_the_real_servo_configuration_still_loads_with_or_without_velocity_feedforward(self):
+        config = load_servo_config(DEFAULT_SERVO_CONFIG_PATH)
+        self.assertEqual(list(range(1, 8)), list(config.servos))
+        for servo in config.servos.values():  # a servo with one has a VelocityFeedforward, the others have none
+            if servo.velocity_feedforward is not None:
+                self.assertGreater(servo.velocity_feedforward.max_positions, 0)
 
 
 if __name__ == '__main__':

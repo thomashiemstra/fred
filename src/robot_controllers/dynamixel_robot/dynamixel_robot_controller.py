@@ -97,7 +97,6 @@ class DynamixelRobotController(AbstractRobotController):
         success = success & self.set_drive_mode()
         success = success & self.set_velocity_profile()
         success = success & self.set_pid()
-        success = success & self.set_feedforward()
         success = success & self.set_goal_current()
         # the calibrated range is enforced by clamping every target (Servo.clamp_target_position), not with the position
         # limits in the eeprom of the servos: the static load compensation is added beyond the range (up to its
@@ -258,9 +257,16 @@ class DynamixelRobotController(AbstractRobotController):
         _, _, _, _, p6 = forward_position_kinematics(angles, self.robot_config)
         return p6
 
-    # returns the time in seconds it took to move the servos
     @synchronized_with_lock("bus_lock")
-    def move_servos(self, angles: np.ndarray) -> float:
+    def move_servos(self, angles: np.ndarray, velocities: np.ndarray | None = None) -> float:
+        """
+        move the servos to the angles
+        :param angles: the angles of all joints, indexed by servo id
+        :param velocities: the commanded velocities of all joints in radians per second, indexed by servo id like the
+            angles, or None; a servo with a velocity feedforward leads its goal by the positions that drive it at its
+            velocity (see Servo.set_target_position_from_angle)
+        :return: the time in seconds it took to move the servos
+        """
         start = timer()
 
         if self.print_position_error:  # reads the bus before the goals are written, so only for debugging
@@ -271,7 +277,8 @@ class DynamixelRobotController(AbstractRobotController):
 
         # First set the target_position variable of all servos, some servos compensate based on the other angles
         for servo_id in ARM_IDS:
-            self.servo_handler.set_angle(servo_id, angles[servo_id], angles)
+            self.servo_handler.set_angle(servo_id, angles[servo_id], angles,
+                                         None if velocities is None else float(velocities[servo_id]))
 
         # Next physically move the servos to their target_position
         self.servo_handler.move_to_angles(ARM_IDS)
@@ -284,7 +291,8 @@ class DynamixelRobotController(AbstractRobotController):
 
     def _print_position_error(self) -> None:
         """print the difference between the current position and the previous target position of each servo, the
-        target without its static load compensation, so the number is the remaining sag"""
+        goal of the angle itself without its static load compensation and velocity lead, so the number is the
+        remaining sag (and the lag of a moving joint)"""
         current_positions = self.get_current_positions()
         if current_positions is None:
             logger.warning("failed to read the current positions")
@@ -293,7 +301,7 @@ class DynamixelRobotController(AbstractRobotController):
         diff = np.zeros(7, dtype=np.intp)
         for servo_id in ARM_IDS:
             servo = self.servo_handler.get_servo(servo_id)
-            diff[servo_id] = current_positions[servo_id] - (servo.target_position - servo.compensation_positions)
+            diff[servo_id] = current_positions[servo_id] - servo.trajectory_position
 
         print("1: {} 2:{} 3:{}, 4:{}, 5:{}, 6:{}".format(diff[1], diff[2], diff[3], diff[4], diff[5], diff[6]))
 
@@ -329,9 +337,6 @@ class DynamixelRobotController(AbstractRobotController):
 
     def set_drive_mode(self) -> bool:
         return self.servo_handler.set_configured_drive_mode()
-
-    def set_feedforward(self) -> bool:
-        return self.servo_handler.set_feedforward()
 
     def set_velocity_profile(self) -> bool:
         return self.servo_handler.set_profile_velocity_and_acceleration()

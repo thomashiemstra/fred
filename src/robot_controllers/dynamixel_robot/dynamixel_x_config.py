@@ -19,8 +19,6 @@ ADDR_PRESENT_CURRENT    = 126
 ADDR_PRESENT_INPUT_VOLTAGE = 144
 ADDR_PRESENT_TEMPERATURE = 146
 ADDR_PWM_LIMIT          = 36   # eeprom, the most pwm the servo outputs, 885 is 100%
-ADDR_FEEDFORWARD_2ND_GAIN = 88  # acceleration feedforward of the position controller, gain / 4
-ADDR_FEEDFORWARD_1ST_GAIN = 90  # velocity feedforward of the position controller, gain / 4
 ADDR_GOAL_PWM           = 100  # in position mode a limit on the pwm output, -PWM limit to PWM limit
 ADDR_REALTIME_TICK      = 120  # ms counter of the servo, wraps at 32767
 ADDR_MOVING             = 122
@@ -47,7 +45,6 @@ LEN_PRESENT_CURRENT     = 2
 LEN_PRESENT_INPUT_VOLTAGE = 2
 LEN_PRESENT_TEMPERATURE = 1
 LEN_PWM_LIMIT           = 2
-LEN_FEEDFORWARD_GAIN    = 2
 LEN_GOAL_PWM            = 2
 LEN_REALTIME_TICK       = 2
 LEN_MOVING              = 1
@@ -59,7 +56,7 @@ LEN_POSITION_TRAJECTORY = 4
 LEN_RETURN_DELAY_TIME   = 1
 LEN_STATE_BLOCK         = 27  # addresses 120 to 146, read in one packet by ServoHandler.read_state
 
-# the position and feedforward gains are 0 to 16383, a servo drops a larger value silently in a sync write
+# the position gains are 0 to 16383, a servo drops a larger value silently in a sync write
 MAX_GAIN                = 16383
 MAX_PWM                 = 885  # 100% duty, 0.113% per unit
 # in position mode the pwm of the servo is P / 128 per position of error, in the units of the pwm registers (the

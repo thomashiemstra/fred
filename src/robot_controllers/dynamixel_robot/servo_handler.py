@@ -79,13 +79,12 @@ class ServoHandler(object):
         if bus_ids != sorted(servos):
             raise ValueError("every servo should be on exactly one bus, got buses %s for servos %s"
                              % (self.buses, sorted(servos)))
-        # adjacent registers are written in a single packet, see set_profile_velocity_and_acceleration, set_pid,
-        # set_feedforward and the goal writes (acceleration, velocity and goal position)
+        # adjacent registers are written in a single packet, see set_profile_velocity_and_acceleration, set_pid
+        # and the goal writes (acceleration, velocity and goal position)
         if (config.ADDR_PROFILE_ACCELERATION + config.LEN_PROFILE_ACCELERATION != config.ADDR_PROFILE_VELOCITY or
                 config.ADDR_PROFILE_VELOCITY + config.LEN_PROFILE_VELOCITY != config.ADDR_GOAL_POSITION or
-                config.ADDR_D + config.LEN_PID != config.ADDR_I or config.ADDR_I + config.LEN_PID != config.ADDR_P or
-                config.ADDR_FEEDFORWARD_2ND_GAIN + config.LEN_FEEDFORWARD_GAIN != config.ADDR_FEEDFORWARD_1ST_GAIN):
-            raise ValueError("the profile, pid or feedforward registers in the config are not adjacent")
+                config.ADDR_D + config.LEN_PID != config.ADDR_I or config.ADDR_I + config.LEN_PID != config.ADDR_P):
+            raise ValueError("the profile or pid registers in the config are not adjacent")
         # the state block of read_state runs from the realtime tick to the temperature
         if (config.ADDR_PRESENT_TEMPERATURE + config.LEN_PRESENT_TEMPERATURE - config.ADDR_REALTIME_TICK
                 != config.LEN_STATE_BLOCK):
@@ -107,9 +106,14 @@ class ServoHandler(object):
         """return the servo object corresponding to the id"""
         return self.servo_map[servo_id]
 
-    def set_angle(self, servo_id: int, angle: float, all_angles: np.ndarray | None = None) -> None:
-        """Set the target position based on the angle for the specific servo"""
-        self.servo_map[servo_id].set_target_position_from_angle(angle, all_angles)
+    def set_angle(self, servo_id: int, angle: float, all_angles: np.ndarray | None = None,
+                  velocity: float | None = None) -> None:
+        """
+        Set the target position based on the angle for the specific servo
+        :param all_angles: the commanded angles of all joints, for the compensation of the servo
+        :param velocity: the commanded velocity of this joint in radians per second, for the velocity lead of the servo
+        """
+        self.servo_map[servo_id].set_target_position_from_angle(angle, all_angles, velocity)
 
     def get_angle(self, servo_id: int, position: int) -> float:
         """converts the position to a servo angle"""
@@ -305,30 +309,6 @@ class ServoHandler(object):
         configured values, so set_pid restores them"""
         return self.__write_pid({servo_id: (p, i, d)})
 
-    def set_feedforward(self, servo_ids: Iterable[int] | None = None) -> bool:
-        """set the configured feedforward of the servos (the velocity gain ff1, the acceleration gain is 0), this
-        get's wiped after a reboot"""
-        feedforward = {}
-        for servo_id in self.__ids(servo_ids):
-            feedforward[servo_id] = (self.servo_map[servo_id].ff1, 0)
-        return self.__write_feedforward(feedforward)
-
-    def set_feedforward_single_servo(self, servo_id: int, first: int, second: int = 0) -> bool:
-        """set the velocity (first) and acceleration (second) feedforward gain of a single servo, this get's wiped
-        after a reboot; the Servo object keeps the configured value, so set_feedforward restores it"""
-        return self.__write_feedforward({servo_id: (first, second)})
-
-    def read_feedforward(self, servo_ids: Iterable[int] | None = None) -> dict[int, tuple[int, int]] | None:
-        """returns a mapping of servo id to the (1st, 2nd) feedforward gain the servo has, or None on failure"""
-        c = self.config
-        fields: Sequence[Field] = ((c.ADDR_FEEDFORWARD_1ST_GAIN, c.LEN_FEEDFORWARD_GAIN, False),
-                                   (c.ADDR_FEEDFORWARD_2ND_GAIN, c.LEN_FEEDFORWARD_GAIN, False))
-        values = self.__sync_read_fields(c.ADDR_FEEDFORWARD_2ND_GAIN, 2 * c.LEN_FEEDFORWARD_GAIN, fields,
-                                         self.__ids(servo_ids))
-        if values is None:
-            return None
-        return {servo_id: (value[0], value[1]) for servo_id, value in values.items()}
-
     def set_goal_pwm(self, servo_id: int, value: int) -> bool:
         """
         set the goal pwm of one servo: in position mode a limit on the pwm output, so on the torque, between
@@ -393,6 +373,7 @@ class ServoHandler(object):
             servo = self.servo_map[servo_id]
             servo.target_position = servo.current_position
             servo.compensation_positions = 0  # the present position is held as it is, nothing was added to it
+            servo.reset_lead()
             if servo.time_based:
                 # the goal is where the servo already is, so it gets its move time and no acceleration time, not a
                 # time for the distance from the previous goal
@@ -545,8 +526,8 @@ class ServoHandler(object):
     def __clamp_target_position(self, servo_id: int) -> None:
         """clamp the target position to both the calibrated and the physical range of the servo
 
-        The calibrated range applies to the target before its static load compensation, the compensation is kept at
-        the ends of the range; the physical range applies to the goal position that is sent.
+        The calibrated range applies to the target before its static load compensation and its velocity lead, both
+        are kept at the ends of the range; the physical range applies to the goal position that is sent.
         """
         servo = self.servo_map[servo_id]
         clamped = servo.clamp_target_position()
@@ -570,20 +551,6 @@ class ServoHandler(object):
                               utils.to_bytes(i, self.config.LEN_PID) +
                               utils.to_bytes(p, self.config.LEN_PID))
         return self.__sync_write(self.config.ADDR_D, 3 * self.config.LEN_PID, data)
-
-    def __write_feedforward(self, feedforward: dict[int, tuple[int, int]]) -> bool:
-        """write a mapping of servo id to (1st gain, 2nd gain)"""
-        # the 2nd and 1st gain registers are adjacent (in that order), so they are written in a single packet
-        data = {}
-        for servo_id, (first, second) in feedforward.items():
-            for name, gain in (('first', first), ('second', second)):
-                # the servos drop a gain outside their range silently, the sync write isn't acknowledged
-                if not 0 <= gain <= self.config.MAX_GAIN:
-                    raise ValueError("[ID:%03d] the %s feedforward gain %d is outside 0..%d" % (
-                        servo_id, name, gain, self.config.MAX_GAIN))
-            data[servo_id] = (utils.to_bytes(second, self.config.LEN_FEEDFORWARD_GAIN) +
-                              utils.to_bytes(first, self.config.LEN_FEEDFORWARD_GAIN))
-        return self.__sync_write(self.config.ADDR_FEEDFORWARD_2ND_GAIN, 2 * self.config.LEN_FEEDFORWARD_GAIN, data)
 
     @synchronized_with_lock("bus_lock")
     def __write_goals(self, goals: dict[int, int]) -> bool:

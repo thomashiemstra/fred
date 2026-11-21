@@ -46,7 +46,14 @@ class AbstractRobotController(ABC):
         pass
 
     @abstractmethod
-    def move_servos(self, angles: np.ndarray) -> float | None:
+    def move_servos(self, angles: np.ndarray, velocities: np.ndarray | None = None) -> float | None:
+        """
+        move the servos to the angles
+        :param angles: the angles of all joints, indexed by servo id (index 0 is unused), in radians
+        :param velocities: the commanded velocities of all joints, indexed by servo id like the angles, in radians
+            per second, or None: a robot that can use them leads its goals by the drive the motors need to turn at
+            these speeds, one that can't ignores them
+        """
         pass
 
     @abstractmethod

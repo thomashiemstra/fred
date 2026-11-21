@@ -8,6 +8,7 @@ import yaml
 
 from src.global_constants import POSITION_CONTROL_MODE, EXTENDED_POSITION_CONTROL, CURRENT_BASED_POSITION_CONTROL_MODE
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation, term_names
 
@@ -20,9 +21,10 @@ OPERATING_MODES = {
 }
 
 _REQUIRED_SERVO_FIELDS = {'name', 'bus', 'mode', 'positions', 'profile', 'pid'}
-_OPTIONAL_SERVO_FIELDS = {'model', 'angles', 'states', 'offset', 'goal_current', 'compensation'}
+_OPTIONAL_SERVO_FIELDS = {'model', 'angles', 'states', 'offset', 'goal_current', 'compensation', 'velocity_feedforward'}
 _REQUIRED_FIELDS = {'temperature_warning', 'temperature_limit', 'servos'}
 _REQUIRED_COMPENSATION_FIELDS = {'max_positions', 'terms'}
+_REQUIRED_VELOCITY_FEEDFORWARD_FIELDS = {'max_positions', 'pwm_per_degree_per_second'}
 # the per-direction coefficient sets of an older version, refused with an explanation instead of as unknown fields
 _REMOVED_COMPENSATION_FIELDS = ('up', 'down')
 
@@ -89,13 +91,24 @@ def parse_servo_config(data: Any, source: str = 'servo configuration') -> ServoC
         servo_data = data['servos'][servo_id]
         servo_source = '{}, servo {}'.format(source, servo_id)
         servos[servo_id] = _parse_servo(servo_data, servo_source, servo_id)
-        names[servo_id] = str(servo_data['name'])
+        names[servo_id] = _label(servo_data['name'], 'name', servo_source)
         if 'model' in servo_data:
-            models[servo_id] = str(servo_data['model'])
-        buses.setdefault(str(servo_data['bus']), []).append(servo_id)
+            models[servo_id] = _label(servo_data['model'], 'model', servo_source,
+                                      'give the dynamixel model or leave the line out')
+        bus = _label(servo_data['bus'], 'bus', servo_source,
+                     'give the connector the servo is on (servos with the same bus are read together)')
+        buses.setdefault(bus, []).append(servo_id)
 
     return ServoConfig(servos, names, tuple(tuple(bus) for bus in buses.values()),
                        temperature_warning, temperature_limit, models)
+
+
+def _label(value: Any, name: str, source: str, advice: str = '') -> str:
+    """a text without surrounding whitespace, an empty one (`name:` in yaml is None) is refused"""
+    label = '' if value is None else str(value).strip()
+    if not label:
+        raise ServoConfigError('{}: {} is empty{}'.format(source, name, ', ' + advice if advice else ''))
+    return label
 
 
 def _parse_servo(data: Any, source: str, servo_id: int) -> Servo:
@@ -121,7 +134,7 @@ def _parse_servo(data: Any, source: str, servo_id: int) -> Servo:
     profile = data['profile']
     _check_fields(profile, {'velocity', 'acceleration'}, {'move_time'}, source + ', profile')
     pid = data['pid']
-    _check_fields(pid, {'p', 'i', 'd'}, {'ff1'}, source + ', pid')
+    _check_fields(pid, {'p', 'i', 'd'}, set(), source + ', pid')
 
     move_time = None
     if 'move_time' in profile:
@@ -130,15 +143,30 @@ def _parse_servo(data: Any, source: str, servo_id: int) -> Servo:
             raise ServoConfigError('{}: profile move_time should be from 1 to {}, not {}'.format(
                 source, cfg.MAX_PROFILE_TIME, move_time))
 
-    goal_current = data.get('goal_current')
-    if goal_current is not None:
-        goal_current = _register(goal_current, 'goal_current', source, *_GOAL_CURRENT_REGISTER)
+    goal_current = None
+    if 'goal_current' in data:
+        if data['goal_current'] is None:
+            raise ServoConfigError('{}: goal_current is empty, give the current in mA or leave the line out'.format(
+                source))
+        goal_current = _register(data['goal_current'], 'goal_current', source, *_GOAL_CURRENT_REGISTER)
+    elif OPERATING_MODES[data['mode']] == CURRENT_BASED_POSITION_CONTROL_MODE:
+        # the goal current limits how hard the gripper squeezes, without it the servo keeps whatever limit it had, up
+        # to its own maximum
+        raise ServoConfigError('{}: a servo in current_based_position mode needs a goal_current (the most current in '
+                               'mA it may use)'.format(source))
 
     compensation = None
     if 'compensation' in data:
         if 'angles' not in data:
             raise ServoConfigError('{}: only a servo with angles can have a compensation'.format(source))
         compensation = _parse_compensation(data['compensation'], source + ', compensation', servo_id)
+
+    velocity_feedforward = None
+    if 'velocity_feedforward' in data:
+        if 'angles' not in data:
+            raise ServoConfigError('{}: only a servo with angles can have a velocity_feedforward'.format(source))
+        velocity_feedforward = _parse_velocity_feedforward(data['velocity_feedforward'],
+                                                           source + ', velocity_feedforward')
 
     # Servo expects the smallest angle first, the positions follow the angles
     if first > last:
@@ -155,7 +183,7 @@ def _parse_servo(data: Any, source: str, servo_id: int) -> Servo:
                  offset=_register(data.get('offset', 0), 'offset', source, *_POSITION_REGISTER),
                  goal_current=goal_current,
                  compensation=compensation, move_time=move_time,
-                 ff1=_register(pid.get('ff1', 0), 'ff1', source, *_PID_REGISTER))
+                 velocity_feedforward=velocity_feedforward)
 
 
 def _parse_compensation(data: Any, source: str, servo_id: int) -> StaticCompensation:
@@ -175,6 +203,24 @@ def _parse_compensation(data: Any, source: str, servo_id: int) -> StaticCompensa
         raise ServoConfigError('{}: max_positions should be positive, not {}'.format(source, max_positions))
     terms = _terms(data['terms'], '{}, terms'.format(source), names)
     return StaticCompensation(servo_id, terms, max_positions)
+
+
+def _parse_velocity_feedforward(data: Any, source: str) -> VelocityFeedforward:
+    if isinstance(data, dict):  # before the missing fields, so a file with the old key `velocity` is told the new one
+        unknown = set(data) - _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS
+        if unknown:
+            raise ServoConfigError('{}: unknown {}, the keys of a velocity_feedforward block are max_positions and '
+                                   'pwm_per_degree_per_second (in pwm units per degree/s of the joint)'.format(
+                                       source, ', '.join(sorted(str(key) for key in unknown))))
+    _check_fields(data, _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS, set(), source)
+    max_positions = _integer(data['max_positions'], 'max_positions', source)
+    if max_positions <= 0:
+        raise ServoConfigError('{}: max_positions should be positive, not {}'.format(source, max_positions))
+    coefficient = _number(data['pwm_per_degree_per_second'], 'pwm_per_degree_per_second', source)
+    if not coefficient >= 0:  # also refuses nan
+        raise ServoConfigError('{}: pwm_per_degree_per_second (pwm per degree/s of the joint) should be 0 or more, '
+                               'not {}'.format(source, coefficient))
+    return VelocityFeedforward(coefficient, max_positions)
 
 
 def _terms(data: Any, source: str, names: Sequence[str]) -> dict[str, float]:

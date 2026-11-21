@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import csv
+import dataclasses
 import io
 import itertools
 import os
@@ -18,19 +19,23 @@ from src.robot_controllers.dynamixel_robot.calibration import gain_tuning, tune_
 import math
 
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    FF_CRUISE_HOLD, FF_RAMP, MIN_BIN_SAMPLES, SWING_MIN_LEG, AbortLimits, BinSide, Criteria, CruiseStatistics, LineFit,
-    RestMetrics, Sample, StepMetrics, SweepBin, SweepSample, SweepStep, SwingPair, SwingSample, SwingSide,
-    SwingStatistics, abort_reason, bin_sweep, choose_d, choose_p, clip_gain, cruise_statistics, d_ladder,
-    environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth, p_values, p_values_down,
-    pwm_clamp, pwm_per_position, recommended_swing_p, rest_metrics, rougher_speeds, step_metrics, step_size,
-    swing_change, swing_changed, swing_legs, swing_spread, swing_statistics, tracking_metrics)
+    FF_CRUISE_HOLD, FF_LAG_TOLERANCE, FF_RAMP, MIN_BIN_SAMPLES, SWING_MIN_LEG, AbortLimits, BinSide, Criteria,
+    CruiseStatistics, LineFit, RestMetrics, Sample, StepMetrics, SweepBin, SweepSample, SweepStep, SwingPair,
+    SwingSample, SwingSide, SwingStatistics, abort_reason, bin_sweep, choose_d, choose_p, cruise_statistics, d_ladder,
+    environmental_abort, evaluate, ff_sweep, fit_line, lag_growth, p_values, p_values_down, pwm_clamp,
+    pwm_per_position, recommended_swing_p, rest_metrics, rougher_speeds, step_metrics, step_size, swing_change,
+    swing_changed, swing_legs, swing_spread, swing_statistics, tracking_metrics)
+from src.robot_controllers.dynamixel_robot.calibration import fit_velocity_lead
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import (
     FF_SAMPLE_FIELDS, SAMPLE_FIELDS, SWING_SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep,
     SwingResult, SwingRun, TuningSession, compared_d, d_candidates, d_grid, d_progress, feedforward_refusal,
     grid_is_done, joint_knee_at, joint_p_at, knee_trial, parse_pose, position_sign, recommend, stream_sweep,
     swept_d_values, swing_gains, swing_refusal)
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
+from src.utils.movement import step_velocities
+from tests.servo_controller_tests.fit_velocity_lead_tests import as_text, sweep_rows
 from tests.servo_controller_tests.static_load_scripts_tests import FakeRobot
 
 DT = 0.002
@@ -768,8 +773,7 @@ class SimulatedServo:
         :param resonance_above: above this P gain the damping drops by resonance_slope per unit of P, so the loop
             rings and, with a large enough slope, oscillates with an amplitude bounded by the velocity limit
         :param trajectory_time: seconds the trajectory takes to reach a new goal, a linear ramp as the time-based
-            profile makes with the move time; the loop then follows the trajectory and the velocity feedforward
-            adds ff1 / 4 times its velocity in positions per millisecond to the pwm. None: the trajectory is the goal
+            profile makes with the move time; the loop then follows the trajectory. None: the trajectory is the goal
         """
         self.position = float(position)
         self.damping = damping
@@ -777,8 +781,6 @@ class SimulatedServo:
         self.resonance_slope = resonance_slope
         self.velocity = 0.0
         self.p, self.i, self.d = 0, 0, 0
-        self.ff1 = 0
-        self.ff_scale = 1.0  # how much of the formula's feedforward the servo applies
         self.goal_pwm = cfg.MAX_PWM
         self.load = load
         self.dt = dt
@@ -811,19 +813,12 @@ class SimulatedServo:
         fraction = min(1.0, (self.now - self._ramp_start) / self.trajectory_time)
         return self._ramp_from + (self._goal - self._ramp_from) * fraction
 
-    def trajectory_velocity(self):
-        """positions per millisecond"""
-        if self.trajectory_time is None or self.now - self._ramp_start >= self.trajectory_time - 1e-9:
-            return 0.0
-        return (self._goal - self._ramp_from) / (1000.0 * self.trajectory_time)
-
     def advance(self, seconds):
         steps = max(1, int(round(seconds / self.dt)))
         friction = self.FRICTION / (1.0 + self.d / self.FRICTION_D)
         for _ in range(steps):
             error = self.trajectory() - self.position
-            feedforward = self.ff1 * self.ff_scale / 4.0 * self.trajectory_velocity()
-            self.pwm = self.p / 128.0 * error + feedforward - self.d / 16.0 * self.velocity * 0.0059
+            self.pwm = self.p / 128.0 * error - self.d / 16.0 * self.velocity * 0.0059
             self.pwm = max(-self.goal_pwm, min(self.goal_pwm, self.pwm))
             damping = self.damping + self.DAMPING_PER_D * self.d
             if self.resonance_above is not None and self.p > self.resonance_above:
@@ -859,14 +854,11 @@ class FakeTuningHandler:
         self.profiles = {servo_id: servo.profile_registers() for servo_id, servo in self.servos.items()}
         self.goal_pwm = {servo_id: cfg.MAX_PWM for servo_id in self.servos}
         self.gains = {servo_id: (servo.p, servo.i, servo.d) for servo_id, servo in self.servos.items()}
-        self.feedforward = {servo_id: (servo.ff1, 0) for servo_id, servo in self.servos.items()}
         self.gain_writes = []
-        self.feedforward_writes = []
         self.goal_pwm_writes = []
         self.goal_writes = []  # ('move' or 'step', servo id, position)
         self.failed_reads = 0
         self.sim.p, self.sim.i, self.sim.d = self.gains[joint]
-        self.sim.ff1 = self.feedforward[joint][0]
         self.fail_reads = False
         self.before_read = None  # called before every state read, for the tests to disturb the servo
         self.temperatures = {servo_id: 30 for servo_id in self.servos}
@@ -933,39 +925,21 @@ class FakeTuningHandler:
             self.sim.jump_to_goal()
         return True
 
-    def set_feedforward_single_servo(self, servo_id, first, second=0):
-        self.feedforward[servo_id] = (first, second)
-        self.feedforward_writes.append((servo_id, first, second))
-        if servo_id == self.joint:
-            self.sim.ff1 = first
-        return True
-
-    def set_feedforward(self, servo_ids=None):
-        for servo_id in servo_ids or self.servos:
-            self.set_feedforward_single_servo(servo_id, self.servos[servo_id].ff1)
-        return True
-
-    def read_feedforward(self, servo_ids=None):
-        if self.fail_reads:
-            return None
-        return {servo_id: self.feedforward[servo_id] for servo_id in servo_ids or self.servos}
-
 
 class FakeTuningRobot(FakeRobot):
 
-    def __init__(self, angles, joint, sim, resonance_by_pose=None, move_time=None, ff1=0):
+    def __init__(self, angles, joint, sim, resonance_by_pose=None, move_time=None):
         """
         :param resonance_by_pose: optional function of the commanded angles giving the resonance_above of the
             simulated servo there, so the knee differs per pose
         :param move_time: ms of the time-based profile of the joint under test, None for the velocity-based profile
-        :param ff1: the yaml feedforward gain of the joint under test
         """
         super().__init__(angles)
         self.joint = joint
         self.sim = sim
         self.resonance_by_pose = resonance_by_pose
         servo = self.servo_config.servos[joint]
-        servo.move_time, servo.ff1 = move_time, ff1
+        servo.move_time = move_time
         self.servo_handler = FakeTuningHandler(self.servo_config, joint, sim)
         self.enabled = False
 
@@ -976,19 +950,19 @@ class FakeTuningRobot(FakeRobot):
     def get_servo_temperatures(self):
         return {servo_id: 30 for servo_id in range(1, 7)}
 
-    def move_servos(self, angles):
-        super().move_servos(angles)
+    def move_servos(self, angles, velocities=None):
+        super().move_servos(angles, velocities)
         self.sim.goal = self.servo_handler.get_servo(self.joint).target_position
         if self.resonance_by_pose is not None:
             self.sim.resonance_above = self.resonance_by_pose(angles)
 
 
 def session_for(joint=3, resonance_above=None, resonance_slope=0.1, settings=None, writers=False,
-                resonance_by_pose=None, load=50000.0, move_time=None, ff1=0, trajectory_time=None):
+                resonance_by_pose=None, load=50000.0, move_time=None, trajectory_time=None):
     pose = parse_pose('elbow_out')
     sim = SimulatedServo(2048, load=load, resonance_above=resonance_above, resonance_slope=resonance_slope,
                          trajectory_time=trajectory_time)
-    robot = FakeTuningRobot(pose, joint, sim, resonance_by_pose, move_time, ff1)
+    robot = FakeTuningRobot(pose, joint, sim, resonance_by_pose, move_time)
     servo = robot.servo_handler.get_servo(joint)
     servo.set_target_position_from_angle(pose[joint], pose)
     sim.position = sim.goal = servo.target_position
@@ -1444,7 +1418,7 @@ class TimeBasedStepTests(unittest.TestCase):
     def session(self, move_time=20, settings=None):
         settings = settings or Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0,
                                         max_factor=1.0, tune_d=False)
-        session, robot, sim, _, _ = session_for(joint=4, load=0.0, settings=settings, move_time=move_time, ff1=100)
+        session, robot, sim, _, _ = session_for(joint=4, load=0.0, settings=settings, move_time=move_time)
         for name, replacement in (('sleep', sim.advance), ('perf_counter', lambda: sim.now)):
             patcher = mock.patch('src.utils.movement.' + name, replacement)
             patcher.start()
@@ -1473,34 +1447,41 @@ class TimeBasedStepTests(unittest.TestCase):
         seen = []
         original = robot.move_servos
 
-        def recording(angles):
+        def recording(angles, velocities=None):
             seen.append(robot.servo_handler.profiles[4])
-            original(angles)
+            original(angles, velocities)
         robot.move_servos = recording
         session.run([parse_pose('elbow_out')])
         self.assertGreater(len(seen), 100)
         self.assertEqual({(20, 0)}, set(seen), 'the steps left (0, 0), the profile is back before the moves')
 
-    def test_the_restore_writes_and_verifies_the_move_time_and_the_feedforward_gain(self):
+    def test_the_restore_writes_and_verifies_the_move_time(self):
         session, robot, sim = self.session()
         handler = robot.servo_handler
         handler.profiles[4] = (0, 0)
-        handler.feedforward[4] = (700, 0)
         self.assertTrue(session.restore())
         self.assertEqual((20, 0), handler.profiles[4])
-        self.assertEqual((100, 0), handler.feedforward[4], 'the yaml gain, the 2nd gain 0')
-        self.assertEqual([(4, 100, 0)], handler.feedforward_writes)
         # a profile that doesn't take is found by the read back; the yaml velocity and acceleration are not it
         handler.set_profile = lambda servo_id, velocity, acceleration: True
         handler.profiles[4] = (300, 100)
         with self.assertLogs(tune_servo_gains.logger, 'ERROR'):
             self.assertFalse(session.restore())
-        del handler.set_profile
-        # nor is a feedforward gain that doesn't take
-        handler.set_feedforward = lambda servo_ids=None: True
-        handler.feedforward[4] = (7, 0)
-        with self.assertLogs(tune_servo_gains.logger, 'ERROR'):
-            self.assertFalse(session.restore())
+
+    def test_the_restore_puts_the_velocity_lead_of_the_servo_back_once_it_was_noted(self):
+        session, robot, sim = self.session()
+        servo = robot.servo_handler.get_servo(4)
+        own = VelocityFeedforward(3.0, 20)
+        servo.velocity_feedforward = own
+        session.restore()
+        self.assertIs(own, servo.velocity_feedforward, 'nothing was noted yet, the restore leaves the servo alone')
+        servo.velocity_feedforward = None
+        session.restore()
+        self.assertIsNone(servo.velocity_feedforward)
+        servo.velocity_feedforward = own
+        session.snapshot()
+        servo.velocity_feedforward = VelocityFeedforward(9.0, 5)
+        self.assertTrue(session.restore())
+        self.assertIs(own, servo.velocity_feedforward)
 
     def test_a_servo_without_move_time_is_unchanged(self):
         session, robot, sim = self.session(move_time=None)
@@ -1801,22 +1782,11 @@ class FeedforwardArithmeticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fit_line([0.2, 0.2, 0.2], [1.0, 2.0, 3.0])
 
-    def test_the_joint_4_numbers_give_the_gain(self):
+    def test_the_joint_4_numbers_give_the_line(self):
         # 18 November 2026, P 780: a lag of 8.0 positions at 145 positions/s and 12.9 at 392, a slope of 20 ms
-        self.assertAlmostEqual(487, feedforward_change(780, 20.0), delta=1)
         fit = fit_line([0.145, 0.392], [8.0, 12.9])
         self.assertAlmostEqual(20, fit.slope, delta=0.5)
         self.assertAlmostEqual(8.0 - 0.145 * fit.slope, fit.friction)
-        self.assertAlmostEqual(487, feedforward_change(780, fit.slope), delta=5)
-
-    def test_a_slope_of_zero_or_less_gives_no_gain_and_the_gain_is_clipped(self):
-        self.assertEqual(0, clip_gain(feedforward_change(780, 0.0), 4000))
-        self.assertEqual(-122, feedforward_change(780, -5.0))
-        self.assertEqual(0, clip_gain(feedforward_change(780, -5.0), 4000))
-        self.assertEqual(6250, feedforward_change(2500, 80.0))
-        self.assertEqual(4000, clip_gain(feedforward_change(2500, 80.0), 4000), 'at --ff-max')
-        self.assertEqual(cfg.MAX_GAIN, clip_gain(100000, cfg.MAX_GAIN))
-        self.assertEqual(900, clip_gain(900, 4000))
 
     def test_the_growth_of_the_lag_over_the_speeds(self):
         stats = [CruiseStatistics(speed, 3.0 + 20.0 * speed, 100, 0.5, 2, 40) for speed in (0.1, 0.2, 0.34)]
@@ -1824,29 +1794,29 @@ class FeedforwardArithmeticTests(unittest.TestCase):
         self.assertAlmostEqual(-1.0, lag_growth(LineFit(3.0, -1.0 / 0.24), stats))
 
     def test_rougher_speeds(self):
-        before = [CruiseStatistics(0.1, 3.0, 100, 0.5, 2, 40), CruiseStatistics(0.2, 4.0, 100, 1.0, 2, 40)]
-        after = [CruiseStatistics(0.1, 3.0, 100, 1.4, 2, 40), CruiseStatistics(0.2, 4.0, 100, 2.5, 2, 40)]
+        before, after = [0.5, 1.0], [1.4, 2.5]
         self.assertEqual([1], rougher_speeds(before, after), 'more than a position more at the second speed only')
         self.assertEqual([], rougher_speeds(before, before))
+        self.assertEqual([0, 1], rougher_speeds(before, after, limit=0.4), 'in the unit of the stds, pwm units too')
+        self.assertEqual([], rougher_speeds([10.0, 12.0], [20.0, 25.0], limit=15.0))
 
 
 class FeedforwardStageTests(unittest.TestCase):
     """the stage on the simulated servo: its lag grows with the speed (the damping of the loop is a back voltage the
-    position error has to pay for) and the feedforward gain takes that part away; joint 4 at P 1000"""
+    position error has to pay for) and the velocity lead takes that part away; joint 4 at P 1000"""
     P = 1000
-    YAML_FF1 = 100
     MOVE_TIME = 20
-    # the lag grows by 128 * damping / (force per pwm) / P seconds per position per second; the gain that takes it
-    # away is P / 32 times that in ms, which doesn't depend on P
-    SLOPE = 1000 * 128 * SIM_DAMPING / SimulatedServo.FORCE_PER_PWM / P
-    FLAT_FF1 = 4000 * SIM_DAMPING / SimulatedServo.FORCE_PER_PWM
+    # pwm per degree/s the simulated servo needs: the damping force per position/s over the force per pwm unit
+    TRUE_K = SIM_DAMPING * 4096 / 360 / SimulatedServo.FORCE_PER_PWM
 
-    def stage(self, ff_scale=1.0, move_time=MOVE_TIME, load=20000.0, reverse=False, **overrides):
+    def stage(self, velocity_feedforward=None, load=20000.0, reverse=False, move_time=MOVE_TIME, **overrides):
+        """the session, robot and simulation of the stage; `velocity_feedforward` is the velocity lead of the servo in
+        the yaml"""
         settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, tune_d=False,
                             ff_degrees=10.0)._replace(**overrides)
         session, robot, sim, _, _ = session_for(joint=4, load=load, settings=settings, move_time=move_time,
-                                                ff1=self.YAML_FF1, trajectory_time=0.01)
-        sim.ff_scale = ff_scale
+                                                trajectory_time=0.01)
+        robot.servo_handler.get_servo(4).velocity_feedforward = velocity_feedforward
         if reverse:  # the positions fall as the angle rises; the pose is at the middle of the range, the same position
             servo = robot.servo_handler.get_servo(4)
             servo.min_position, servo.max_position = servo.max_position, servo.min_position
@@ -1863,52 +1833,87 @@ class FeedforwardStageTests(unittest.TestCase):
             result = session.run_feedforward(parse_pose('elbow_out'))
         return result, out.getvalue()
 
-    def test_the_stage_finds_the_gain_that_makes_the_lag_flat(self):
-        session, robot, sim = self.stage()
-        handler = robot.servo_handler
-        buffer = io.StringIO()
-        session.ff_writer = csv.DictWriter(buffer, fieldnames=FF_SAMPLE_FIELDS)
-        session.ff_writer.writeheader()
-        times, starts = [], []
+    @staticmethod
+    def watch_writes(session, robot):
+        """note, per sweep of the stage, the speed, the coefficient it was given and every write of the sweep: the
+        velocity_feedforward the servo had, the lead it added, its target position and the angles that were written"""
+        servo = robot.servo_handler.get_servo(4)
+        seen = []
         move_servos = robot.move_servos
-
-        def timed(angles):
-            times.append(sim.now)
-            move_servos(angles)
-        robot.move_servos = timed
         sweep = session.feedforward_sweep
 
-        def marked(pose, speed, ff1):
-            starts.append(len(times))
-            return sweep(pose, speed, ff1)
-        session.feedforward_sweep = marked
+        def marked(pose, speed, lead_gain):
+            seen.append({'speed': speed, 'lead_gain': lead_gain, 'writes': []})
+            return sweep(pose, speed, lead_gain)
 
+        def noted(angles, velocities=None):
+            move_servos(angles, velocities)
+            if seen:
+                seen[-1]['writes'].append((servo.velocity_feedforward, servo.lead_positions, servo.target_position,
+                                           np.array(angles)))
+        session.feedforward_sweep = marked
+        robot.move_servos = noted
+        return seen
+
+    def test_without_a_velocity_feedforward_round_1_finds_the_coefficient_and_round_2_leads_with_it_and_is_flat(self):
+        session, robot, sim = self.stage()
+        handler = robot.servo_handler
+        servo = handler.get_servo(4)
+        seen = self.watch_writes(session, robot)
         result, output = self.run_stage(session)
 
-        # at FF1 = 0 the lag grows with the speed, at the recommended gain it doesn't
-        self.assertEqual([0, result.recommended], [r.ff1 for r in result.rounds], 'no correction was needed')
-        self.assertAlmostEqual(self.SLOPE, result.rounds[0].fit.slope, delta=0.1 * self.SLOPE)
-        self.assertAlmostEqual(self.FLAT_FF1, result.recommended, delta=0.08 * self.FLAT_FF1)
-        self.assertLess(abs(result.rounds[1].fit.slope), 0.1 * result.rounds[0].fit.slope)
-        speeds = [s.speed for s in result.rounds[0].statistics]
-        self.assertEqual(sorted(speeds), speeds)
-        self.assertAlmostEqual(10 * 4096 / 360 / 1000, speeds[0], delta=0.005, msg='positions per ms from the goals')
-        self.assertAlmostEqual(30 * 4096 / 360 / 1000, speeds[2], delta=0.01)
-        self.assertGreater(result.rounds[0].statistics[2].lag, result.rounds[0].statistics[0].lag + 2)
-        self.assertLess(result.rounds[1].statistics[2].lag, result.rounds[0].statistics[2].lag)
-        # the part of the lag that doesn't depend on the speed: the friction of the simulation, in positions
-        self.assertAlmostEqual(SimulatedServo.FRICTION / SimulatedServo.FORCE_PER_PWM * 128 / self.P,
-                               result.rounds[0].fit.friction, delta=1.5)
+        off, on = result.rounds
+        fit = off.analysis.fit
+        self.assertEqual((0, 0), (off.lead_gain, off.max_positions))
+        self.assertAlmostEqual(self.TRUE_K, fit.coefficient, delta=0.08 * self.TRUE_K, msg='the lag route')
+        self.assertAlmostEqual(self.TRUE_K, fit.k_pwm, delta=0.12 * self.TRUE_K, msg='the measured pwm route')
+        self.assertAlmostEqual(1.0, fit.ratio, delta=0.15)
+        self.assertEqual(self.P, fit.p)
+        self.assertGreater(fit.intended_change, 2 * FF_LAG_TOLERANCE, 'without a lead the lag grows with the speed')
+        # round 2 leads with the coefficient of round 1, to the 2 decimals of the yaml, and the default clamp
+        self.assertEqual(round(fit.coefficient, 2), on.lead_gain)
+        self.assertEqual(30, on.max_positions)
+        self.assertIn('fitted from the lag', on.origin)
+        self.assertLessEqual(abs(on.analysis.fit.intended_change), FF_LAG_TOLERANCE, 'the lag is flat with the lead')
+        self.assertLess(abs(on.analysis.fit.intended_change), 0.3 * fit.intended_change)
+        self.assertTrue(result.flat)
+        self.assertEqual(on.lead_gain, result.recommended)
+        self.assertAlmostEqual(self.TRUE_K, on.analysis.fit.coefficient, delta=0.08 * self.TRUE_K,
+                               msg='the physics does not change with the lead')
+        speeds = [s.speed for s in on.analysis.statistics]
+        self.assertEqual([10.0, 20.0, 30.0], speeds)
+        self.assertAlmostEqual(self.TRUE_K * 30 * 128 / self.P, on.analysis.statistics[2].lead, delta=1.0)
+        self.assertEqual(0.0, off.analysis.statistics[2].lead)
 
-        # afterwards the servo has its yaml gains again, not the recommended one
-        self.assertEqual((self.YAML_FF1, 0), handler.feedforward[4])
+        # round 1 really ran without a lead (the goals are those of the trajectory), round 2 with it
+        self.assertEqual([0, 0, 0, on.lead_gain, on.lead_gain, on.lead_gain], [s['lead_gain'] for s in seen])
+        self.assertEqual([10.0, 20.0, 30.0] * 2, [s['speed'] for s in seen])
+        reference = FakeRobot(parse_pose('elbow_out')).servo_config.servos[4]
+        for sweep in seen:
+            self.assertGreater(len(sweep['writes']), 300)
+            leads = []
+            for velocity_feedforward, lead, target, angles in sweep['writes']:
+                reference.set_target_position_from_angle(angles[4], angles)
+                if sweep['lead_gain'] == 0:
+                    self.assertIsNone(velocity_feedforward)
+                    self.assertEqual(0, lead)
+                    self.assertEqual(reference.target_position, target)
+                else:
+                    self.assertEqual(VelocityFeedforward(on.lead_gain, 30), velocity_feedforward)
+                    self.assertEqual(reference.target_position + lead, target, 'the lead is all that was added')
+                leads.append(abs(lead))
+            if sweep['lead_gain'] == 0:
+                self.assertEqual(0, max(leads))
+            else:
+                self.assertGreater(max(leads), 0.8 * self.TRUE_K * sweep['speed'] * 128 / self.P)
+                self.assertEqual(0, leads[0], 'the sweep starts at rest')
+                self.assertEqual(0, leads[-1], 'and ends at rest: the end point does not carry a lead')
+
+        # afterwards the servo has its own (no) velocity_feedforward and its yaml gains
+        self.assertIsNone(servo.velocity_feedforward)
         self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
         self.assertEqual((1000, 0, 0), handler.gains[4])
         self.assertEqual(cfg.MAX_PWM, handler.goal_pwm[4])
-        written = [first for _, first, _ in handler.feedforward_writes]
-        self.assertIn(0, written)
-        self.assertIn(result.recommended, written)
-        self.assertEqual(self.YAML_FF1, written[-1])
 
         # only the joint under test moves in the sweeps, within 10 degrees of the pose
         pose = parse_pose('elbow_out')
@@ -1917,35 +1922,216 @@ class FeedforwardStageTests(unittest.TestCase):
         np.testing.assert_allclose(moves[:, others], np.tile(pose[others], (len(moves), 1)))
         self.assertAlmostEqual(np.radians(10), np.abs(moves[:, 4] - pose[4]).max(), places=6)
 
-        # the writes are on the clock without drift, the servo is read several times between two writes
-        first = np.array(times[starts[0]:starts[1]])
-        steps = ff_sweep(10.0, 10.0, 0.01)
-        self.assertEqual(len(steps), len(first))
-        np.testing.assert_allclose(first - first[0], [s.time for s in steps], atol=0.003)
-        rows = list(csv.DictReader(io.StringIO(buffer.getvalue())))
+        # the report
+        self.assertIn('round 1, without a lead', output)
+        self.assertIn('round 2, with a lead of {:g} pwm per degree/s from the coefficient fitted'.format(on.lead_gain),
+                      output)
+        self.assertIn('ratio k_pwm / k_lag', output)
+        self.assertIn('flat (within 1 position)', output)
+        self.assertIn('more than 1 position, the speed dependent part is not taken out', output)
+        self.assertIn('for servo_config.yaml, the coefficient of round 2 (from the coefficient fitted', output)
+        self.assertIn('      pwm_per_degree_per_second: {:.2f}'.format(on.lead_gain), output)
+        self.assertIn('      max_positions: 30', output)
+        self.assertNotIn('makes the joint rougher', output)
+        self.assertNotIn('pid:', output, 'the stage does not set P or D')
+
+    def test_the_stage_numbers_are_those_of_fit_velocity_lead_on_the_csv_it_wrote(self):
+        session, robot, sim = self.stage()
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'tune_joint4_ff.csv')
+            with open(path, 'w', newline='') as csv_file:
+                session.ff_writer = csv.DictWriter(csv_file, fieldnames=FF_SAMPLE_FIELDS)
+                session.ff_writer.writeheader()
+                result, output = self.run_stage(session)
+            with open(path, newline='') as csv_file:
+                rows = list(csv.DictReader(csv_file))
+            groups = fit_velocity_lead.group_rows(fit_velocity_lead.read_rows([path]))
+            from_file = [fit_velocity_lead.analyse_group(key, members) for key, members in groups.items()]
+            code, script_output = self.run_script(path)
+
+        # the columns
         self.assertEqual(list(FF_SAMPLE_FIELDS), list(rows[0].keys()))
+        self.assertEqual(['p', 'lead', 'lead_gain'], list(FF_SAMPLE_FIELDS[-3:]))
+        self.assertEqual(['joint', 'pose', 'speed'], list(FF_SAMPLE_FIELDS[:3]), 'no column between the pose and speed')
+        self.assertNotIn('ff1', FF_SAMPLE_FIELDS)
         self.assertEqual({'4'}, {row['joint'] for row in rows})
-        self.assertEqual({'0', str(result.recommended)}, {row['ff1'] for row in rows})
+        self.assertEqual({str(self.P)}, {row['p'] for row in rows})
         self.assertEqual({'10.0', '20.0', '30.0'}, {row['speed'] for row in rows})
         self.assertEqual({'1', '-1'}, {row['direction'] for row in rows})
         self.assertEqual({'0', '1'}, {row['cruise'] for row in rows})
-        slow = [row for row in rows if row['ff1'] == '0' and row['speed'] == '10.0']
+        off, on = result.rounds
+        gains = {row['lead_gain'] for row in rows}
+        self.assertEqual({'0', '{:g}'.format(on.lead_gain)}, gains)
+        for gain in gains:
+            mine = [row for row in rows if row['lead_gain'] == gain]
+            leads = [int(row['lead']) * int(row['direction']) for row in mine if row['cruise'] == '1']
+            if gain == '0':
+                self.assertEqual({0}, set(int(row['lead']) for row in mine), 'no lead in round 1')
+            else:
+                self.assertGreater(len(set(int(row['lead']) for row in mine)), 5, 'the lead changes with the speed')
+                self.assertGreaterEqual(min(leads), 0, 'in the direction of the move for every cruise sample')
+                self.assertGreater(max(leads), 5)
+        slow = [row for row in rows if row['lead_gain'] == '0' and row['speed'] == '10.0']
+        steps = ff_sweep(10.0, 10.0, 0.01)
         self.assertGreater(len(slow), 3 * len(steps), 'sampled as often as it fits between two writes')
-        times_of_slow = [float(row['time']) for row in slow]
-        self.assertEqual(sorted(times_of_slow), times_of_slow)
+        seconds = [float(row['time']) for row in slow]
+        self.assertEqual(sorted(seconds), seconds)
 
-        # the report
-        self.assertIn('pid: {{p: 1000, i: 0, d: 0, ff1: {}}}'.format(result.recommended), output)
-        self.assertIn('positions/ms', output)
-        self.assertIn('ms per position/ms', output)
-        self.assertIn('the friction', output)
-        self.assertNotIn('rougher', output)
+        # the numbers of the stage are the numbers of fit_velocity_lead on the csv
+        self.assertEqual(2, len(from_file))
+        for stage_round, analysed in zip(result.rounds, from_file):
+            self.assertEqual(stage_round.analysis.statistics, analysed.statistics)
+            self.assertEqual(stage_round.analysis.fit, analysed.fit)
+            self.assertEqual(stage_round.analysis.p, analysed.p)
+            self.assertEqual(stage_round.lead_gain, analysed.key.lead_gain)
+        self.assertEqual(off.analysis.fit.coefficient, from_file[0].fit.coefficient)
+        self.assertEqual(0, code)
+        self.assertEqual(2, script_output.count('pwm_per_degree_per_second: '))
+        for stage_round in result.rounds:
+            fit = stage_round.analysis.fit
+            self.assertIn('{:.2f} pwm per degree/s'.format(fit.k_pwm), script_output)
+            self.assertIn('error = {:.2f} + {:.4f} * speed positions'.format(fit.friction_positions, fit.slope),
+                          script_output)
+        fit = off.analysis.fit  # the stage prints the two fits for the round without a lead
+        self.assertIn('error = {:.2f} + {:.4f} * speed positions'.format(fit.friction_positions, fit.slope), output)
+        self.assertIn('pwm = {:.1f} + {:.3f} * speed'.format(fit.friction_pwm, fit.k_pwm), output)
+        for line in script_output.splitlines():  # every line of the table of a round is in the report of the stage
+            if line.startswith('        ') and line.split()[0] in ('10', '20', '30'):
+                self.assertIn(line, output)
+        self.assertIn('pwm_per_degree_per_second: {:.2f}'.format(off.analysis.fit.coefficient), script_output)
+        self.assertIn('pwm_per_degree_per_second: {:.2f}'.format(result.recommended), output)
 
-    def test_a_servo_mounted_reversed_gets_the_same_gain(self):
+    @staticmethod
+    def run_script(path):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = fit_velocity_lead.main([path])
+        return code, out.getvalue()
+
+    def test_a_velocity_feedforward_on_the_servo_gives_its_coefficient_and_clamp_to_round_2(self):
+        own = VelocityFeedforward(3.7, 25)  # a bit below the 3.9 the simulation needs: the lag is still flat
+        session, robot, sim = self.stage(velocity_feedforward=own)
+        servo = robot.servo_handler.get_servo(4)
+        seen = self.watch_writes(session, robot)
+        result, output = self.run_stage(session)
+
+        off, on = result.rounds
+        self.assertEqual(2, len(result.rounds))
+        self.assertAlmostEqual(self.TRUE_K, off.analysis.fit.coefficient, delta=0.08 * self.TRUE_K)
+        self.assertNotEqual(round(off.analysis.fit.coefficient, 2), 3.7, 'it is not the one that was fitted')
+        self.assertEqual((3.7, 25), (on.lead_gain, on.max_positions))
+        self.assertIn('velocity_feedforward block of servo_config.yaml', on.origin)
+        self.assertTrue(result.flat)
+        self.assertEqual(3.7, result.recommended)
+        self.assertIn('      max_positions: 25', output)
+        self.assertIn('lead of 3.7 pwm per degree/s from the velocity_feedforward block of servo_config.yaml, at most '
+                      '25 positions', output)
+        # round 1 ran without the velocity_feedforward of the servo, round 2 with it, and the servo has it again
+        # afterwards
+        for sweep in seen:
+            for velocity_feedforward, lead, target, angles in sweep['writes']:
+                if sweep['lead_gain'] == 0:
+                    self.assertIsNone(velocity_feedforward)
+                    self.assertEqual(0, lead)
+                else:
+                    self.assertEqual(own, velocity_feedforward)
+        self.assertEqual(3, sum(1 for sweep in seen if sweep['lead_gain'] == 0))
+        self.assertIs(own, servo.velocity_feedforward)
+
+    def test_the_ff_lead_option_wins_over_the_velocity_feedforward_of_the_servo_and_the_fit(self):
+        own = VelocityFeedforward(3.0, 25)
+        session, robot, sim = self.stage(velocity_feedforward=own, ff_lead=3.8, ff_max_positions=22)
+        result, output = self.run_stage(session)
+        off, on = result.rounds
+        self.assertEqual(2, len(result.rounds))
+        self.assertEqual(3.8, on.lead_gain)
+        self.assertEqual(25, on.max_positions, 'the clamp of the velocity_feedforward block of the yaml, there is one')
+        self.assertIn('--ff-lead', on.origin)
+        self.assertIn('from the --ff-lead option', output)
+        self.assertEqual(3.8, result.recommended)
+        self.assertIs(own, robot.servo_handler.get_servo(4).velocity_feedforward)
+
+    def test_a_coefficient_that_is_too_small_is_corrected_once_and_the_corrected_one_is_right(self):
+        session, robot, sim = self.stage(ff_lead=2.0, ff_max_positions=22)
+        result, output = self.run_stage(session)
+        self.assertEqual(3, len(result.rounds), 'without a lead, the coefficient, the corrected coefficient')
+        off, small, corrected = result.rounds
+        self.assertEqual((0, 2.0), (off.lead_gain, small.lead_gain))
+        self.assertEqual((22, 22), (small.max_positions, corrected.max_positions))
+        self.assertGreater(abs(small.analysis.fit.intended_change), FF_LAG_TOLERANCE)
+        # the coefficient in force plus the slope that is left times P / 128, to 2 decimals
+        fit = small.analysis.fit
+        expected = round(2.0 + fit.intended_slope * self.P / 128, 2)
+        self.assertEqual(expected, corrected.lead_gain)
+        self.assertEqual(expected, tune_servo_gains.corrected_coefficient(small))
+        self.assertAlmostEqual(self.TRUE_K, corrected.lead_gain, delta=0.08 * self.TRUE_K)
+        self.assertIn('the correction of round 2', corrected.origin)
+        self.assertLessEqual(abs(corrected.analysis.fit.intended_change), FF_LAG_TOLERANCE)
+        self.assertLess(abs(corrected.analysis.fit.intended_change), abs(small.analysis.fit.intended_change))
+        self.assertTrue(result.flat)
+        self.assertEqual(corrected.lead_gain, result.recommended)
+        self.assertIn('the coefficient should be {:g} instead of 2'.format(corrected.lead_gain), output)
+        self.assertIn('round 3, with the corrected lead of {:g} pwm per degree/s'.format(corrected.lead_gain), output)
+        self.assertIn('      pwm_per_degree_per_second: {:.2f}'.format(corrected.lead_gain), output)
+        self.assertIn('      max_positions: 22', output)
+
+    def test_a_lag_that_stays_not_flat_is_not_corrected_twice_and_the_report_says_so(self):
+        # the stage is told the lag is never flat: the correction of round 2 is measured, a round 3 is not
+        session, robot, sim = self.stage(ff_lead=2.0)
+        with mock.patch.object(tune_servo_gains, 'is_flat', return_value=False):
+            result, output = self.run_stage(session)
+            flat, recommended = result.flat, result.recommended  # both ask is_flat
+        self.assertEqual(3, len(result.rounds), 'never a second correction')
+        first, second = result.lead_rounds
+        self.assertGreater(second.lead_gain, first.lead_gain)
+        self.assertFalse(flat)
+        self.assertEqual(tune_servo_gains.corrected_coefficient(second), recommended)
+        self.assertAlmostEqual(self.TRUE_K, recommended, delta=0.08 * self.TRUE_K)
+        self.assertIn('is NOT flat in round 3', output)
+        self.assertIn('{:g} (not measured)'.format(recommended), output)
+        self.assertEqual(1, output.count('the coefficient should be'), 'one correction')
+
+    def test_a_lead_at_its_clamp_is_not_chased_with_a_larger_coefficient(self):
+        # the clamp of 6 positions cuts the lead at the faster speeds: no coefficient can make the lag flat
+        session, robot, sim = self.stage(ff_max_positions=6)
+        result, output = self.run_stage(session)
+        self.assertEqual(2, len(result.rounds), 'no correction round, it would only chase the clamp')
+        (on,) = result.lead_rounds
+        self.assertTrue(on.clamped)
+        self.assertFalse(result.flat)
+        self.assertGreater(abs(on.analysis.fit.intended_change), FF_LAG_TOLERANCE)
+        self.assertIsNone(result.recommended)
+        self.assertIn('at its clamp of 6 positions', output)
+        self.assertIn('no correction is measured, raise --ff-max-positions', output)
+        self.assertIn('no coefficient to recommend: the lead was at its clamp of 6 positions in round 2', output)
+        self.assertNotIn('velocity_feedforward:', output)
+        self.assertNotIn('the coefficient should be', output)
+
+    def test_a_lag_that_does_not_grow_with_the_speed_gives_no_lead_round(self):
+        session, robot, sim = self.stage()
+        analyse = tune_servo_gains.analyse_group
+
+        def flat_lag(key, rows, *args):
+            found = analyse(key, rows, *args)
+            return dataclasses.replace(found, fit=dataclasses.replace(found.fit, slope=-0.05))
+        with mock.patch.object(tune_servo_gains, 'analyse_group', flat_lag):
+            result, output = self.run_stage(session)
+        self.assertEqual(1, len(result.rounds), 'nothing to verify')
+        self.assertEqual((), result.lead_rounds)
+        self.assertIsNone(result.recommended)
+        self.assertIsNone(robot.servo_handler.get_servo(4).velocity_feedforward)
+        self.assertIn('does not grow with the speed', output)
+        self.assertIn('no lead to recommend', output)
+        self.assertNotIn('velocity_feedforward:', output)
+        # a lead asked for with --ff-lead is measured all the same
+        session, robot, sim = self.stage(ff_lead=1.0)
+        with mock.patch.object(tune_servo_gains, 'analyse_group', flat_lag):
+            result, output = self.run_stage(session)
+        self.assertEqual([0, 1.0], [r.lead_gain for r in result.rounds[:2]])
+
+    def test_a_servo_mounted_reversed_gets_the_same_coefficient_and_a_lead_in_the_direction_of_its_position(self):
         # joint 3 of servo_config.yaml has its positions fall as its angle rises: the lag in positions of a joint that
         # trails its trajectory while the angle goes up is negative, and the stage must still see it grow with speed
-        normal, _, _ = self.stage()
-        reference, _ = self.run_stage(normal)
         session, robot, sim = self.stage(reverse=True)
         servo = robot.servo_handler.get_servo(4)
         self.assertGreater(servo.min_position, servo.max_position)
@@ -1954,80 +2140,74 @@ class FeedforwardStageTests(unittest.TestCase):
         session.ff_writer.writeheader()
         result, output = self.run_stage(session)
         self.assertEqual(-1, position_sign(servo))
-        self.assertEqual([0, result.recommended], [r.ff1 for r in result.rounds])
-        self.assertAlmostEqual(self.SLOPE, result.rounds[0].fit.slope, delta=0.1 * self.SLOPE)
-        self.assertAlmostEqual(self.FLAT_FF1, result.recommended, delta=0.08 * self.FLAT_FF1)
-        self.assertAlmostEqual(reference.recommended, result.recommended, delta=0.03 * reference.recommended)
-        self.assertAlmostEqual(reference.rounds[0].statistics[2].lag, result.rounds[0].statistics[2].lag, delta=0.5)
+        self.assertEqual(2, len(result.rounds))
+        self.assertAlmostEqual(self.TRUE_K, result.rounds[0].analysis.fit.coefficient, delta=0.08 * self.TRUE_K)
+        self.assertTrue(result.flat)
         self.assertNotIn('does not grow', output)
-        # the direction in the csv is the one of the position: the goal rises where it is 1
+        # the direction in the csv is the one of the position: the goal rises where it is 1, and the lead is in it
         rows = [row for row in csv.DictReader(io.StringIO(buffer.getvalue())) if row['cruise'] == '1']
         self.assertTrue(rows)
         steps = 0
         for before, after in zip(rows, rows[1:]):
-            if before['direction'] == after['direction'] and before['speed'] == after['speed'] and                     before['ff1'] == after['ff1']:
+            if before['direction'] == after['direction'] and before['speed'] == after['speed'] and \
+                    before['lead_gain'] == after['lead_gain']:
                 steps += 1
-                self.assertGreaterEqual((int(after['goal']) - int(before['goal'])) * int(after['direction']), 0)
         self.assertGreater(steps, 1000)
+        led = [row for row in rows if row['lead_gain'] != '0']
+        self.assertGreater(max(int(row['lead']) * int(row['direction']) for row in led), 5)
+        self.assertGreaterEqual(min(int(row['lead']) * int(row['direction']) for row in led), 0)
 
-    def test_a_first_gain_that_leaves_a_slope_is_corrected_once(self):
-        # the servo applies 60 % of the feedforward the formula promises: the first gain takes 60 % of the slope
-        session, robot, sim = self.stage(ff_scale=0.6)
-        result, output = self.run_stage(session)
-        self.assertEqual(3, len(result.rounds), 'FF1 = 0, the gain, the corrected gain: never a second correction')
-        first, second, third = result.rounds
-        self.assertEqual(0, first.ff1)
-        self.assertAlmostEqual(self.FLAT_FF1, second.ff1, delta=0.08 * self.FLAT_FF1)
-        remaining = second.fit.slope
-        self.assertAlmostEqual(0.4 * self.SLOPE, remaining, delta=0.15 * self.SLOPE)
-        self.assertEqual(second.ff1 + round(self.P / 32 * remaining), third.ff1)
-        self.assertLess(abs(third.fit.slope), abs(remaining))
-        self.assertEqual(third.ff1, result.recommended)
-        self.assertIn('correcting ff1 from {} to {}'.format(second.ff1, third.ff1), output)
-        self.assertEqual((self.YAML_FF1, 0), robot.servo_handler.feedforward[4])
+    def endings(self):
+        """the three ways a stage can end early, as a function that raises (or has the stage stop) when `when` says"""
+        return {
+            'a stop request': lambda session, handler, sim, when: setattr(session.stop, 'requested', when()),
+            'an abort rule': lambda session, handler, sim, when: setattr(
+                sim, 'temperature', int(AbortLimits().max_temperature) if when() else 30),
+            'ctrl+c': lambda session, handler, sim, when: self.interrupt(when)}
 
-    def test_a_gain_above_the_maximum_is_clipped_and_not_corrected_beyond_it(self):
-        session, robot, sim = self.stage(ff_max=500)
-        result, output = self.run_stage(session)
-        self.assertEqual([0, 500], [r.ff1 for r in result.rounds], 'the correction would stay at 500')
-        self.assertIn('above --ff-max', output)
-        self.assertEqual(500, result.recommended)
+    @staticmethod
+    def interrupt(when):
+        if when():
+            raise KeyboardInterrupt
 
-    def test_a_lag_that_does_not_grow_with_the_speed_gives_gain_0(self):
-        session, robot, sim = self.stage()
-        with mock.patch.object(tune_servo_gains, 'fit_line', return_value=LineFit(friction=2.0, slope=-3.0)):
-            result, output = self.run_stage(session)
-        self.assertEqual([0], [r.ff1 for r in result.rounds], 'nothing to verify')
-        self.assertEqual(0, result.recommended)
-        self.assertIn('does not grow with the speed', output)
-        self.assertIn('ff1: 0}', output)
-        self.assertEqual((self.YAML_FF1, 0), robot.servo_handler.feedforward[4])
+    def test_the_velocity_feedforward_of_the_servo_is_back_whatever_ends_the_stage(self):
+        own = VelocityFeedforward(3.7, 25)
+        expected = {'a stop request': tune_servo_gains.Stop, 'an abort rule': tune_servo_gains.Stop,
+                    'ctrl+c': KeyboardInterrupt}
+        for ending, make in self.endings().items():
+            for where in ('without a lead', 'with a lead'):
+                with self.subTest(ending=ending, where=where):
+                    session, robot, sim = self.stage(velocity_feedforward=own)
+                    handler = robot.servo_handler
+                    servo = handler.get_servo(4)
+                    if where == 'without a lead':
+                        when = lambda: servo.velocity_feedforward is None
+                    else:
+                        when = lambda: servo.velocity_feedforward is not None and servo.velocity_feedforward is not own
+                    handler.before_read = lambda: make(session, handler, sim, when)
+                    with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(expected[ending]):
+                        session.run_feedforward(parse_pose('elbow_out'))
+                    self.assertIs(own, servo.velocity_feedforward,
+                                  'its own velocity_feedforward is back, the lead of the round is gone')
+                    session.stop.requested = False
+                    handler.before_read = None
+                    self.assertTrue(session.restore())
+                    self.assertIs(own, servo.velocity_feedforward)
+                    self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
 
-    def test_an_abort_during_a_sweep_restores_the_gain(self):
+    def test_a_servo_without_a_velocity_feedforward_has_none_again_after_an_abort_in_a_lead_round(self):
         session, robot, sim = self.stage()
         handler = robot.servo_handler
+        servo = handler.get_servo(4)
         warm = int(AbortLimits().max_temperature)
-        # the servo gets too warm once a sweep runs with the recommended gain
         handler.before_read = lambda: setattr(sim, 'temperature',
-                                              warm if handler.feedforward[4][0] not in (0, self.YAML_FF1) else 30)
+                                              warm if servo.velocity_feedforward is not None else 30)
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop) as raised:
             session.run_feedforward(parse_pose('elbow_out'))
         self.assertIn('temperature {}C'.format(warm), str(raised.exception))
-        self.assertEqual((self.YAML_FF1, 0), handler.feedforward[4], 'restored at the abort')
-        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+        self.assertIsNone(servo.velocity_feedforward)
         self.assertEqual(session.pose_goal, sim.goal, 'the goal is back at the pose')
-
-    def test_a_stop_request_during_a_sweep_restores_the_gain_too(self):
-        session, robot, sim = self.stage()
-        handler = robot.servo_handler
-        handler.before_read = lambda: setattr(session.stop, 'requested',
-                                              handler.feedforward[4][0] not in (0, self.YAML_FF1))
-        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop) as raised:
-            session.run_feedforward(parse_pose('elbow_out'))
-        self.assertEqual('interrupted', str(raised.exception))
-        self.assertNotEqual((self.YAML_FF1, 0), handler.feedforward[4], 'main restores in its finally')
-        self.assertTrue(session.restore())
-        self.assertEqual((self.YAML_FF1, 0), handler.feedforward[4])
+        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
 
     def test_a_servo_without_move_time_is_skipped(self):
         session, robot, sim = self.stage(move_time=None)
@@ -2036,7 +2216,6 @@ class FeedforwardStageTests(unittest.TestCase):
         self.assertEqual('servo 4 has no move_time in servo_config.yaml, the feedforward stage needs the time-based '
                          'profile\n', output)
         self.assertEqual([], robot.moves, 'nothing moved')
-        self.assertEqual([], robot.servo_handler.feedforward_writes)
 
     def test_a_refused_sweep_skips_the_stage_before_anything_moves(self):
         pose = parse_pose('elbow_out')
@@ -2051,28 +2230,151 @@ class FeedforwardStageTests(unittest.TestCase):
             self.assertIsNone(result)
             self.assertIn(expected, output)
             self.assertEqual([], robot.moves, 'nothing moved')
-            self.assertEqual([], robot.servo_handler.feedforward_writes)
         session, robot, sim = self.stage()
         self.assertIsNone(feedforward_refusal(robot, 4, pose, session.settings))
 
-    def test_the_report_warns_when_the_feedforward_makes_the_joint_rougher(self):
-        def round_of(ff1, lag_std):
-            statistics = tuple(CruiseStatistics(speed, 3.0 + 20.0 * speed, 100, lag_std, 2, 40)
-                               for speed in (0.1, 0.2, 0.34))
-            return tune_servo_gains.FeedforwardRound(ff1, statistics, LineFit(3.0, 0.5))
 
-        servo = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, p=780, i=0, d=1020)
-        quiet = tune_servo_gains.FeedforwardResult((10.0, 20.0, 30.0), (round_of(0, 0.5), round_of(487, 1.0)))
-        rough = tune_servo_gains.FeedforwardResult((10.0, 20.0, 30.0), (round_of(0, 0.5), round_of(487, 2.0)))
+class FeedforwardJointDefaultsTests(unittest.TestCase):
+    """the sweeps of the stage per joint: slow and small on the belt joints 1 and 2"""
+
+    def test_the_defaults_per_joint(self):
+        settings = Settings()
+        for joint in (1, 2):
+            self.assertEqual(10.0, settings.ff_degrees_of(joint))
+            self.assertEqual((5.0, 10.0, 15.0), settings.ff_speeds_of(joint))
+        for joint in (3, 4, 5, 6):
+            self.assertEqual(15.0, settings.ff_degrees_of(joint))
+            self.assertEqual((10.0, 20.0, 30.0), settings.ff_speeds_of(joint))
+
+    def test_explicit_degrees_and_speeds_override_the_defaults_on_every_joint(self):
+        settings = Settings(ff_degrees=12.0, ff_speeds=(4.0, 8.0, 12.0))
+        for joint in (1, 2, 3, 6):
+            self.assertEqual(12.0, settings.ff_degrees_of(joint))
+            self.assertEqual((4.0, 8.0, 12.0), settings.ff_speeds_of(joint))
+        # one of the two given: the other stays the default of the joint
+        self.assertEqual(10.0, Settings(ff_speeds=(1.0, 2.0, 3.0)).ff_degrees_of(2))
+        self.assertEqual((5.0, 10.0, 15.0), Settings(ff_degrees=12.0).ff_speeds_of(2))
+
+    def refusal(self, joint, settings):
+        pose = parse_pose('elbow_out')
+        sim = SimulatedServo(2048)
+        robot = FakeTuningRobot(pose, joint, sim, move_time=20)
+        return feedforward_refusal(robot, joint, pose, settings)
+
+    def test_the_default_sweeps_of_the_belt_joints_pass_the_planner(self):
+        for joint in (1, 2):
+            self.assertIsNone(self.refusal(joint, Settings()), joint)
+
+    def test_a_speed_above_15_degrees_per_second_is_refused_on_joints_1_and_2_only(self):
+        for joint in (1, 2):
+            reason = self.refusal(joint, Settings(ff_speeds=(10.0, 20.0, 30.0)))
+            self.assertEqual('no feedforward stage, joint {} can not be swept faster than 15 degrees/s (it moves '
+                             'behind a belt), got 20 30'.format(joint), reason)
+            self.assertIsNotNone(self.refusal(joint, Settings(ff_speeds=(5.0, 10.0, 15.1))))
+            self.assertIsNone(self.refusal(joint, Settings(ff_speeds=(5.0, 10.0, 15.0))), 'the top itself is allowed')
+            self.assertIsNone(self.refusal(joint, Settings(ff_degrees=8.0, ff_speeds=(3.0, 6.0, 12.0))))
+        for joint in (3, 4, 5, 6):
+            self.assertIsNone(self.refusal(joint, Settings(ff_speeds=(10.0, 20.0, 30.0))), joint)
+
+
+class FeedforwardReportTests(unittest.TestCase):
+    """the report of the stage from rounds made of rows of the model of fit_velocity_lead_tests: joint 4 at P 1000"""
+    K = 3.9
+
+    @staticmethod
+    def round_of(lead_gain, k=K, max_positions=30, origin='the test', **rows):
+        analysis = fit_velocity_lead.analyse_group(
+            fit_velocity_lead.GroupKey('', 4, lead_gain),
+            as_text(sweep_rows(joint=4, k=k, friction=20.0, p=1000.0, lead_gain=lead_gain, **rows)))
+        return tune_servo_gains.FeedforwardRound(lead_gain, max_positions if lead_gain else 0,
+                                                 origin if lead_gain else '', analysis)
+
+    def report(self, *rounds):
+        servo = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, p=1000, i=0, d=0)
+        result = tune_servo_gains.FeedforwardResult((5.0, 10.0, 15.0), tuple(rounds))
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            tune_servo_gains.print_feedforward(4, servo, quiet)
-        self.assertNotIn('rougher', out.getvalue())
-        self.assertIn('pid: {p: 780, i: 0, d: 1020, ff1: 487}', out.getvalue())
-        self.assertIn('remaining slope at ff1 487: 0.5 ms', out.getvalue())
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            tune_servo_gains.print_feedforward(4, servo, rough)
-        self.assertIn('rougher', out.getvalue())
-        self.assertIn('10, 20, 30 degrees/s', out.getvalue())
+            tune_servo_gains.print_feedforward(4, servo, result)
+        return result, out.getvalue()
+
+    def test_a_flat_lead_is_the_recommendation_with_the_tables_and_the_fits_of_fit_velocity_lead(self):
+        off, on = self.round_of(0), self.round_of(self.K)
+        result, output = self.report(off, on)
+        self.assertTrue(result.flat)
+        self.assertEqual(self.K, result.recommended)
+        self.assertEqual(self.K, result.corrected, 'what is left of the slope is 0')
+        for expected in ('round 1, without a lead:', 'round 2, with a lead of 3.9 pwm per degree/s from the test, at '
+                         'most 30 positions:', 'samples', 'intended', 'err std', 'pwm std',
+                         'pwm = 20.0 + 3.900 * speed', 'error = 2.56 + 0.4992 * speed positions',
+                         'ratio k_pwm / k_lag = 1.00', 'friction part', 'flat (within 1 position)',
+                         'for servo_config.yaml, the coefficient of round 2 (from the test)',
+                         '      max_positions: 30', '      pwm_per_degree_per_second: 3.90',
+                         'at P 1000 the lead is'):
+            self.assertIn(expected, output)
+        self.assertEqual(1, output.count('ratio k_pwm / k_lag'), 'the two fits are for the round without a lead')
+        self.assertEqual(1, output.count('from the measured pwm'))
+        self.assertIn('more than 1 position, the speed dependent part is not taken out', output, 'round 1 is not flat')
+        self.assertNotIn('NOT flat', output)
+        self.assertIn('does not make the joint rougher', output)
+        self.assertNotIn('makes the joint rougher', output)
+
+    def test_a_lead_that_leaves_the_lag_not_flat_says_so_and_gives_the_corrected_value(self):
+        off, small = self.round_of(0), self.round_of(1.9)
+        result, output = self.report(off, small)
+        self.assertFalse(result.flat)
+        self.assertEqual(3.9, result.corrected, '1.9 plus the slope that is left, 2.0 pwm per degree/s')
+        self.assertEqual(3.9, result.recommended)
+        self.assertIn('NOT flat in round 2: it changes by', output)
+        self.assertIn('the coefficient would be 3.9 (not measured)', output)
+        self.assertIn('      pwm_per_degree_per_second: 3.90', output)
+        self.assertNotIn('flat (within 1 position)\nfor servo', output)
+        # a lead that is too large is corrected down, and never below 0
+        big = self.round_of(9.0)
+        self.assertAlmostEqual(self.K, tune_servo_gains.corrected_coefficient(big), places=2)
+        # a joint that needs no drive that grows with the speed (a negative slope) gets 0, never a negative lead
+        self.assertEqual(0.0, tune_servo_gains.corrected_coefficient(self.round_of(1.0, k=-2.0)))
+
+    def test_without_a_round_with_a_lead_there_is_nothing_to_recommend(self):
+        result, output = self.report(self.round_of(0))
+        self.assertIsNone(result.recommended)
+        self.assertIsNone(result.corrected)
+        self.assertFalse(result.flat)
+        self.assertIn('no lead to recommend', output)
+        self.assertNotIn('velocity_feedforward:', output)
+
+    def test_the_report_warns_when_the_lead_makes_the_joint_rougher(self):
+        off = self.round_of(0)
+        quiet = self.round_of(self.K, jitter=0.5)
+        rough = self.round_of(self.K, jitter=2.0)
+        _, output = self.report(off, quiet)
+        self.assertNotIn('makes the joint rougher', output)
+        _, output = self.report(off, rough)
+        # the error std grew by 2 positions, the pwm std by 2 pwm units, which is below the drive of a position (7.81)
+        self.assertIn('warning: in round 2 the std of the error grew by more than 1 position at 5, 10, 15 degrees/s, '
+                      'the lead makes the joint rougher', output)
+        self.assertIn('round 2: the std of the pwm is at most 7.81 pwm units above round 1 at every speed', output)
+        very_rough = self.round_of(self.K, jitter=10.0)
+        _, output = self.report(off, very_rough)
+        self.assertIn('the std of the pwm grew by more than 7.81 pwm units at 5, 10, 15 degrees/s', output)
+
+    def test_a_lead_at_its_clamp_is_pointed_out(self):
+        # the lead at 15 degrees/s is 3.9 * 15 * 128 / 1000 = 7.5 positions
+        result, output = self.report(self.round_of(0), self.round_of(self.K, max_positions=7))
+        self.assertIn('the lead is at its clamp of 7 positions at the fast speeds', output)
+        self.assertTrue(result.flat)
+        self.assertEqual(self.K, result.recommended, 'flat is flat')
+        result, output = self.report(self.round_of(0), self.round_of(self.K, max_positions=30))
+        self.assertNotIn('at its clamp', output)
+        self.assertFalse(self.round_of(self.K, max_positions=30).clamped)
+        self.assertFalse(self.round_of(0).clamped, 'a round without a lead has no clamp')
+
+    def test_a_clamped_lead_that_is_not_flat_gives_no_recommendation(self):
+        # a lead of 1.9 where 3.9 is needed is 3.65 positions at 15 degrees/s: at the clamp of 3 and not flat
+        result, output = self.report(self.round_of(0), self.round_of(1.9, max_positions=3))
+        self.assertTrue(result.lead_rounds[0].clamped)
+        self.assertFalse(result.flat)
+        self.assertIsNone(result.recommended)
+        self.assertIn('no coefficient to recommend: the lead was at its clamp of 3 positions in round 2', output)
+        self.assertNotIn('velocity_feedforward:', output)
 
 
 class StreamSweepTests(unittest.TestCase):
@@ -2089,6 +2391,8 @@ class StreamSweepTests(unittest.TestCase):
         stalled_writes, stalled_reads = stalled_writes or {}, stalled_reads or {}
         now = [0.0]
         written, sent, sleeps, reads_of_step = [], [], [], {}
+        self.velocities = []  # what every write was given as the velocities of the joints
+        servo = mock.Mock(target_position=2048, compensation_positions=0, lead_positions=0)
 
         def clock():
             return now[0]
@@ -2097,9 +2401,11 @@ class StreamSweepTests(unittest.TestCase):
             sleeps.append(seconds)
             now[0] += seconds
 
-        def move_servos(angles):
+        def move_servos(angles, velocities=None):
             written.append(now[0])
             sent.append(angles[0])
+            self.velocities.append(None if velocities is None else np.array(velocities))
+            servo.lead_positions = 100 + len(written)  # a lead that changes with every write
             now[0] += stalled_writes.get(len(written) - 1, 0.0)
 
         def read(goal, time_written):
@@ -2109,14 +2415,33 @@ class StreamSweepTests(unittest.TestCase):
 
         robot = mock.Mock()
         robot.move_servos.side_effect = move_servos
-        servo = mock.Mock(target_position=2048, compensation_positions=0)
         steps_of_sweep = [SweepStep(index * self.DT, 0.0, 1, False) for index in range(steps)]
         angles = np.tile(np.arange(steps, dtype=np.float64)[:, np.newaxis], (1, 7))
         recorded = []
         reason = stream_sweep(robot, servo, steps_of_sweep, angles, read, lambda time_written: None, recorded,
                               clock, sleep)
         self.assertIsNone(reason)
+        self.angles = angles
         return written, sent, sleeps, recorded
+
+    def test_every_step_is_written_with_its_velocities_and_the_lead_of_every_write_is_noted(self):
+        written, sent, sleeps, recorded = self.stream(steps=40)
+        expected = step_velocities(self.angles, self.DT)
+        self.assertEqual(40, len(self.velocities))
+        for step, (given, wanted) in enumerate(zip(self.velocities, expected)):
+            np.testing.assert_allclose(given, wanted, err_msg='step {}'.format(step))
+        # the angle of the test grows by 1 rad per step: 100 rad/s inside, nothing at the first and the last step
+        np.testing.assert_allclose(self.velocities[0], 0.0)
+        np.testing.assert_allclose(self.velocities[-1], 0.0)
+        np.testing.assert_allclose(self.velocities[20], 100.0)
+        # every sample carries the lead that its step's write added, which is not that of the other steps
+        by_step = {}
+        for sample in recorded:
+            by_step.setdefault(sample.step.time, set()).add(sample.lead)
+        self.assertEqual(40, len(by_step))
+        for index, time_of_step in enumerate(sorted(by_step)):
+            self.assertEqual({101 + index}, by_step[time_of_step])
+        self.assertEqual(3 * 40, len(recorded))
 
     def test_without_a_stall_the_steps_follow_the_clock_and_the_servo_is_read_between_them(self):
         written, sent, sleeps, recorded = self.stream()
@@ -2185,9 +2510,9 @@ class PositionSignTests(unittest.TestCase):
 class FeedforwardOptionTests(unittest.TestCase):
     """main with the options of the stage, with a session that only records what it is asked to do"""
 
-    def run_main(self, argv, move_time=20, stop_in_run=False):
+    def run_main(self, argv, move_time=20, stop_in_run=False, joint=4):
         sim = SimulatedServo(2048)
-        robot = FakeTuningRobot(parse_pose('elbow_out'), 4, sim, move_time=move_time)
+        robot = FakeTuningRobot(parse_pose('elbow_out'), joint, sim, move_time=move_time)
         calls = []
         swing_writers, settings_seen = [], []
 
@@ -2223,7 +2548,7 @@ class FeedforwardOptionTests(unittest.TestCase):
                 mock.patch.object(tune_servo_gains, 'CombinedRobot', FakeTuningRobot), \
                 mock.patch.object(tune_servo_gains, 'TuningSession', RecordingSession), \
                 mock.patch.object(tune_servo_gains, 'finish') as finish, contextlib.redirect_stdout(out):
-            code = tune_servo_gains.main(['--joint', '4', '--yes', '--pose', 'elbow_out', '--output-dir',
+            code = tune_servo_gains.main(['--joint', str(joint), '--yes', '--pose', 'elbow_out', '--output-dir',
                                           directory] + argv)
             files = sorted(os.listdir(directory))
         self.recorded = (calls, finish, [name.split('_', 4)[-1] for name in files], robot)
@@ -2232,9 +2557,12 @@ class FeedforwardOptionTests(unittest.TestCase):
         return code, out.getvalue()
 
     def test_the_defaults(self):
-        self.assertEqual((10.0, 20.0, 30.0), Settings().ff_speeds)
-        self.assertEqual(15.0, Settings().ff_degrees)
-        self.assertEqual(4000, Settings().ff_max)
+        settings = Settings()
+        self.assertIsNone(settings.ff_speeds, 'per joint')
+        self.assertIsNone(settings.ff_degrees, 'per joint')
+        self.assertIsNone(settings.ff_lead)
+        self.assertEqual(30, settings.ff_max_positions)
+        self.assertFalse(hasattr(settings, 'ff_max'), 'the old --ff-max is gone')
 
     def test_without_the_options_the_stage_does_not_run(self):
         code, output = self.run_main([])
@@ -2254,13 +2582,55 @@ class FeedforwardOptionTests(unittest.TestCase):
 
     def test_ff_only_skips_the_p_and_d_stages(self):
         code, output = self.run_main(['--ff-only', '--ff-degrees', '12', '--ff-speeds', '5', '10', '15',
-                                      '--ff-max', '3000'])
+                                      '--ff-lead', '4.2', '--ff-max-positions', '20'])
         calls, finish, files, robot = self.recorded
         self.assertEqual(0, code)
         self.assertEqual([('session', False, False, True), ('ff', [90, 90, 0, 0, 0, 0]), 'restore'], calls)
         self.assertEqual(['ff.csv'], files)
         self.assertTrue(robot.enabled)
-        self.assertIn('sweeps of 12 degrees either way at 5 10 15 degrees/s, ff1 up to 3000', output)
+        self.assertIn('sweeps of 12 degrees either way at 5 10 15 degrees/s, first without a lead, then with a '
+                      'coefficient of 4.2 pwm per degree/s', output)
+        (settings,) = self.settings
+        self.assertEqual((12.0, (5.0, 10.0, 15.0), 4.2, 20),
+                         (settings.ff_degrees, settings.ff_speeds, settings.ff_lead, settings.ff_max_positions))
+
+    def test_without_the_options_the_sweeps_are_those_of_the_joint_and_the_lead_is_fitted(self):
+        code, output = self.run_main(['--ff-only'])
+        (settings,) = self.settings
+        self.assertEqual(0, code)
+        self.assertEqual((None, None, None, 30),
+                         (settings.ff_degrees, settings.ff_speeds, settings.ff_lead, settings.ff_max_positions))
+        self.assertIn('sweeps of 15 degrees either way at 10 20 30 degrees/s, first without a lead, then with the '
+                      'coefficient fitted in the first round', output)
+
+    def test_a_belt_joint_defaults_to_small_and_slow_sweeps_and_is_refused_above_15_degrees_per_second(self):
+        for joint in (1, 2):
+            code, output = self.run_main(['--ff-only'], joint=joint)
+            self.assertEqual(0, code, joint)
+            self.assertIn('sweeps of 10 degrees either way at 5 10 15 degrees/s', output)
+            code, output = self.run_main(['--ff-only', '--ff-speeds', '10', '20', '30'], joint=joint)
+            self.assertEqual(1, code, joint)
+            self.assertIn('joint {} can not be swept faster than 15 degrees/s'.format(joint), output)
+            self.assertFalse(self.recorded[3].enabled, 'refused before the servos are enabled')
+            self.assertEqual([], self.recorded[0])
+            self.assertEqual([], self.recorded[2])
+            # with --ff the P and D stages still run and the stage is left out
+            code, output = self.run_main(['--ff', '--ff-speeds', '10', '20', '30'], joint=joint)
+            self.assertEqual(0, code)
+            self.assertEqual([('session', True, True, False), ('run', 1), 'restore'], self.recorded[0])
+        code, output = self.run_main(['--ff-only', '--ff-speeds', '10', '20', '30'], joint=3)
+        self.assertEqual(0, code, 'joint 3 may be swept at 30 degrees/s')
+
+    def test_the_old_ff_max_is_refused_and_not_taken_for_the_abbreviation_of_ff_max_positions(self):
+        code, output = self.run_main(['--ff-only', '--ff-max', '4000'])
+        self.assertEqual(1, code)
+        self.assertIn('--ff-max is gone: the stage measures the velocity lead of the PC', output)
+        self.assertIn('--ff-max-positions', output)
+        self.assertEqual([], self.recorded[0])
+        self.assertFalse(self.recorded[3].enabled)
+        code, output = self.run_main(['--ff-only', '--ff-max-positions', '12'])
+        self.assertEqual(0, code)
+        self.assertEqual(12, self.settings[0].ff_max_positions)
 
     def test_the_stage_does_not_start_after_a_p_and_d_run_that_stopped(self):
         code, output = self.run_main(['--ff'], stop_in_run=True)
@@ -2292,8 +2662,9 @@ class FeedforwardOptionTests(unittest.TestCase):
             raise AssertionError('the robot was touched')
 
         for argv in (['--ff-speeds', '10', '20'], ['--ff-speeds', '10'], ['--ff-speeds', '10', '10', '20'],
-                     ['--ff-speeds', '0', '10', '20'], ['--ff-degrees', '0'], ['--ff-max', str(cfg.MAX_GAIN + 1)],
-                     ['--ff-max', '-1']):
+                     ['--ff-speeds', '0', '10', '20'], ['--ff-speeds', '5', '10', 'nan'], ['--ff-degrees', '0'],
+                     ['--ff-lead', '0'], ['--ff-lead', '-2'], ['--ff-lead', 'nan'], ['--ff-lead', 'inf'],
+                     ['--ff-max-positions', '0'], ['--ff-max-positions', '-3'], ['--ff-max', '4000']):
             out = io.StringIO()
             with mock.patch.object(tune_servo_gains, 'get_robot', no_robot), contextlib.redirect_stdout(out):
                 self.assertEqual(1, tune_servo_gains.main(['--joint', '4', '--ff-only'] + argv), argv)
@@ -2623,9 +2994,9 @@ class SwingStageTests(unittest.TestCase):
         times, starts = [], []
         move_servos = robot.move_servos
 
-        def timed(angles):
+        def timed(angles, velocities=None):
             times.append(sim.now)
-            move_servos(angles)
+            move_servos(angles, velocities)
         robot.move_servos = timed
         sweep = session.swing_sweep
 
@@ -2644,7 +3015,6 @@ class SwingStageTests(unittest.TestCase):
         self.assertEqual(self.YAML, handler.gains[4])
         self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
         self.assertEqual(cfg.MAX_PWM, handler.goal_pwm[4])
-        self.assertEqual((0, 0), handler.feedforward[4])
 
         # only the joint under test moves in the sweeps, within 10 degrees of the pose
         pose = parse_pose('elbow_out')
@@ -2670,6 +3040,9 @@ class SwingStageTests(unittest.TestCase):
         self.assertEqual({'0', '1'}, {row['cruise'] for row in rows})
         self.assertEqual({'0', '1', '2', '3', '4'}, {row['leg'] for row in rows})
         self.assertEqual({'0', '1', '2', '3'}, {row['setting'] for row in rows})
+        self.assertEqual('lead', list(SWING_SAMPLE_FIELDS)[-1])
+        self.assertEqual({'0'}, {row['lead'] for row in rows},
+                         'a servo without a velocity_feedforward block gets no lead')
         for setting, (p, d) in enumerate(self.DEFAULT_SETTINGS):
             mine = [row for row in rows if row['setting'] == str(setting)]
             self.assertEqual({(str(p), str(d))}, {(row['p'], row['d']) for row in mine})
@@ -2685,6 +3058,20 @@ class SwingStageTests(unittest.TestCase):
         self.assertIn('how much a repeat differs', output)
         self.assertIn('the yaml P 1000 is fine', output)
         self.assertNotIn('pid:', output, 'the script recommends, it does not write the yaml')
+
+    def test_a_servo_with_a_velocity_feedforward_runs_the_sweeps_with_its_lead_and_the_csv_has_it(self):
+        session, robot, sim, buffer = self.stage(swing_p=(800,))
+        servo = robot.servo_handler.get_servo(4)
+        servo.velocity_feedforward = VelocityFeedforward(3.9, 25)
+        self.run_stage(session)
+        rows = self.rows_of(buffer)
+        leads = [int(row['lead']) * int(row['direction']) for row in rows if row['cruise'] == '1']
+        # the angle of joint 4 rises with its position: at 10 degrees/s the lead is 3.9 * 10 * 128 / 1000 = 5 positions
+        self.assertAlmostEqual(5.0, float(np.median(leads)), delta=1.0)
+        self.assertGreaterEqual(min(leads), 0)
+        self.assertEqual(0, int(rows[0]['lead']), 'the sweep starts at rest')
+        self.assertEqual(0, int(rows[-1]['lead']), 'and ends at rest')
+        self.assertIsNotNone(servo.velocity_feedforward, 'the swing stage never takes it away')
 
     def test_the_direction_in_the_csv_is_that_of_the_angle_even_for_a_servo_mounted_reversed(self):
         for reverse in (False, True):

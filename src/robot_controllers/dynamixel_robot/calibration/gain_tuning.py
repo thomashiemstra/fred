@@ -1,8 +1,9 @@
 """
 The arithmetic of calibration/tune_servo_gains.py: the size of a test step, the metrics of a step response and of a
 rest period, the acceptance criteria that mark the knee of a gain sweep, the live abort rules, and the choice of the
-gains from the trials, and the feedforward stage: the sweep of the joint, the statistics of its cruise parts, the line
-fit of the lag against the speed and the gain it gives, and the binning of a slow sweep by the angle of the joint that
+gains from the trials, and the feedforward stage (the velocity lead of the PC): the sweep of the joint, the statistics
+of its cruise parts and the line fit of the lag against the speed (the fits of the stage itself are in
+calibration/fit_velocity_lead.py), and the binning of a slow sweep by the angle of the joint that
 calibration/record_load_sweep.py uses, and the swing stage: the size and the frequency of the oscillation of the lag
 during the cruise of a sweep per direction of the angle, the spread between two runs and the choice of P from them.
 Pure functions on lists of samples, nothing here talks to the robot.
@@ -481,8 +482,9 @@ def choose_d(results: Sequence[tuple[int, bool, float, int, float, float]], pwm_
 FF_RAMP = 0.2  # seconds a leg of the sweep takes to ramp its speed up from rest, and to ramp it down again
 FF_CRUISE_HOLD = 0.15  # seconds at the full speed before a step counts as cruise
 MIN_CRUISE_SAMPLES = 3  # per direction, fewer than this and the statistics of a sweep are not made
-FF_LAG_TOLERANCE = 1.0  # positions the lag may change between the slowest and the fastest speed before a correction
-FF_ROUGHNESS = 1.0  # positions the std of the lag may grow with the feedforward before it is a warning
+FF_LAG_TOLERANCE = 1.0  # positions the lag behind the intended trajectory may change between the slowest and the
+#                         fastest speed before the coefficient of the lead is corrected
+FF_ROUGHNESS = 1.0  # positions the std of the lag may grow with the lead before it is a warning
 
 
 class SweepStep(NamedTuple):
@@ -612,8 +614,7 @@ def cruise_statistics(samples: Sequence[SweepSample], minimum: int = MIN_CRUISE_
         pwms.append(pwm.mean())
         lag_stds.append(lag.std())
         pwm_stds.append(pwm.std())
-        # the slope of the goal against the time within the legs, pooled, in positions per millisecond: the unit of
-        # the servo's feedforward gain
+        # the slope of the goal against the time within the legs, pooled, in positions per millisecond
         covariance = variance = 0.0
         for leg in legs.values():
             times = np.array([r.time for r in leg])
@@ -648,24 +649,14 @@ def lag_growth(fit: LineFit, statistics: Sequence[CruiseStatistics]) -> float:
     return fit.slope * (max(speeds) - min(speeds))
 
 
-def feedforward_change(p: int, slope: float) -> int:
+def rougher_speeds(before: Sequence[float], after: Sequence[float], limit: float = FF_ROUGHNESS) -> list[int]:
     """
-    the feedforward gain that takes the part of the lag that grows with the speed away: the servo adds FF1 / 4 times
-    the trajectory velocity in positions per millisecond to the output of the position controller, whose proportional
-    term is P / 128 times the error, so a lag growing by `slope` milliseconds per position per millisecond needs
-    FF1 = 4 * P / 128 * slope = P / 32 * slope. Negative for a slope below 0.
+    the indexes of the speeds where a std grew by more than the limit
+    :param before: the std at every speed without the velocity lead, in positions or in pwm units
+    :param after: the std at the same speeds with it, in the same unit as `before`
+    :param limit: in that unit; FF_ROUGHNESS is for positions
     """
-    return round(p / 32.0 * slope)
-
-
-def clip_gain(value: int, maximum: int) -> int:
-    return max(0, min(maximum, value))
-
-
-def rougher_speeds(before: Sequence[CruiseStatistics], after: Sequence[CruiseStatistics],
-                   limit: float = FF_ROUGHNESS) -> list[int]:
-    """the indexes of the speeds where the std of the lag grew by more than the limit"""
-    return [i for i, (b, a) in enumerate(zip(before, after)) if a.lag_std - b.lag_std > limit]
+    return [i for i, (b, a) in enumerate(zip(before, after)) if a - b > limit]
 
 
 # the load sweep: the cruise samples of a slow sweep binned by the angle of the joint

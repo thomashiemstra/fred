@@ -39,17 +39,37 @@ at their yaml gains throughout.
 A run that stops keeps the D gains swept at every pose so far: the grid goes D by D, every pose at a D before the
 next D, so the summary can still recommend from them.
 
-The feedforward stage (--ff after the P and D tuning, --ff-only for the stage alone) sets the velocity feedforward
-gain FF1 of a joint with the time-based profile (a servo with a move_time in servo_config.yaml) at its yaml gains, at
-the first pose only. The servo adds FF1 / 4 times the velocity of its trajectory in positions per millisecond to the
-output of the position controller, so the lag behind the trajectory, which grows with the speed because the motor's
-back voltage has to come from P times the error, can be taken away. The joint sweeps +-15 degrees (--ff-degrees) at
-three speeds (--ff-speeds, degrees per second) with FF1 = 0, in legs that ramp up over 0.2 s, cruise and ramp down;
-the lag of the cruise parts, averaged over both directions so gravity cancels, is fitted against the speed, and
-FF1 = P / 32 times the slope of the fit (at most --ff-max). That gain is written, measured again and corrected
-once when the lag still changes by more than a position over the speeds. The report has a table, the friction part
-of the lag, the slope before and after and the yaml line; the samples go to tune_joint<N>_<time>_ff.csv. The servo
-has its yaml feedforward gain again afterwards.
+The feedforward stage (--ff after the P and D tuning, --ff-only for the stage alone) measures and verifies the
+velocity lead of a joint with the time-based profile (a servo with a move_time in servo_config.yaml) at its yaml
+gains, at the first pose only. The servos run a P-only position loop, pwm = P / 128 * (goal - present), and a turning
+motor needs a drive in proportion to its speed (its back voltage), so a moving joint trails its trajectory by an
+error that grows with the speed. The PC sends every goal ahead of the planned path by exactly that error (the
+`velocity_feedforward` block of a servo in servo_config.yaml, VelocityFeedforward: lead in positions = coefficient *
+velocity * 128 / P, the coefficient in pwm units per degree/s of the joint).
+The joint sweeps +-15 degrees (--ff-degrees) at three speeds (--ff-speeds, degrees per second, 10 20 30), in
+legs that ramp up over 0.2 s, cruise and ramp down; joints 1 and 2 sit behind 3:1 belts and sweep +-10 degrees at 5 10
+15 by default and are refused above 15 degrees/s. The rounds:
+  1. without a lead on the joint (the `velocity_feedforward` of its servo is set aside): the drive and the lag of the
+     cruise parts against the speed give the coefficient the joint needs, by two routes (the measured pwm, and the lag
+     times P / 128; their ratio is 1 when the factor 128 holds);
+  2. with a lead. The coefficient is --ff-lead when given, else the one of the `velocity_feedforward` block of the
+     servo in the yaml, else the one fitted in round 1 (from the lag); the clamp is the max_positions of the yaml
+     `velocity_feedforward`, else --ff-max-positions (30). The lag behind the INTENDED trajectory (the trajectory of
+     the servo less the lead the PC added) should now be the same at every speed, only the friction part is left;
+  3. when it still changes by more than a position over the speeds, the coefficient is corrected by the slope that is
+     left (times P / 128) and measured once more (never a second correction). Not when the lead was at its clamp at a
+     speed: no coefficient flattens the lag then, the report says to raise the clamp and recommends nothing.
+The report has per round the table of fit_velocity_lead.py (per speed the cruise samples, pwm, the error behind the
+trajectory of the servo, the lead, the lag behind the intended trajectory and the std of the error and of the pwm), the
+two fits of round 1, the change of the intended lag over the speeds per round, whether a lead made the joint rougher
+(a std of the error more than a position, or of the pwm more than the drive of a position, above round 1), and the
+`velocity_feedforward` block for servo_config.yaml: the coefficient of the last round when its lag is flat, else it
+says that it is not and gives the corrected value. The numbers are those of fit_velocity_lead.py, which the stage
+runs on the very rows it writes to tune_joint<N>_<time>_ff.csv (joint, pose, speed, time, direction of the
+position, cruise, goal as written with the lead in it, position, position_trajectory, velocity, velocity_trajectory,
+pwm, current, voltage, temperature, and the P of the servo (p), the lead the PC added to the goal in positions (lead)
+and the coefficient in force (lead_gain, 0 without a lead)). Running that script on the csv gives the
+same numbers. The servo has its own `velocity_feedforward` again afterwards, whatever ends the stage.
 
 The swing stage (--swing after the other stages, --swing-only for the stage alone, not together with --ff-only; with
 --ff and --swing the order is the step tests, the feedforward stage, the swing stage) looks for what the step tests
@@ -71,22 +91,25 @@ yaml D (the worse of the runs when it was run twice), the yaml P is fine when th
 that the belt or the mechanics should be checked before P is lowered further (a slack belt lowers the resonance and
 raises the swing). The script recommends, it doesn't change servo_config.yaml. The samples of every setting go to
 tune_joint<N>_<time>_swing.csv, with the direction of the angle (the direction of the _ff.csv is that of the
-position). The servo has its yaml gains again afterwards.
+position) and the lead the PC added to the goal in positions (lead; the sweep runs with the velocity lead of the yaml
+like every planned move, 0 without a `velocity_feedforward` block; the statistics of the stage don't use it, they are
+of the band of 3 to 15 Hz of the lag behind the trajectory of the servo). The servo has its yaml gains again afterwards.
 
 Safety: every sample is checked live (temperature, voltage drop, position jumps, divergence from the trajectory,
-oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the feedforward gain, the
-profile and the goal pwm at once, after which the run waits 1.5 s for the arm to move back to the pose. Oscillation is the position going both
-up and down by more than max(6 positions, 3 times the baseline ripple) within the last second, never counting the
-0.5 s after a goal write; a creep in one direction is the joint settling. Divergence, oscillation and a pwm stuck at the clamp count as the knee; a temperature, voltage or position
-jump abort says nothing about the gains and ends the run. Ctrl+C stops after the current read and restores the same;
-a second Ctrl+C kills the script, the trial gains and profile then stay in the servo until the robot is started
-again, a goal pwm clamp until the servos are rebooted or power cycled (the script resets a leftover clamp when it
-starts). Nothing is written to the eeprom. Every write is read back, the sync write of a gain isn't acknowledged by
+oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the profile, the goal pwm and
+the velocity lead of the servo (its own `velocity_feedforward`) at once, after which the run waits 1.5 s for the arm to
+move back to the pose. Oscillation is the position going both up and down by more than max(6 positions, 3 times the
+baseline ripple) within the last second, never counting the 0.5 s after a goal write; a creep in one direction is the
+joint settling. Divergence, oscillation and a pwm stuck at the clamp count as the knee; a temperature, voltage or
+position jump abort says nothing about the gains and ends the run. Ctrl+C stops after the current read and restores
+the same; a second Ctrl+C kills the script, the trial gains and profile then stay in the servo until the robot is
+started again, a goal pwm clamp until the servos are rebooted or power cycled (the script resets a leftover clamp when
+it starts). Nothing is written to the eeprom. Every write is read back, the sync write of a gain isn't acknowledged by
 the servo.
 
 The run ends with the arm lowered to record_static_load.REST_POSE (where it lies on the table, a bit over 1 cm higher) at
 0.3 rad/s and the torque switched off there, before the plot. The prompt to support the arm and press enter is the
-fallback: when the servo under test doesn't have its yaml gains and feedforward gain again, when a servo has a hardware error or the status
+fallback: when the servo under test doesn't have its yaml gains again, when a servo has a hardware error or the status
 can't be read, when the planner refuses the move, and on Ctrl+C during it (the servos then hold where they are).
 
 Output: a csv with every sample (<output-dir>/tune_joint<N>_<time>_samples.csv), a csv with the metrics of every
@@ -117,17 +140,20 @@ from src.global_objects import get_robot
 from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.calibration import record_static_load
+from src.robot_controllers.dynamixel_robot.calibration.fit_velocity_lead import (
+    GroupKey, GroupResult, SpeedStatistics, analyse_group, fit_lines, intended_line, is_flat, lead_meaning,
+    speed_statistics, table, yaml_block)
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    FF_LAG_TOLERANCE, SWING_BAND, SWING_MIN_LEG, AbortLimits, Criteria, CruiseStatistics, LineFit, RestMetrics, Sample,
-    StepMetrics, SweepSample, SweepStep, SwingPair, SwingSample, SwingStatistics, TrackingMetrics, abort_reason,
-    choose_d, choose_p, clip_gain, cruise_statistics, d_ladder, environmental_abort, evaluate, feedforward_change,
-    ff_sweep, fit_line, lag_growth, p_values, p_values_down, pwm_clamp, pwm_per_position, recommended_swing_p,
-    rest_metrics, rougher_speeds, round_gain, step_metrics, step_size, swing_change, swing_changed, swing_legs,
-    swing_spread, swing_statistics, tracking_metrics)
+    FF_LAG_TOLERANCE, FF_ROUGHNESS, SWING_BAND, SWING_MIN_LEG, AbortLimits, Criteria, RestMetrics, Sample, StepMetrics,
+    SweepStep, SwingPair, SwingSample, SwingStatistics, TrackingMetrics, abort_reason, choose_d, choose_p, d_ladder,
+    environmental_abort, evaluate, ff_sweep, p_values, p_values_down, pwm_clamp, pwm_per_position,
+    recommended_swing_p, rest_metrics, rougher_speeds, round_gain, step_metrics, step_size, swing_change,
+    swing_changed, swing_legs, swing_spread, swing_statistics, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 from src.robot_controllers.dynamixel_robot.servo import Servo
-from src.utils.movement import PlannedMove, check_move, plan_move_to_angles
+from src.utils.movement import PlannedMove, check_move, plan_move_to_angles, step_velocities
 from src.utils.movement_exception import MovementException
 
 logger = logging.getLogger(__name__)
@@ -160,14 +186,18 @@ TRIAL_FIELDS = ('joint', 'pose', 'pose_degrees', 'trial', 'phase', 'p', 'i', 'd'
                 'max_settle_time', 'min_rise_time', 'error_up', 'error_down', 'pwm_per_position', 'track_peak',
                 'track_rms', 'track_final', 'following_error', 'flags', 'warnings', 'aborted', 'temperature_start',
                 'temperature_end', 'voltage_min', 'sample_period')
-FF_SAMPLE_FIELDS = ('joint', 'pose', 'ff1', 'speed', 'time', 'direction', 'cruise', 'goal', 'position',
+# p is the P gain of the servo, lead the positions the velocity lead added to the goal (signed like the position, the
+# goal column has it in it), lead_gain the coefficient of the lead in force in pwm per degree/s, 0 for none: the
+# columns fit_velocity_lead.py reads
+FF_SAMPLE_FIELDS = ('joint', 'pose', 'speed', 'time', 'direction', 'cruise', 'goal', 'position',
                     'position_trajectory', 'velocity', 'velocity_trajectory', 'pwm', 'current', 'voltage',
-                    'temperature')
+                    'temperature', 'p', 'lead', 'lead_gain')
 # setting is the number of the setting of the stage in the order they ran, direction is that of the ANGLE of the joint
 # (1 rising, -1 falling; the direction of the _ff.csv is that of the position, which is the other way round for a servo
-# mounted reversed), speed the degrees per second of the cruise
+# mounted reversed), speed the degrees per second of the cruise, lead the positions the velocity lead added to the goal
 SWING_SAMPLE_FIELDS = ('joint', 'pose', 'setting', 'p', 'd', 'speed', 'time', 'direction', 'cruise', 'leg', 'goal',
-                       'position', 'position_trajectory', 'velocity', 'pwm', 'current', 'voltage', 'temperature')
+                       'position', 'position_trajectory', 'velocity', 'pwm', 'current', 'voltage', 'temperature',
+                       'lead')
 STEP_SEQUENCE = ((1, 1), (-1, 0), (-1, -1), (1, 0))  # (direction, offset in steps from the pose) of a repeat
 MOVE_HOLD = 1.0  # seconds of hold after a streamed move
 GAIN_SETTLE = 0.3  # seconds between a gain write and the first measurement
@@ -200,7 +230,14 @@ P_SWEEP_PHASES = ('p', 'p_down')  # the phases of the trials of a P sweep, as op
 Knee = tuple[int, int, float]
 DEFAULT_FF_DEGREES = 15.0  # the sweep of the feedforward stage goes this far either side of the pose
 DEFAULT_FF_SPEEDS = (10.0, 20.0, 30.0)  # degrees per second of the cruise of the sweeps
-DEFAULT_FF_MAX = 4000  # the largest feedforward gain the stage sets
+# joints 1 and 2 sit behind 3:1 belts and are not moved fast: smaller and slower sweeps, as run on 18 November 2026
+BELT_FF_DEGREES = 10.0
+BELT_FF_SPEEDS = (5.0, 10.0, 15.0)
+BELT_JOINTS = (1, 2)
+# the fastest sweep of the stage per joint in degrees per second, as TOP_SPEEDS of record_load_sweep.py is for its own
+FF_TOP_SPEEDS: dict[int, float] = {joint: max(BELT_FF_SPEEDS) for joint in BELT_JOINTS}
+DEFAULT_FF_MAX_POSITIONS = 30  # the clamp of the lead of a servo without a `velocity_feedforward` block, in positions
+LEAD_COEFFICIENT_STEP = 0.005  # pwm per degree/s: a correction smaller than this is not measured again
 MIN_FF_SPEEDS = 3  # the line of the lag against the speed needs more than two points to be a line
 FF_REST = 0.5  # seconds at rest after a sweep before the next one
 DEFAULT_SWING_DEGREES = 10.0  # the sweep of the swing stage goes this far either side of the pose
@@ -261,9 +298,11 @@ class Settings(NamedTuple):
     speed: float = 0.5  # rad/s of the planned moves
     clamp: int | None = None  # goal pwm clamp, None computes it from the holding pwm
     max_step: int | None = None  # the largest step of the trials in positions, None takes MAX_STEP of the joint
-    ff_degrees: float = DEFAULT_FF_DEGREES  # the feedforward sweep goes this far either side of the pose
-    ff_speeds: tuple[float, ...] = DEFAULT_FF_SPEEDS  # degrees per second of its cruise
-    ff_max: int = DEFAULT_FF_MAX  # the largest feedforward gain the stage sets
+    ff_degrees: float | None = None  # the feedforward sweep goes this far either side of the pose, None: per joint
+    ff_speeds: tuple[float, ...] | None = None  # degrees per second of its cruise, None: per joint
+    ff_lead: float | None = None  # coefficient of the lead of the second round in pwm per degree/s, None: see the stage
+    # the clamp of the lead when the servo has no `velocity_feedforward` block
+    ff_max_positions: int = DEFAULT_FF_MAX_POSITIONS
     swing_degrees: float = DEFAULT_SWING_DEGREES  # the swing sweep goes this far either side of the pose
     swing_speed: float = DEFAULT_SWING_SPEED  # degrees per second of its cruise
     swing_p: tuple[int, ...] | None = None  # P gains besides the yaml one, None: DEFAULT_SWING_P_FACTORS times it
@@ -271,6 +310,20 @@ class Settings(NamedTuple):
     swing_limit: float = DEFAULT_SWING_LIMIT  # positions, the swing a P may have in either direction
     criteria: Criteria = Criteria()
     limits: AbortLimits = AbortLimits()
+
+    def ff_degrees_of(self, joint: int) -> float:
+        """the degrees either side of the pose the feedforward sweep of the joint goes: --ff-degrees when given, else
+        the default of the joint (smaller on the belt joints 1 and 2)"""
+        if self.ff_degrees is not None:
+            return self.ff_degrees
+        return BELT_FF_DEGREES if joint in BELT_JOINTS else DEFAULT_FF_DEGREES
+
+    def ff_speeds_of(self, joint: int) -> tuple[float, ...]:
+        """the cruise speeds in degrees per second of the feedforward sweeps of the joint: --ff-speeds when given, else
+        the default of the joint (slower on the belt joints 1 and 2)"""
+        if self.ff_speeds is not None:
+            return self.ff_speeds
+        return BELT_FF_SPEEDS if joint in BELT_JOINTS else DEFAULT_FF_SPEEDS
 
 
 class TrialResult(NamedTuple):
@@ -338,21 +391,57 @@ class PoseResult(NamedTuple):
 
 
 class FeedforwardRound(NamedTuple):
-    """the sweeps at every speed with one feedforward gain"""
-    ff1: int
-    statistics: tuple[CruiseStatistics, ...]  # in the order of Settings.ff_speeds
-    fit: LineFit
+    """the sweeps at every speed with one velocity lead, analysed by fit_velocity_lead.py on the rows of the csv"""
+    lead_gain: float  # the coefficient of the lead in pwm per degree/s, 0 for a round without a lead
+    max_positions: int  # the clamp of the lead in positions, 0 for a round without a lead
+    origin: str  # where the coefficient came from, empty for the round without a lead
+    analysis: GroupResult
+
+    @property
+    def clamped(self) -> bool:
+        """whether the lead reached its clamp (within half a position) at some speed: the lag can't be flat there,
+        whatever the coefficient"""
+        return self.max_positions > 0 and any(abs(s.lead) >= self.max_positions - 0.5
+                                              for s in self.analysis.statistics)
 
 
 class FeedforwardResult(NamedTuple):
-    """the rounds of the feedforward stage in the order they ran: FF1 = 0, the recommended gain, and the corrected
-    gain when the first one left a slope; the last round is the recommendation"""
+    """the rounds of the feedforward stage in the order they ran: without a lead, with a lead, and with the corrected
+    coefficient when the lag behind the intended trajectory was not flat in the second. No lead round when the lag of
+    the first does not grow with the speed and no coefficient was given."""
     speeds: tuple[float, ...]  # degrees per second
     rounds: tuple[FeedforwardRound, ...]
 
     @property
-    def recommended(self) -> int:
-        return self.rounds[-1].ff1
+    def lead_rounds(self) -> tuple[FeedforwardRound, ...]:
+        return self.rounds[1:]
+
+    @property
+    def flat(self) -> bool:
+        """whether the lag behind the intended trajectory of the last round with a lead is flat over the speeds"""
+        fit = self.lead_rounds[-1].analysis.fit if self.lead_rounds else None
+        return fit is not None and is_flat(fit)
+
+    @property
+    def corrected(self) -> float | None:
+        """
+        the coefficient that the slope of the lag behind the intended trajectory in the last round with a lead says
+        would have made it flat (the one in force plus what the lead lacks, not below 0, to 2 decimals), None without
+        a round with a lead
+        """
+        return corrected_coefficient(self.lead_rounds[-1]) if self.lead_rounds else None
+
+    @property
+    def recommended(self) -> float | None:
+        """the coefficient for the yaml: the one of the last round with a lead when its lag is flat, else the
+        corrected one; None without a round with a lead, and when the lead was at its clamp in the last round
+        without being flat (no coefficient can say anything then, the clamp has to be raised)"""
+        if not self.lead_rounds:
+            return None
+        last = self.lead_rounds[-1]
+        if self.flat:
+            return last.lead_gain
+        return None if last.clamped else self.corrected
 
 
 class SwingRun(NamedTuple):
@@ -426,7 +515,7 @@ def angles_of_sweep(pose: np.ndarray, joint: int, steps: Sequence[SweepStep]) ->
 def sweep_angles(pose: np.ndarray, joint: int, speed: float, settings: Settings) -> tuple[list[SweepStep], np.ndarray]:
     """the steps of the sweep of the feedforward stage of the joint at the speed (degrees per second) and the angles
     of every step"""
-    steps = ff_sweep(settings.ff_degrees, speed, 1.0 / global_constants.steps_per_second)
+    steps = ff_sweep(settings.ff_degrees_of(joint), speed, 1.0 / global_constants.steps_per_second)
     return steps, angles_of_sweep(pose, joint, steps)
 
 
@@ -444,6 +533,7 @@ class StreamedSample(NamedTuple):
     step: SweepStep  # its direction is the direction of the ANGLE, see position_sign
     goal: int  # the goal position of the servo as the host wrote it, with the compensation in it
     compensation: int  # the positions the static compensation of the servo added to that goal
+    lead: int = 0  # the positions the velocity lead of the servo added to that goal, signed like the position
 
 
 def stream_sweep(robot: DynamixelRobotController | CombinedRobot, servo: Servo, steps: Sequence[SweepStep],
@@ -457,8 +547,10 @@ def stream_sweep(robot: DynamixelRobotController | CombinedRobot, servo: Servo, 
     still fits before that. When a step is late (a stall of the PC, a read that took too long) the next ones do not
     hurry to catch up, the loop carries on from there with one period between the steps, so the sweep ends later and
     no step is skipped. The loop knows nothing about the tuning or the recording: what a read does and what ends the
-    sweep early are the callables.
-    :param servo: the servo under test, its target position and compensation are noted with every sample
+    sweep early are the callables. The velocity of every step (movement.step_velocities, zero at the first and the last
+    step) goes to the robot with it, so the servos run with the velocity lead of servo_config.yaml as they do in every
+    planned move; a servo without a `velocity_feedforward` block is not affected.
+    :param servo: the servo under test, its target position, compensation and lead are noted with every sample
     :param steps: the steps of the sweep, made for a period of 1 / global_constants.steps_per_second
     :param angles: the angles of the robot at every step, as sweep_angles makes them
     :param read: read(goal, written) reads the servo and returns the sample; goal is the goal position the step
@@ -469,18 +561,20 @@ def stream_sweep(robot: DynamixelRobotController | CombinedRobot, servo: Servo, 
     :return: the reason check gave when it stopped the sweep, None when every step was streamed
     """
     dt = 1.0 / global_constants.steps_per_second
+    velocities = step_velocities(angles, dt)
     next_step = clock()
-    for step, step_angles in zip(steps, angles):
-        robot.move_servos(step_angles)
+    for step, step_angles, step_velocity in zip(steps, angles, velocities):
+        robot.move_servos(step_angles, step_velocity)
         written = clock()
         goal = servo.target_position
         compensation = servo.compensation_positions
+        lead = servo.lead_positions
         next_step += dt
         while True:
             began = clock()
             sample = read(goal, written)
             now = clock()
-            recorded.append(StreamedSample(sample, step, goal, compensation))
+            recorded.append(StreamedSample(sample, step, goal, compensation, lead))
             reason = check(written)
             if reason is not None:
                 return reason
@@ -509,28 +603,84 @@ def position_sign(servo: Servo) -> int:
 def feedforward_refusal(robot: DynamixelRobotController | CombinedRobot, joint: int, pose: np.ndarray,
                         settings: Settings) -> str | None:
     """
-    why the feedforward stage can't run at the pose, or None; nothing moves. The servo needs the time-based profile,
-    the pose with the joint moved by the sweep either way has to pass the pose check of the script, every sweep has
-    to pass the planner's check_move (joint speed, range and workspace of every step), and has to cruise in both
-    directions or there is nothing to measure.
+    why the feedforward stage can't run at the pose, or None; nothing moves. The servo needs the time-based profile, the
+    speeds may not be above FF_TOP_SPEEDS of the joint (the belt joints 1 and 2), the pose with the joint moved by the
+    sweep either way has to pass the pose check of the script, every sweep has to pass the planner's check_move (joint
+    speed, range and workspace of every step), and has to cruise in both directions or there is nothing to measure.
     """
     servo = robot.servo_handler.get_servo(joint)
     if not servo.time_based:
         return 'servo {} has no move_time in servo_config.yaml, the feedforward stage needs the time-based profile' \
             .format(joint)
-    refused = pose_is_accepted(pose, robot, joint, np.radians(settings.ff_degrees))
+    degrees, speeds = settings.ff_degrees_of(joint), settings.ff_speeds_of(joint)
+    top = FF_TOP_SPEEDS.get(joint)
+    too_fast = [speed for speed in speeds if top is not None and speed > top]
+    if top is not None and too_fast:
+        return 'no feedforward stage, joint {} can not be swept faster than {:g} degrees/s (it moves behind a belt), ' \
+               'got {}'.format(joint, top, ' '.join('{:g}'.format(speed) for speed in too_fast))
+    refused = pose_is_accepted(pose, robot, joint, np.radians(degrees))
     if refused is not None:
         return 'no feedforward stage at pose {} degrees: {}'.format(pose_degrees(pose), refused)
-    for speed in settings.ff_speeds:
+    for speed in speeds:
         steps, angles = sweep_angles(pose, joint, speed, settings)
         try:
             check_move(PlannedMove('sweep at {} degrees/s'.format(speed), angles, steps[-1].time), robot)
         except MovementException as e:
             return 'no feedforward stage, the sweep at {} degrees/s is refused: {}'.format(speed, e)
         if {step.direction for step in steps if step.cruise} != {1, -1}:
-            return 'no feedforward stage, a sweep of {} degrees either way at {} degrees/s has no cruise part going ' \
-                   'both ways: use a larger --ff-degrees or lower --ff-speeds'.format(settings.ff_degrees, speed)
+            return 'no feedforward stage, a sweep of {:g} degrees either way at {:g} degrees/s has no cruise part ' \
+                   'going both ways: use a larger --ff-degrees or lower --ff-speeds'.format(degrees, speed)
     return None
+
+
+def corrected_coefficient(feedforward_round: FeedforwardRound) -> float:
+    """
+    the coefficient of the lead that would have made the lag behind the intended trajectory of the round flat: the one
+    in force plus the slope the lag still has over the speeds times P / 128 (pwm per degree/s the lead lacks, negative
+    when it was too large), not below 0, to 2 decimals as it goes into the yaml. The coefficient in force when the
+    round has no fit.
+    """
+    fit = feedforward_round.analysis.fit
+    leftover = fit.leftover_coefficient if fit is not None else None
+    if leftover is None:
+        return feedforward_round.lead_gain
+    return round(max(0.0, feedforward_round.lead_gain + leftover), 2)
+
+
+def lead_choice(settings: Settings, feedforward: VelocityFeedforward | None, fitted: float) -> tuple[float, int, str]:
+    """
+    the coefficient, the clamp and where the coefficient came from for the first round with a lead, in the order: the
+    --ff-lead option, the `velocity_feedforward` block of the servo in the yaml, the coefficient fitted in the round
+    without a lead (rounded to the 2 decimals of the yaml). The clamp is the one of the yaml `velocity_feedforward` when
+    the servo has one, else --ff-max-positions.
+    :param feedforward: the `velocity_feedforward` of the servo in the yaml, None for a servo without one
+    :param fitted: the coefficient fitted from the lag in the round without a lead
+    """
+    max_positions = feedforward.max_positions if feedforward is not None else settings.ff_max_positions
+    if settings.ff_lead is not None:
+        return settings.ff_lead, max_positions, 'the --ff-lead option'
+    if feedforward is not None:
+        return (feedforward.pwm_per_degree_per_second, max_positions,
+                'the velocity_feedforward block of servo_config.yaml')
+    return round(fitted, 2), max_positions, 'the coefficient fitted from the lag in the round without a lead'
+
+
+def ff_sample_row(joint: int, pose_index: int, speed: float, p: int, lead_gain: float, sign: int,
+                  streamed: StreamedSample) -> dict[str, str]:
+    """
+    the csv row (FF_SAMPLE_FIELDS, every value as text, as it is in the file) of a sample of a feedforward sweep; the
+    stage writes it to the csv and gives the very same rows to fit_velocity_lead.py for its numbers
+    :param sign: position_sign of the servo, the direction in the csv is the one of the position
+    """
+    sample = streamed.sample
+    values: dict[str, object] = {
+        'joint': joint, 'pose': pose_index, 'speed': speed, 'time': '{:.4f}'.format(sample.time),
+        'direction': streamed.step.direction * sign, 'cruise': int(streamed.step.cruise), 'goal': sample.goal,
+        'position': sample.position, 'position_trajectory': sample.position_trajectory, 'velocity': sample.velocity,
+        'velocity_trajectory': sample.velocity_trajectory, 'pwm': sample.pwm, 'current': sample.current,
+        'voltage': sample.voltage, 'temperature': sample.temperature, 'p': p, 'lead': streamed.lead,
+        'lead_gain': '{:g}'.format(lead_gain)}
+    return {name: str(values[name]) for name in FF_SAMPLE_FIELDS}
 
 
 def swing_refusal(robot: DynamixelRobotController | CombinedRobot, joint: int, pose: np.ndarray,
@@ -710,6 +860,9 @@ class TuningSession:
         self.sleep = sleep
         self.stop = stop if stop is not None else StopFlag()
         self.original_goal_pwm: int | None = None
+        # the velocity lead the servo has from the yaml, which the feedforward stage sets aside for its first round
+        self.original_velocity_feedforward: VelocityFeedforward | None = None
+        self.velocity_feedforward_saved = False
         self.results: list[PoseResult] = []  # the poses done so far, kept when the run stops early
         self.pose_index = 0
         self.trial_index = 0
@@ -724,7 +877,10 @@ class TuningSession:
     # the robot
 
     def snapshot(self) -> None:
-        """check the servo has the yaml gains and no goal pwm clamp left by an earlier run"""
+        """note the velocity lead (`velocity_feedforward`) the servo has, which restore puts back, and check that the
+        servo has the yaml gains and no goal pwm clamp left by an earlier run"""
+        self.original_velocity_feedforward = self.servo.velocity_feedforward
+        self.velocity_feedforward_saved = True
         goal_pwm = self.handler.read_goal_pwm([self.joint])
         if goal_pwm is None:
             raise Stop('failed to read the goal pwm of servo {}'.format(self.joint))
@@ -771,44 +927,33 @@ class TuningSession:
             raise Stop('the gain write to servo {} failed'.format(self.joint))
         self.current_p, self.current_d = p, d
 
-    def verify_feedforward(self, first: int, second: int = 0) -> bool:
-        feedforward = self.handler.read_feedforward([self.joint])
-        if feedforward is None:
-            raise Stop('failed to read the feedforward gains of servo {}'.format(self.joint))
-        if feedforward[self.joint] != (first, second):
-            logger.error('servo %d has feedforward gains %s, not the written %s', self.joint,
-                         feedforward[self.joint], (first, second))
-            return False
-        return True
-
-    def write_feedforward(self, first: int) -> None:
-        """write the feedforward gain to the servo under test and read it back"""
-        if not self.handler.set_feedforward_single_servo(self.joint, first) or not self.verify_feedforward(first):
-            self.restore()
-            raise Stop('the feedforward write to servo {} failed'.format(self.joint))
+    def restore_velocity_feedforward(self) -> None:
+        """put the velocity lead (`velocity_feedforward`) the servo had from the yaml back, whatever the feedforward
+        stage left there; nothing before snapshot has noted it"""
+        if self.velocity_feedforward_saved:
+            self.servo.velocity_feedforward = self.original_velocity_feedforward
 
     def restore(self) -> bool:
-        """put the yaml gains, the yaml feedforward gain, the yaml profile (the time and the acceleration time of a
-        servo with a move_time) and the original goal pwm back, returns False when a read-back doesn't match"""
+        """put the yaml gains, the yaml profile (the time and the acceleration time of a servo with a move_time), the
+        original goal pwm and the velocity lead of the servo back, returns False when a read-back doesn't match. The
+        lead is only on the PC, so it goes back first and can't be lost to a failed write."""
+        self.restore_velocity_feedforward()
         ok = self.handler.set_pid([self.joint])
-        ok &= self.handler.set_feedforward([self.joint])
         ok &= self.handler.set_profile(self.joint, *self.servo.profile_registers())
         if self.original_goal_pwm is not None:
             ok &= self.handler.set_goal_pwm(self.joint, self.original_goal_pwm)
         self.current_p, self.current_d = self.servo.p, self.servo.d
         gains = self.handler.read_pid([self.joint])
-        feedforward = self.handler.read_feedforward([self.joint])
         profile = self.handler.read_profile([self.joint])
         goal_pwm = self.handler.read_goal_pwm([self.joint])
-        if gains is None or feedforward is None or profile is None or goal_pwm is None:
+        if gains is None or profile is None or goal_pwm is None:
             logger.error('could not read servo %d back after restoring its settings', self.joint)
             return False
-        expected = ((self.servo.p, self.servo.i, self.servo.d), (self.servo.ff1, 0), self.servo.profile_registers(),
-                    self.original_goal_pwm)
-        actual = (gains[self.joint], feedforward[self.joint], profile[self.joint],
+        expected = ((self.servo.p, self.servo.i, self.servo.d), self.servo.profile_registers(), self.original_goal_pwm)
+        actual = (gains[self.joint], profile[self.joint],
                   goal_pwm[self.joint] if self.original_goal_pwm is not None else None)
         if actual != expected:
-            logger.error('servo %d has gains, feedforward gains, profile, goal pwm %s after the restore, expected %s',
+            logger.error('servo %d has gains, profile, goal pwm %s after the restore, expected %s',
                          self.joint, actual, expected)
             return False
         return ok
@@ -1256,17 +1401,10 @@ class TuningSession:
 
     # the feedforward stage
 
-    def write_ff_samples(self, rows: Sequence[SweepSample], ff1: int, speed: float) -> None:
-        if self.ff_writer is None:
-            return
-        for row in rows:
-            s = row.sample
-            self.ff_writer.writerow({'joint': self.joint, 'pose': self.pose_index, 'ff1': ff1, 'speed': speed,
-                                     'time': '{:.4f}'.format(s.time), 'direction': row.direction,
-                                     'cruise': int(row.cruise), 'goal': s.goal, 'position': s.position,
-                                     'position_trajectory': s.position_trajectory, 'velocity': s.velocity,
-                                     'velocity_trajectory': s.velocity_trajectory, 'pwm': s.pwm,
-                                     'current': s.current, 'voltage': s.voltage, 'temperature': s.temperature})
+    def write_ff_samples(self, rows: Sequence[dict[str, str]]) -> None:
+        """write the rows of ff_sample_row to the csv of the stage, if it has one"""
+        if self.ff_writer is not None:
+            self.ff_writer.writerows(rows)
 
     def stream_stage_sweep(self, steps: Sequence[SweepStep], angles: np.ndarray, stage: str,
                            write: Callable[[list[StreamedSample]], None]) -> list[StreamedSample]:
@@ -1303,47 +1441,61 @@ class TuningSession:
             raise Stop('the {} stage was aborted: {}'.format(stage, reason))
         return streamed
 
-    def feedforward_samples(self, streamed: Sequence[StreamedSample]) -> list[SweepSample]:
-        """the samples of a feedforward sweep with the direction of the position, in which the lag is signed"""
-        sign = position_sign(self.servo)
-        return [SweepSample(s.sample, s.step.direction * sign, s.step.cruise, s.step.leg) for s in streamed]
-
-    def feedforward_sweep(self, pose: np.ndarray, speed: float, ff1: int) -> list[SweepSample]:
+    def feedforward_sweep(self, pose: np.ndarray, speed: float, lead_gain: float) -> list[dict[str, str]]:
         """
         stream one sweep of the joint at the speed (degrees per second) against the clock, as move_test does, and
         sample the servo as often as fits between two writes. An abort rule for a streamed move restores the servo
         and stops the stage.
+        :param lead_gain: the coefficient of the velocity lead the servo has now, only for the csv
+        :return: the rows of ff_sample_row of every sample; they are written to the csv whatever ends the sweep
         """
         self.check_servos()
         steps, angles = sweep_angles(pose, self.joint, speed, self.settings)
-        streamed = self.stream_stage_sweep(
-            steps, angles, 'feedforward',
-            lambda rows: self.write_ff_samples(self.feedforward_samples(rows), ff1, speed))
-        return self.feedforward_samples(streamed)
+        sign = position_sign(self.servo)
+        rows: list[dict[str, str]] = []
 
-    def measure_feedforward(self, pose: np.ndarray, ff1: int) -> FeedforwardRound:
-        """write the feedforward gain and sweep at every speed"""
-        self.write_feedforward(ff1)
-        self.sleep(GAIN_SETTLE)
-        statistics: list[CruiseStatistics] = []
-        for speed in self.settings.ff_speeds:
-            recorded = self.feedforward_sweep(pose, speed, ff1)
-            try:
-                statistics.append(cruise_statistics(recorded))
-            except ValueError as e:
-                raise Stop('the sweep at {:g} degrees/s has too few cruise samples: {}'.format(speed, e))
-            s = statistics[-1]
-            print('  ff1 {} at {:g} degrees/s ({:.3f} positions/ms): lag {:.1f} positions, pwm {:.0f}, lag std {:.1f}'
-                  .format(ff1, speed, s.speed, s.lag, s.pwm, s.lag_std))
+        def write(streamed: list[StreamedSample]) -> None:
+            rows[:] = [ff_sample_row(self.joint, self.pose_index, speed, self.servo.p, lead_gain, sign, s)
+                       for s in streamed]
+            self.write_ff_samples(rows)
+        self.stream_stage_sweep(steps, angles, 'feedforward', write)
+        return rows
+
+    def measure_feedforward(self, pose: np.ndarray, feedforward: VelocityFeedforward | None, label: str,
+                            origin: str = '') -> FeedforwardRound:
+        """
+        sweep at every speed with the velocity lead `feedforward` on the servo (None: without one, the servo's own
+        velocity_feedforward is set aside; restore_velocity_feedforward puts it back) and analyse the rows with
+        fit_velocity_lead
+        :param label: what the round is called in the progress lines
+        :param origin: where the coefficient came from, for the report
+        :raises Stop: when a sweep has too few cruise samples or the rows can't be fitted
+        """
+        self.servo.velocity_feedforward = feedforward
+        lead_gain = feedforward.pwm_per_degree_per_second if feedforward is not None else 0.0
+        print('  {}:'.format(label))
+        rows: list[dict[str, str]] = []
+        for speed in self.settings.ff_speeds_of(self.joint):
+            sweep = self.feedforward_sweep(pose, speed, lead_gain)
+            rows.extend(sweep)
+            statistics, notes = speed_statistics(sweep)
+            if not statistics:
+                raise Stop('the sweep at {:g} degrees/s has too few cruise samples: {}'.format(speed, ' '.join(notes)))
+            s = statistics[0]
+            print('    {:g} degrees/s: error {:.1f} positions, lead {:.1f}, lag behind the intended trajectory {:.1f}, '
+                  'pwm {:.0f}, error std {:.1f}'.format(speed, s.error, s.lead, s.intended, s.pwm, s.error_std))
             self.sleep(FF_REST)
-        fit = fit_line([s.speed for s in statistics], [s.lag for s in statistics])
-        return FeedforwardRound(ff1, tuple(statistics), fit)
+        analysis = analyse_group(GroupKey('', self.joint, lead_gain), rows)
+        if analysis.fit is None:
+            raise Stop('the sweeps of {} can not be fitted: {}'.format(label, analysis.problem))
+        max_positions = feedforward.max_positions if feedforward is not None else 0
+        return FeedforwardRound(lead_gain, max_positions, origin, analysis)
 
     def run_feedforward(self, pose: np.ndarray) -> FeedforwardResult | None:
         """
         the feedforward stage at the pose, see the module docstring; None when the stage can't run (the servo is not
-        time-based, a sweep is refused, the planner refuses the pose). The servo has its yaml feedforward gain again
-        afterwards.
+        time-based, a sweep is refused, the planner refuses the pose). The servo has its own velocity
+        lead (`velocity_feedforward`) again afterwards, whatever ends the stage.
         """
         settings = self.settings
         refused = feedforward_refusal(self.robot, self.joint, pose, settings)
@@ -1354,58 +1506,88 @@ class TuningSession:
             self.snapshot()
         self.pose_index = 1
         self.check_servos()
+        speeds = settings.ff_speeds_of(self.joint)
         print('feedforward stage at pose {} degrees: sweeps of {:g} degrees either way at {} degrees/s, yaml p={} '
-              'ff1={}'.format(pose_degrees(pose), settings.ff_degrees, ' '.join('{:g}'.format(s) for s in
-                                                                               settings.ff_speeds),
-                              self.servo.p, self.servo.ff1))
+              'velocity_feedforward={}'.format(pose_degrees(pose), settings.ff_degrees_of(self.joint),
+                                               ' '.join('{:g}'.format(s) for s in speeds), self.servo.p,
+                                               self.servo.velocity_feedforward))
         if not self.move_to_pose(pose):
             print('no feedforward stage: the planner refuses the move to the pose')
             return None
         self.pose_goal = self.servo.target_position
         self.sleep(settings.baseline_rest / 2)
-        p = self.servo.p
-        rounds = [self.measure_feedforward(pose, 0)]
-        slope = rounds[0].fit.slope
-        change = feedforward_change(p, slope)
-        value = clip_gain(change, settings.ff_max)
-        if slope <= 0:
-            print('the lag does not grow with the speed (slope {:.1f} ms), the feedforward gain stays 0'.format(slope))
-        else:
-            if change > value:
-                print('warning: the gain {} that takes the slope away is above --ff-max, using {}'.format(change,
-                                                                                                         value))
-            if value == 0:
-                print('the slope of {:.1f} ms gives a feedforward gain of 0'.format(slope))
-            else:
-                rounds.append(self.measure_feedforward(pose, value))
-                last = rounds[-1]
-                if abs(lag_growth(last.fit, last.statistics)) > FF_LAG_TOLERANCE:
-                    corrected = clip_gain(value + feedforward_change(p, last.fit.slope), settings.ff_max)
-                    print('the lag still changes by {:.1f} positions over the speeds (slope {:.1f} ms): correcting '
-                          'ff1 from {} to {}'.format(lag_growth(last.fit, last.statistics), last.fit.slope, value,
-                                                     corrected))
-                    if corrected != value:
-                        rounds.append(self.measure_feedforward(pose, corrected))
+        rounds: list[FeedforwardRound] = []
+        try:
+            rounds.append(self.measure_feedforward(pose, None, 'round 1, without a lead'))
+            self.run_lead_rounds(pose, rounds)
+        finally:
+            self.restore_velocity_feedforward()
         if not self.restore():
             raise Stop('could not restore the settings of servo {} after the feedforward stage'.format(self.joint))
-        result = FeedforwardResult(tuple(settings.ff_speeds), tuple(rounds))
+        result = FeedforwardResult(tuple(speeds), tuple(rounds))
         print_feedforward(self.joint, self.servo, result)
         return result
 
+    def run_lead_rounds(self, pose: np.ndarray, rounds: list[FeedforwardRound]) -> None:
+        """
+        the rounds with a lead after the round without one, appended to rounds: one with the coefficient of lead_choice
+        and, when the lag behind the intended trajectory still changes by more than FF_LAG_TOLERANCE over the speeds,
+        one with the corrected coefficient (never a second correction). No round when the lag of the first does not
+        grow with the speed and no coefficient was asked for.
+        """
+        settings = self.settings
+        fit = rounds[0].analysis.fit
+        if fit is None:
+            return
+        coefficient, max_positions, origin = lead_choice(settings, self.original_velocity_feedforward, fit.coefficient)
+        if coefficient <= 0:
+            print('the lag does not grow with the speed (the fit gives {:.2f} pwm per degree/s): no lead is '
+                  'measured, --ff-lead tries one'.format(fit.coefficient))
+            return
+        print('lead of {:g} pwm per degree/s from {}, at most {} positions'.format(coefficient, origin, max_positions))
+        rounds.append(self.measure_feedforward(
+            pose, VelocityFeedforward(coefficient, max_positions),
+            'round 2, with a lead of {:g} pwm per degree/s'.format(coefficient), origin))
+        last = rounds[-1]
+        last_fit = last.analysis.fit
+        if last_fit is None or is_flat(last_fit):
+            return
+        if last.clamped:
+            # the lead can't follow a larger coefficient, the lag stays as it is: another round would only chase it
+            print('the lag behind the intended trajectory changes by {:+.2f} positions over the speeds (more than '
+                  '{:g}) while the lead is at its clamp of {} positions: no correction is measured, raise '
+                  '--ff-max-positions (or max_positions of the velocity_feedforward block) and run again'.format(
+                      last_fit.intended_change, FF_LAG_TOLERANCE, last.max_positions))
+            return
+        corrected = corrected_coefficient(last)
+        print('the lag behind the intended trajectory still changes by {:+.2f} positions over the speeds (more than '
+              '{:g}): the coefficient should be {:g} instead of {:g}'.format(
+                  last_fit.intended_change, FF_LAG_TOLERANCE, corrected, last.lead_gain))
+        if corrected <= 0 or abs(corrected - last.lead_gain) < LEAD_COEFFICIENT_STEP:
+            print('that is no change worth measuring again')
+            return
+        rounds.append(self.measure_feedforward(
+            pose, VelocityFeedforward(corrected, max_positions),
+            'round 3, with the corrected lead of {:g} pwm per degree/s'.format(corrected),
+            'the correction of round 2'))
+
     # the swing stage
 
-    def write_swing_samples(self, rows: Sequence[SwingSample], setting: int, p: int, d: int) -> None:
+    def write_swing_samples(self, streamed: Sequence[StreamedSample], setting: int, p: int, d: int) -> None:
+        """write the samples of a swing sweep to the csv of the stage, if it has one; the direction is that of the
+        angle, the lead the positions the velocity lead added to the goal"""
         if self.swing_writer is None:
             return
-        for row in rows:
-            s = row.sample
+        for streamed_sample in streamed:
+            s = streamed_sample.sample
+            step = streamed_sample.step
             self.swing_writer.writerow({'joint': self.joint, 'pose': self.pose_index, 'setting': setting, 'p': p,
                                         'd': d, 'speed': self.settings.swing_speed, 'time': '{:.4f}'.format(s.time),
-                                        'direction': row.direction, 'cruise': int(row.cruise), 'leg': row.leg,
+                                        'direction': step.direction, 'cruise': int(step.cruise), 'leg': step.leg,
                                         'goal': s.goal, 'position': s.position,
                                         'position_trajectory': s.position_trajectory, 'velocity': s.velocity,
                                         'pwm': s.pwm, 'current': s.current, 'voltage': s.voltage,
-                                        'temperature': s.temperature})
+                                        'temperature': s.temperature, 'lead': streamed_sample.lead})
 
     @staticmethod
     def swing_samples(streamed: Sequence[StreamedSample]) -> list[SwingSample]:
@@ -1417,7 +1599,7 @@ class TuningSession:
         written to the csv whatever ends the sweep"""
         steps, angles = swing_sweep_angles(pose, self.joint, self.settings)
         streamed = self.stream_stage_sweep(
-            steps, angles, 'swing', lambda rows: self.write_swing_samples(self.swing_samples(rows), setting, p, d))
+            steps, angles, 'swing', lambda rows: self.write_swing_samples(rows, setting, p, d))
         return self.swing_samples(streamed)
 
     def measure_swing(self, pose: np.ndarray, setting: int, p: int, d: int) -> SwingRun:
@@ -1547,29 +1729,92 @@ def print_summary(joint: int, results: Sequence[PoseResult], servo_p: int, servo
     print('    pid: {{p: {}, i: 0, d: {}}}'.format(p, d))
 
 
+def roughness_lines(servo: Servo, number: int, before: Sequence[SpeedStatistics],
+                    after: Sequence[SpeedStatistics]) -> list[str]:
+    """
+    whether the lead of round `number` made the joint rougher than round 1 (`before`, without a lead): the std of the
+    error behind the trajectory of the servo more than FF_ROUGHNESS positions above it at a speed, and the std of the
+    pwm more than the drive of FF_ROUGHNESS positions at the P of the servo (P / 128 pwm units per position); only the
+    speeds both rounds have are compared
+    """
+    earlier = {s.speed: s for s in before}
+    later = {s.speed: s for s in after}
+    shared = sorted(set(earlier) & set(later))
+    pwm_limit = FF_ROUGHNESS * servo.p * cfg.PWM_PER_POSITION_PER_P
+    lines = []
+    for what, values, limit, unit in (('error', lambda s: s.error_std, FF_ROUGHNESS,
+                                        'position' if FF_ROUGHNESS == 1 else 'positions'),
+                                      ('pwm', lambda s: s.pwm_std, pwm_limit, 'pwm units')):
+        rougher = rougher_speeds([values(earlier[speed]) for speed in shared],
+                                 [values(later[speed]) for speed in shared], limit)
+        if rougher:
+            lines.append('  warning: in round {} the std of the {} grew by more than {:.3g} {} at {} degrees/s, the '
+                         'lead makes the joint rougher'.format(number, what, limit, unit,
+                                                               ', '.join('{:g}'.format(shared[i]) for i in rougher)))
+        else:
+            lines.append('  round {}: the std of the {} is at most {:.3g} {} above round 1 at every speed, the lead '
+                         'does not make the joint rougher'.format(number, what, limit, unit))
+    return lines
+
+
 def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> None:
-    """the table of the feedforward stage, the friction and the slope of the lag, and the yaml line"""
-    print('\nfeedforward of joint {} (yaml p={} d={}):'.format(joint, servo.p, servo.d))
-    print('  {:>6s} {:>10s} {:>12s} {:>8s} {:>7s} {:>8s} {:>7s}'.format('ff1', 'degrees/s', 'positions/ms', 'lag',
-                                                                       'pwm', 'lag std', 'pwm std'))
-    for r in result.rounds:
-        for degrees_per_second, s in zip(result.speeds, r.statistics):
-            print('  {:6d} {:10g} {:12.3f} {:8.1f} {:7.0f} {:8.1f} {:7.1f}'.format(
-                r.ff1, degrees_per_second, s.speed, s.lag, s.pwm, s.lag_std, s.pwm_std))
+    """
+    the report of the feedforward stage, with the tables, fits and texts of fit_velocity_lead.py: per round the table
+    (cruise samples, pwm, the error behind the trajectory of the servo, the lead, the lag behind the intended
+    trajectory, the stds) and the change of the intended lag over the speeds, for the round without a lead the two
+    fits and their ratio, whether a lead made the joint rougher, and the `velocity_feedforward` block for
+    servo_config.yaml
+    """
+    print('\nvelocity lead of joint {} (yaml p={} d={}), at the speeds {} degrees/s:'.format(
+        joint, servo.p, servo.d, ' '.join('{:g}'.format(s) for s in result.speeds)))
     first = result.rounds[0]
-    print('  without feedforward the lag is {:.1f} positions at no speed (a drive of {:.1f} pwm units, the friction) '
-          'and grows by {:.1f} ms per position/ms'.format(first.fit.friction, servo.p / 128 * first.fit.friction,
-                                                          first.fit.slope))
-    last = result.rounds[-1]
-    if len(result.rounds) > 1:
-        print('  remaining slope at ff1 {}: {:.1f} ms (the lag changes by {:.1f} positions over the speeds)'.format(
-            last.ff1, last.fit.slope, lag_growth(last.fit, last.statistics)))
-    rougher = rougher_speeds(first.statistics, last.statistics) if len(result.rounds) > 1 else []
-    if rougher:
-        print('  warning: the std of the lag grew by more than 1 position at {} degrees/s, the feedforward makes the '
-              'joint rougher'.format(', '.join('{:g}'.format(result.speeds[i]) for i in rougher)))
-    print('recommended for servo_config.yaml:')
-    print('    pid: {{p: {}, i: {}, d: {}, ff1: {}}}'.format(servo.p, servo.i, servo.d, result.recommended))
+    for number, r in enumerate(result.rounds, start=1):
+        fit = r.analysis.fit
+        if r.lead_gain:
+            print('round {}, with a lead of {:g} pwm per degree/s from {}, at most {} positions:'.format(
+                number, r.lead_gain, r.origin, r.max_positions))
+        else:
+            print('round {}, without a lead:'.format(number))
+        print(table(r.analysis.statistics))
+        for note in r.analysis.notes:
+            print('  note: ' + note)
+        if fit is None:
+            print('  no fit: {}'.format(r.analysis.problem))
+            continue
+        if not r.lead_gain:
+            print('\n'.join(fit_lines(fit)))
+        print(intended_line(fit))
+        if r.clamped:
+            print('  warning: the lead is at its clamp of {} positions at the fast speeds, the lag can not be flat '
+                  'there: raise max_positions'.format(r.max_positions))
+        if number > 1:
+            for line in roughness_lines(servo, number, first.analysis.statistics, r.analysis.statistics):
+                print(line)
+    if not result.lead_rounds:
+        print('no lead to recommend: the lag does not grow with the speed, or no round with a lead ran')
+        return
+    last = result.lead_rounds[-1]
+    last_fit = last.analysis.fit
+    number = len(result.rounds)
+    coefficient = result.recommended
+    if last.clamped and not result.flat:
+        print('no coefficient to recommend: the lead was at its clamp of {} positions in round {} and the lag behind '
+              'the intended trajectory is not flat, raise --ff-max-positions (or max_positions of the '
+              'velocity_feedforward block) and run again'.format(last.max_positions, number))
+        return
+    if coefficient is None or last_fit is None:
+        print('no lead to recommend: the last round could not be fitted')
+        return
+    if result.flat:
+        print('for servo_config.yaml, the coefficient of round {} (from {}): the lag behind the intended trajectory '
+              'is flat over the speeds, within {:g} position:'.format(number, last.origin, FF_LAG_TOLERANCE))
+    else:
+        print('the lag behind the intended trajectory is NOT flat in round {}: it changes by {:+.2f} positions over '
+              'the speeds, more than {:g}. With the slope that is left taken out the coefficient would be {:g} (not '
+              'measured), for servo_config.yaml to try:'.format(number, last_fit.intended_change, FF_LAG_TOLERANCE,
+                                                               coefficient))
+    print(yaml_block(joint, coefficient, last.max_positions).rstrip('\n'))
+    print('  ' + lead_meaning(coefficient, servo.p))
 
 
 def print_swing(joint: int, servo: Servo, result: SwingResult) -> None:
@@ -1704,18 +1949,30 @@ def main(argv: list[str] | None = None) -> int:
                         help='cm above the table the wrist and gripper tip stay, default WorkSpaceLimits.z_min ({})'
                         .format(WorkSpaceLimits.z_min))
     parser.add_argument('--ff', action='store_true',
-                        help='after the P and D tuning, set the velocity feedforward gain (a servo with a move_time)')
+                        help='after the P and D tuning, measure and verify the velocity lead of the PC (a servo with '
+                             'a move_time)')
     parser.add_argument('--ff-only', action='store_true',
                         help='only the feedforward stage, the P and D stages are skipped')
-    parser.add_argument('--ff-degrees', type=float, default=DEFAULT_FF_DEGREES,
-                        help='the feedforward sweep goes this many degrees either side of the pose (default '
-                             '%(default)s)')
-    parser.add_argument('--ff-speeds', type=float, nargs='+', default=list(DEFAULT_FF_SPEEDS),
+    parser.add_argument('--ff-degrees', type=float, default=None,
+                        help='the feedforward sweep goes this many degrees either side of the pose (default {:g}, '
+                             '{:g} for joints {})'.format(DEFAULT_FF_DEGREES, BELT_FF_DEGREES,
+                                                          ' and '.join(str(j) for j in BELT_JOINTS)))
+    parser.add_argument('--ff-speeds', type=float, nargs='+', default=None,
                         help='three or more cruise speeds of the feedforward sweeps in degrees per second (default '
-                             '{})'.format(' '.join('{:g}'.format(s) for s in DEFAULT_FF_SPEEDS)))
-    parser.add_argument('--ff-max', type=int, default=DEFAULT_FF_MAX,
-                        help='the largest feedforward gain the stage sets, at most {} (default %(default)s)'.format(
-                            cfg.MAX_GAIN))
+                             '{}, {} for joints {}, which are not swept above {:g})'.format(
+                                 ' '.join('{:g}'.format(s) for s in DEFAULT_FF_SPEEDS),
+                                 ' '.join('{:g}'.format(s) for s in BELT_FF_SPEEDS),
+                                 ' and '.join(str(j) for j in BELT_JOINTS), max(BELT_FF_SPEEDS)))
+    parser.add_argument('--ff-lead', type=float, default=None,
+                        help='the coefficient of the lead of the second round in pwm per degree/s, default the '
+                             '`velocity_feedforward` of the servo in servo_config.yaml, else the one fitted in the '
+                             'first round')
+    parser.add_argument('--ff-max-positions', type=int, default=DEFAULT_FF_MAX_POSITIONS,
+                        help='the clamp of the lead in positions for a servo without a `velocity_feedforward` block '
+                             '(default %(default)s)')
+    # an option of an earlier version of the stage: refused by name, argparse would otherwise
+    # take it for the abbreviation of --ff-max-positions and clamp the lead at that many positions
+    parser.add_argument('--ff-max', default=None, help=argparse.SUPPRESS)
     parser.add_argument('--swing', action='store_true',
                         help='after the other stages, measure the swing of the joint while it moves at the yaml gains '
                              'and at other P gains (a servo with a move_time)')
@@ -1753,13 +2010,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.max_step is not None and args.max_step < MIN_STEP:
             raise ValueError('--max-step has to be at least {} positions, the smallest step of a trial'.format(
                 MIN_STEP))
-        if len(set(args.ff_speeds)) < MIN_FF_SPEEDS or any(speed <= 0 for speed in args.ff_speeds):
+        if args.ff_max is not None:
+            raise ValueError('--ff-max is gone: the stage measures the velocity lead of the '
+                             'PC (--ff-max-positions clamps the lead, --ff-lead sets its coefficient)')
+        if args.ff_speeds is not None and (len(set(args.ff_speeds)) < MIN_FF_SPEEDS
+                                           or any(not 0 < speed < math.inf for speed in args.ff_speeds)):
             raise ValueError('--ff-speeds needs at least {} different positive speeds in degrees per second'.format(
                 MIN_FF_SPEEDS))
-        if args.ff_degrees <= 0:
+        if args.ff_degrees is not None and not 0 < args.ff_degrees < math.inf:
             raise ValueError('--ff-degrees has to be above 0')
-        if not 0 <= args.ff_max <= cfg.MAX_GAIN:
-            raise ValueError('--ff-max has to be between 0 and {}'.format(cfg.MAX_GAIN))
+        if args.ff_lead is not None and not 0 < args.ff_lead < math.inf:
+            raise ValueError('--ff-lead has to be above 0 pwm per degree/s')
+        if args.ff_max_positions < 1:
+            raise ValueError('--ff-max-positions has to be at least 1')
         if args.swing_only and (args.ff_only or args.ff):
             raise ValueError('--swing-only runs the swing stage alone, not together with --ff or --ff-only (use --ff '
                              '--swing for both stages after the P and D tuning)')
@@ -1792,8 +2055,9 @@ def main(argv: list[str] | None = None) -> int:
                         d_patience=args.d_patience, repeats=args.repeats, hold=args.hold, rest=args.rest,
                         baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
                         clamp=args.pwm_clamp, max_step=args.max_step, ff_degrees=args.ff_degrees,
-                        ff_speeds=tuple(args.ff_speeds), ff_max=args.ff_max, swing_degrees=args.swing_degrees,
-                        swing_speed=args.swing_speed,
+                        ff_speeds=tuple(args.ff_speeds) if args.ff_speeds is not None else None,
+                        ff_lead=args.ff_lead, ff_max_positions=args.ff_max_positions,
+                        swing_degrees=args.swing_degrees, swing_speed=args.swing_speed,
                         swing_p=tuple(args.swing_p) if args.swing_p is not None else None,
                         swing_d=tuple(args.swing_d), swing_limit=args.swing_limit,
                         limits=AbortLimits(max_temperature=max_temperature))
@@ -1855,12 +2119,16 @@ def main(argv: list[str] | None = None) -> int:
         print('the arm moves to these poses and steps joint {} by up to 5 degrees there, nothing may be in its way; '
               'the other joints hold their position'.format(args.joint))
     if run_ff:
-        print('feedforward stage: joint {} (yaml p={} ff1={}) at pose {} degrees, sweeps of {:g} degrees either way '
-              'at {} degrees/s, ff1 up to {}, output {}'.format(
-                  args.joint, servo.p, servo.ff1, pose_degrees(accepted[0]), args.ff_degrees,
-                  ' '.join('{:g}'.format(s) for s in args.ff_speeds), args.ff_max, ff_path))
+        print('feedforward stage (velocity lead): joint {} (yaml p={} velocity_feedforward={}) at pose {} degrees, '
+              'sweeps of {:g} degrees either way at {} degrees/s, first without a lead, then with {}, output {}'.format(
+                  args.joint, servo.p, servo.velocity_feedforward, pose_degrees(accepted[0]),
+                  settings.ff_degrees_of(args.joint),
+                  ' '.join('{:g}'.format(s) for s in settings.ff_speeds_of(args.joint)),
+                  'a coefficient of {:g} pwm per degree/s'.format(args.ff_lead) if args.ff_lead is not None
+                  else 'the velocity_feedforward block of the yaml' if servo.velocity_feedforward is not None
+                  else 'the coefficient fitted in the first round', ff_path))
         print('joint {} sweeps up to {:g} degrees either way at the speeds above, nothing may be in its way; '
-              'the other joints hold their position'.format(args.joint, args.ff_degrees))
+              'the other joints hold their position'.format(args.joint, settings.ff_degrees_of(args.joint)))
     if run_swing:
         print('swing stage: joint {} (yaml p={} d={}) at pose {} degrees, sweeps of {:g} degrees either way at {:g} '
               'degrees/s with the gains (p, d) {}, recommending the largest P that swings at most {:g} positions, '
@@ -1922,10 +2190,10 @@ def main(argv: list[str] | None = None) -> int:
             stop.protected = True
             restored = session.restore()
             if restored:
-                print('the yaml gains, feedforward gain, profile and goal pwm of servo {} are back'.format(args.joint))
+                print('the yaml gains, profile, goal pwm and velocity lead of servo {} are back'.format(args.joint))
             else:
-                print('RESTORING SERVO {} FAILED: start the robot again for the gains, the feedforward gain and the '
-                      'profile, reboot or power cycle the servos for the goal pwm'.format(args.joint))
+                print('RESTORING SERVO {} FAILED: start the robot again for the gains and the profile, reboot or '
+                      'power cycle the servos for the goal pwm'.format(args.joint))
             stop.protected = False
         stop.uninstall()
     results = session.results if session is not None else []

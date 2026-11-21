@@ -9,6 +9,7 @@ import dynamixel_sdk as dxl
 from src.robot_controllers.dynamixel_robot import dynamixel_robot_controller as drc
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src import global_constants
 from src.kinematics.kinematics import forward_kinematics, inverse_kinematics
@@ -573,19 +574,130 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.assertIn('2:0', printed.call_args.args[0])
         self.assertAlmostEqual(0.0, self.robot.get_current_angles()[2], places=3)
 
+    # velocity lead
+
+    ANGLES = np.array([0, 0.3, 1.5, 1.5, 0.2, -0.3, 0.1])
+
+    def goals(self):
+        """the goal positions of the arm servos on the bus"""
+        return [self.bus.get(servo_id, cfg.ADDR_GOAL_POSITION, 4) for servo_id in range(1, 7)]
+
+    def give_velocity_feedforward(self, servo_id):
+        """a velocity feedforward for the servo: a degree per second of the joint are 2 positions at its P gain"""
+        servo = self.servos[servo_id - 1]
+        servo.velocity_feedforward = VelocityFeedforward(servo.p / 128 * 2.0, 30)
+        return servo
+
+    def test_the_velocities_reach_the_servos_by_id(self):
+        # servo 3 is mounted the other way around
+        servo_2, servo_3 = self.give_velocity_feedforward(2), self.give_velocity_feedforward(3)
+        velocities = np.array([0, 0.3, 0.1, -0.1, 0.5, 0.5, 0.5])  # rad/s, index 0 is unused
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, velocities)
+        # 0.1 rad/s are 5.73 degrees/s, 11.46 positions
+        self.assertEqual(11, servo_2.lead_positions)
+        # the angle of servo 3 falls, and its position rises: the lead is in the direction of the position
+        self.assertEqual(11, servo_3.lead_positions)
+        self.assertEqual([0, 0, 0, 0], [self.servos[index].lead_positions for index in (0, 3, 4, 5)])
+        # the goals on the bus carry the lead of their own servo only
+        for servo_id in (2, 3):
+            expected = position_of(self.servo_config.servos[servo_id], self.ANGLES[servo_id]) + 11
+            self.assertEqual(expected, self.bus.get(servo_id, cfg.ADDR_GOAL_POSITION, 4))
+        for servo_id in (1, 4, 5, 6):
+            expected = position_of(self.servo_config.servos[servo_id], self.ANGLES[servo_id])
+            self.assertEqual(expected, self.bus.get(servo_id, cfg.ADDR_GOAL_POSITION, 4))
+
+    def test_the_velocity_of_servo_2_is_not_the_one_of_servo_3(self):
+        servo_2, servo_3 = self.give_velocity_feedforward(2), self.give_velocity_feedforward(3)
+        velocities = np.array([0, 0, 0.1, 0.0, 0, 0, 0])
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, velocities)
+        self.assertEqual(11, servo_2.lead_positions)
+        self.assertEqual(0, servo_3.lead_positions)
+
+    def test_velocities_of_none_and_no_velocities_give_no_lead(self):
+        servos = [self.give_velocity_feedforward(servo_id) for servo_id in (2, 3)]
+        self.robot.move_servos(self.ANGLES)
+        without = self.goals()
+        self.robot.move_servos(self.ANGLES, None)
+        self.assertEqual(without, self.goals())
+        self.assertEqual([0, 0], [servo.lead_positions for servo in servos])
+        # also after a lead was built up
+        velocities = np.array([0, 0, 0.1, 0.1, 0, 0, 0])
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, velocities)
+        self.assertNotEqual(without, self.goals())
+        self.robot.move_servos(self.ANGLES, None)
+        self.assertEqual(without, self.goals())
+
+    def test_without_a_velocity_feedforward_the_goals_are_what_they_are_without_velocities(self):
+        from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
+        # the servos of the test configuration have no velocity_feedforward: the velocities must change no goal
+        for servo in self.servos:
+            self.assertIsNone(servo.velocity_feedforward)
+        # the compensation is in the goals too, so the lead would be added to something that is not a plain target
+        self.servos[1].compensation = StaticCompensation(2, {'cos_q2': 20.0 * self.servos[1].p / 128}, 60)
+        self.servos[2].compensation = StaticCompensation(3, {'sin_phi': 10.0 * self.servos[2].p / 128}, 60)
+        rng = np.random.default_rng(3)
+        # angles within the ranges of the servos, so no goal is clamped
+        moves = [np.array([0.0] + [rng.uniform(0.9 * servo.min_angle, 0.9 * servo.max_angle)
+                                   for servo in self.servos[:6]]) for _ in range(20)]
+        velocities = [rng.uniform(-3.0, 3.0, 7) for _ in moves]  # far above anything a move asks of the joints
+
+        goals_without = []
+        for angles in moves:
+            self.robot.move_servos(angles)
+            goals_without.append(self.goals())
+        goals_with = []
+        for angles, step_velocities in zip(moves, velocities):
+            self.robot.move_servos(angles, step_velocities)
+            goals_with.append(self.goals())
+            self.assertEqual([0] * 7, [servo.lead_positions for servo in self.servos])
+
+        self.assertEqual(goals_without, goals_with)
+
+    def test_a_list_of_velocities_works_like_an_array(self):
+        servo = self.give_velocity_feedforward(2)
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, [0, 0, 0.1, 0, 0, 0, 0])
+        self.assertEqual(11, servo.lead_positions)
+
+    def test_the_single_servo_and_the_pose_moves_have_no_lead(self):
+        servo = self.give_velocity_feedforward(2)
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, np.array([0, 0, 0.1, 0, 0, 0, 0]))
+        self.assertEqual(11, servo.lead_positions)
+        self.robot.move_servo(2, 1.0)
+        self.assertEqual(0, servo.lead_positions)
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, np.array([0, 0, 0.1, 0, 0, 0, 0]))
+        self.robot.move_to_pose(forward_kinematics(self.ANGLES, self.robot.robot_config))
+        self.assertEqual(0, servo.lead_positions)
+
+    def test_the_lead_is_left_out_of_the_position_error(self):
+        servo = self.give_velocity_feedforward(2)
+        for _ in range(10):
+            self.robot.move_servos(self.ANGLES, np.array([0, 0, 0.1, 0, 0, 0, 0]))
+        self.assertEqual(11, servo.lead_positions)
+        # the servo reaches the goal of the angle itself: the printed error is 0, the lead is not part of it
+        self.bus.set_position(2, servo.trajectory_position)
+        self.assertEqual(servo.target_position - 11, servo.trajectory_position)
+        with mock.patch('builtins.print') as printed:
+            self.robot._print_position_error()
+        self.assertIn('2:0', printed.call_args.args[0])
+
     # time-based profile
 
     def test_initialize_servos_sets_the_drive_mode_before_the_profile(self):
         calls = mock.Mock()
-        names = ('set_control_mode', 'set_drive_mode', 'set_velocity_profile', 'set_pid', 'set_feedforward',
-                 'set_goal_current')
+        names = ('set_control_mode', 'set_drive_mode', 'set_velocity_profile', 'set_pid', 'set_goal_current')
         with mock.patch.multiple(self.robot, **{name: mock.DEFAULT for name in names}) as patched:
             for name, method in patched.items():
                 method.return_value = True
                 calls.attach_mock(method, name)
             self.robot.initialize_servos()
         self.assertEqual([mock.call.set_control_mode(), mock.call.set_drive_mode(),
-                          mock.call.set_velocity_profile(), mock.call.set_pid(), mock.call.set_feedforward(),
+                          mock.call.set_velocity_profile(), mock.call.set_pid(),
                           mock.call.set_goal_current()], calls.mock_calls)
 
     def test_initialize_servos_fails_when_the_drive_mode_can_not_be_set(self):
@@ -596,21 +708,17 @@ class TestDynamixelRobotController(unittest.TestCase):
             self.robot.perform_safety_checks = False
             self.robot.initialize_servos()
 
-    def test_a_time_based_servo_is_set_up_with_its_drive_mode_move_time_and_feedforward(self):
+    def test_a_time_based_servo_is_set_up_with_its_drive_mode_and_move_time(self):
         servo = self.servos[0]
-        servo.move_time, servo.ff1 = 15, 40
+        servo.move_time = 15
         self.bus.packets.clear()
         self.robot.initialize_servos()
         self.assertEqual(cfg.DRIVE_MODE_TIME_BASED_PROFILE, self.bus.memory[1][cfg.ADDR_DRIVE_MODE])
         self.assertEqual((0, 15), (self.bus.get(1, cfg.ADDR_PROFILE_ACCELERATION, 4),
                                    self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4)))
-        self.assertEqual((40, 0), (self.bus.get(1, cfg.ADDR_FEEDFORWARD_1ST_GAIN, 2),
-                                   self.bus.get(1, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 2)))
-        # the other servos are untouched: velocity-based, no feedforward
+        # the other servos are untouched: velocity-based
         self.assertEqual(0, self.bus.memory[2][cfg.ADDR_DRIVE_MODE])
         self.assertEqual(self.servos[1].profile_velocity, self.bus.get(2, cfg.ADDR_PROFILE_VELOCITY, 4))
-        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [1, 2, 3, 4, 5, 6, 7])],
-                         self.bus.packets_to(cfg.ADDR_FEEDFORWARD_2ND_GAIN))
 
     def test_the_drive_mode_is_not_changed_when_the_robot_starts_with_the_torque_on(self):
         self.servos[0].move_time = 15
@@ -624,7 +732,6 @@ class TestDynamixelRobotController(unittest.TestCase):
         combined = CombinedRobot.__new__(CombinedRobot)
         combined.dynamixel_robot = self.robot
         self.assertTrue(combined.set_drive_mode())
-        self.assertTrue(combined.set_feedforward())
 
     def test_move_servos_writes_the_goals_before_the_recorder_reads(self):
         packets_at_record = []

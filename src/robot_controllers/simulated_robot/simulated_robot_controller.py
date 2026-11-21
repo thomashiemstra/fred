@@ -94,7 +94,8 @@ class SimulatedRobotController(AbstractRobotController):
         self.move_servos(angles)
         return angles
 
-    def move_servos(self, angles: np.ndarray | Sequence[float]) -> None:
+    def move_servos(self, angles: np.ndarray | Sequence[float], velocities: np.ndarray | None = None) -> None:
+        # the velocities are ignored: the simulated motors follow the position targets without a lag to lead
         # First set the target_position variable of all servos
         p.setJointMotorControlArray(self.body_id, self._motors, controlMode=p.POSITION_CONTROL,
                                     targetPositions=angles[1:7], physicsClientId=self.physics_client)

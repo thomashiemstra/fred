@@ -199,6 +199,12 @@ All in positions; the sag is the mean of the two directions of a pose, the frict
   the wrist and the gripper tip come, without the robot: the planner's floor lets the tip down to where the
   fingertips touch the table.
 
+The lag while moving, 21 November 2026: every arm joint has a velocity lead since (`velocity_feedforward` in the
+yaml, see `Handover Velocity Lead on the PC.md`). The sweeps of joint 2 recorded again with it
+(`calibration/tuning/load_sweep_joint2_20261121_lead.csv`): the errors while moving went from -9.1 and +9.1 to -2.4
+and +2.5 positions, the sag is unchanged at 0.27 rms. The recorders measure against the goal without the lead and
+log it in a `lead` column.
+
 Still open: joint 4; joint 5 (see above); the wrist model is the simplified
 one; what the encoder does not see (flex) needs an outside reference, see Step 6. A webcam with aruco markers on
 the arm (`aruco_markers_a4.pdf`) records the runs since 19 November, as a check of what happened, not as a

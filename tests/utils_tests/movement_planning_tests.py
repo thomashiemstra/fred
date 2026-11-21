@@ -9,7 +9,7 @@ from src.kinematics.kinematics import inverse_kinematics, forward_kinematics, fo
 from src.kinematics.kinematics_utils import Pose, RobotConfig
 from src.utils import movement, workspace
 from src.utils.movement import plan_move_to_pose, plan_straight_line, check_move, execute_move, \
-    PlannedMove, plan_move_to_angles
+    PlannedMove, plan_move_to_angles, step_velocities
 from src.utils.movement_exception import MovementException
 
 test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
@@ -338,7 +338,102 @@ class FakeClock:
         self.time += seconds
 
 
+def constant_speed_ramp(speeds, steps):
+    """the angles of a move at constant speeds (rad/s, index 0 is unused) at steps_per_second"""
+    dt = 1.0 / global_constants.steps_per_second
+    return np.outer(np.arange(steps) * dt, np.asarray(speeds, dtype=np.float64))
+
+
+class StepVelocitiesTests(unittest.TestCase):
+    dt = 1.0 / global_constants.steps_per_second
+    speeds = [0.0, 0.5, -0.3, 0.0, 1.2, -2.0, 0.05]
+
+    def test_a_ramp_has_its_speed_inside_and_is_at_rest_at_both_ends(self):
+        velocities = step_velocities(constant_speed_ramp(self.speeds, 50), self.dt)
+        self.assertEqual((50, 7), velocities.shape)
+        np.testing.assert_allclose(np.tile(self.speeds, (48, 1)), velocities[1:-1], atol=1e-12)
+        np.testing.assert_array_equal(np.zeros(7), velocities[0])
+        np.testing.assert_array_equal(np.zeros(7), velocities[-1])
+
+    def test_the_velocity_is_the_central_difference(self):
+        angles = np.zeros((4, 7))
+        angles[:, 2] = [0.0, 0.1, 0.4, 1.0]
+        velocities = step_velocities(angles, 0.5)
+        # (0.4 - 0.0) / (2 * 0.5) and (1.0 - 0.1) / (2 * 0.5)
+        np.testing.assert_allclose([0.0, 0.4, 0.9, 0.0], velocities[:, 2])
+
+    def test_the_dt_scales_the_velocity(self):
+        angles = constant_speed_ramp(self.speeds, 10)
+        slower = step_velocities(angles, self.dt)[1:-1]
+        np.testing.assert_allclose(2 * slower, step_velocities(angles, self.dt / 2)[1:-1])
+
+    def test_a_move_of_one_or_two_steps_has_no_velocity(self):
+        for steps in (1, 2):
+            velocities = step_velocities(constant_speed_ramp(self.speeds, steps), self.dt)
+            self.assertEqual((steps, 7), velocities.shape)
+            np.testing.assert_array_equal(np.zeros((steps, 7)), velocities)
+
+    def test_a_move_of_three_steps_has_a_velocity_only_in_the_middle(self):
+        velocities = step_velocities(constant_speed_ramp(self.speeds, 3), self.dt)
+        np.testing.assert_array_equal(np.zeros((2, 7)), velocities[[0, 2]])
+        np.testing.assert_allclose(self.speeds, velocities[1], atol=1e-12)
+
+    def test_a_move_without_steps_gives_an_empty_array(self):
+        self.assertEqual((0, 7), step_velocities(np.zeros((0, 7)), self.dt).shape)
+
+    def test_the_angles_are_not_changed_and_integers_work(self):
+        angles = constant_speed_ramp(self.speeds, 10)
+        before = angles.copy()
+        step_velocities(angles, self.dt)
+        np.testing.assert_array_equal(before, angles)
+        velocities = step_velocities(np.arange(21).reshape(3, 7), 1.0)
+        np.testing.assert_allclose(np.full(7, 7.0), velocities[1])  # (14 - 0) / (2 * 1.0)
+
+    def test_a_minimum_jerk_move_starts_and_ends_at_rest_and_peaks_in_the_middle(self):
+        start = np.array([0, 0.5, 1.0, 0.0, 0.2, 1.0, -1.0])
+        stop = np.array([0, 1.0, 0.5, 0.3, 0.2, 0.5, -0.2])
+        move = plan_move_to_angles(unchecked_robot, start, stop, duration=1.0)
+        velocities = step_velocities(move.angles, self.dt)
+        np.testing.assert_array_equal(np.zeros(7), velocities[0])
+        np.testing.assert_array_equal(np.zeros(7), velocities[-1])
+        # a minimum jerk profile peaks at 1.875 times the average speed, in the middle of the move
+        middle = len(move.angles) // 2
+        np.testing.assert_allclose(1.875 * (stop - start) / move.duration, velocities[middle], atol=2e-3)
+        self.assertEqual(0.0, velocities[middle, 4])  # joint 4 does not move
+        # the velocity has the sign of the move
+        np.testing.assert_array_equal(np.sign(stop - start), np.sign(velocities[middle]))
+
+
 class ExecuteMoveTests(unittest.TestCase):
+
+    def test_the_velocity_of_every_step_is_sent_with_its_angles(self):
+        move = PlannedMove('ramp', constant_speed_ramp([0, 0.5, -0.3, 0, 0, 0, 0], 12), 0.12)
+        fake = mock.Mock()
+        with mock.patch.object(movement, 'sleep'):
+            execute_move(fake, move)
+
+        expected = step_velocities(move.angles, 1.0 / global_constants.steps_per_second)
+        self.assertEqual(12, fake.move_servos.call_count)
+        for step, sent in enumerate(fake.move_servos.call_args_list):
+            self.assertEqual(2, len(sent.args))
+            np.testing.assert_allclose(move.angles[step], sent.args[0])
+            np.testing.assert_allclose(expected[step], sent.args[1])
+        # the move starts and ends at rest, and goes at the speed of the ramp in between
+        np.testing.assert_array_equal(np.zeros(7), fake.move_servos.call_args_list[0].args[1])
+        np.testing.assert_array_equal(np.zeros(7), fake.move_servos.call_args_list[-1].args[1])
+        np.testing.assert_allclose(0.5, fake.move_servos.call_args_list[5].args[1][1])
+        np.testing.assert_allclose(-0.3, fake.move_servos.call_args_list[5].args[1][2])
+
+    def test_a_stopped_move_sends_no_correcting_step(self):
+        move = PlannedMove('ramp', constant_speed_ramp([0, 0.5, 0, 0, 0, 0, 0], 12), 0.12)
+        fake = mock.Mock()
+        should_stop = mock.Mock(side_effect=[False] * 6 + [True])
+        with mock.patch.object(movement, 'sleep'):
+            self.assertFalse(execute_move(fake, move, should_stop))
+        self.assertEqual(6, fake.move_servos.call_count)
+        # the last step that went out is a step of the move, with its velocity, nothing was sent to bring the lead back
+        np.testing.assert_allclose(move.angles[5], fake.move_servos.call_args.args[0])
+        np.testing.assert_allclose(0.5, fake.move_servos.call_args.args[1][1])
 
     def test_every_step_is_sent_to_the_robot(self):
         move = plan_move_to_pose(robot_without_angle_limits, resting_angles, start_pose)
@@ -367,7 +462,7 @@ class ExecuteMoveTests(unittest.TestCase):
     def run_with_fake_clock(self, move, time_to_send_a_step):
         clock = FakeClock()
         fake = mock.Mock()
-        fake.move_servos.side_effect = lambda _: clock.sleep(time_to_send_a_step)
+        fake.move_servos.side_effect = lambda _, __: clock.sleep(time_to_send_a_step)
         with mock.patch.object(movement, 'perf_counter', clock.perf_counter), \
                 mock.patch.object(movement, 'sleep', clock.sleep):
             execute_move(fake, move)
@@ -395,7 +490,7 @@ class ExecuteMoveTests(unittest.TestCase):
         clock = FakeClock()
         written, sent = [], []
 
-        def move_servos(angles):
+        def move_servos(angles, velocities=None):
             written.append(clock.time)
             sent.append(angles[0])
             clock.time += stalls.get(len(written) - 1, 0.0)

@@ -15,6 +15,7 @@ from src.robot_controllers.dynamixel_robot.calibration import fit_static_load, g
 from src.robot_controllers.dynamixel_robot.calibration.record_load_sweep import (
     DEFAULT_SWEEPS, Options, SweepResult, plan_poses, plan_sweep, pose_span, record_sweeps)
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import StopFlag, parse_pose, position_sign
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
 from src.robot_controllers.dynamixel_robot.calibration.load_directions import DOWN, UP
@@ -88,8 +89,8 @@ class SweepRobot(FakeRobot):
         self.enabled = True
         return True
 
-    def move_servos(self, angles):
-        super().move_servos(angles)
+    def move_servos(self, angles, velocities=None):
+        super().move_servos(angles, velocities)
         degrees = float(np.degrees(angles[self.joint]))
         if self.writes:
             seconds, previous = self.writes[-1]
@@ -201,10 +202,12 @@ class RowTests(SweepTestCase):
                     self.assertAlmostEqual(float(row['present_position']) - float(row['error']),
                                            float(row['goal_position']), delta=0.011)
                     self.assertEqual('0.00', row['compensation'])
+                    self.assertEqual('0.00', row['lead'], 'a servo without a velocity_feedforward block gets no lead')
                     self.assertNotEqual('', row['pwm'])
                 else:
                     # the other joints stood still: their angle is all they have
-                    for name in ('error', 'compensation', 'pwm', 'goal_position', 'present_position', 'current_raw',
+                    for name in ('error', 'compensation', 'lead', 'pwm', 'goal_position', 'present_position',
+                                 'current_raw',
                                  'current', 'current_unit', 'samples', 'temperature', 'voltage'):
                         self.assertEqual('', row[name], name)
                     self.assertEqual('{:.6f}'.format(robot.angles[int(row['servo'])]), row['angle'])
@@ -229,6 +232,27 @@ class RowTests(SweepTestCase):
         self.assertEqual(102.5, found.angle)
         self.assertEqual((-5.0, -5.0), (found.up.error, found.down.error))
         self.assertEqual((30, 30), (found.up.samples, found.down.samples))
+        self.assertEqual((0.0, 0.0), (up.lead, down.lead), 'a sample without a lead has none')
+
+    def test_the_error_of_a_bin_is_against_the_goal_without_the_compensation_and_without_the_lead(self):
+        servo = self.robot(3).servo_config.servos[3]
+        streamed = []
+        for direction, lead in ((1, 4), (-1, -2)):
+            for _ in range(gain_tuning.MIN_BIN_SAMPLES):
+                # the trajectory of the servo is the goal of the angle itself (900) plus 5 compensation plus the lead
+                sample = gain_tuning.Sample(time=0.0, tick=0, goal=905 + lead, position=900,
+                                            position_trajectory=905 + lead, velocity=0, velocity_trajectory=0, pwm=0,
+                                            current=0, moving_status=0, voltage=11.9, temperature=30)
+                step = gain_tuning.SweepStep(0.0, 0.0, direction, True, 0)
+                streamed.append(tune_servo_gains.StreamedSample(sample, step, 905 + lead, 5, lead))
+        ((found, up, down),) = record_load_sweep.bin_cruise_samples(servo, streamed, 5.0)
+        self.assertEqual((0.0, 0.0), (found.up.error, found.down.error), 'the present position is at that goal')
+        self.assertEqual((4.0, -2.0), (up.lead, down.lead), 'the mean lead of the samples, signed like the position')
+        self.assertEqual((5.0, 5.0), (up.compensation, down.compensation))
+        # the same samples without their lead are the other error: the lead is not part of the goal of the angle
+        without = [tune_servo_gains.StreamedSample(s.sample, s.step, s.goal, s.compensation, 0) for s in streamed]
+        ((found_without, _, _),) = record_load_sweep.bin_cruise_samples(servo, without, 5.0)
+        self.assertEqual((-4.0, 2.0), (found_without.up.error, found_without.down.error))
 
     def test_the_bins_of_two_speeds_line_up(self):
         robot = self.robot(3, sag=lambda q: 4.0 * np.sin(q[3]), friction=3.0, lag=0.5)
@@ -333,6 +357,105 @@ class RecoveryTests(SweepTestCase):
                 self.assertEqual('13.00', row['compensation'], 'the positions the servo added to its goal')
                 self.assertAlmostEqual(13.0, float(row['error']), delta=0.01, msg='the fake lands on goal + 0 sag')
                 self.assertAlmostEqual(0.0, float(row['error']) - float(row['compensation']), delta=0.01)
+
+
+class LeadTests(SweepTestCase):
+    """a servo with a velocity lead (a `velocity_feedforward` block): the sweeps run with it, the error of a bin is
+    against the goal without it and the lead column has its mean. The fake joint trails its trajectory (which has the lead in it) by
+    LAG positions per degree/s, a lead of LEAD per degree/s makes up part of that"""
+    LAG = 0.5
+    LEAD = 0.3
+    SAG = staticmethod(lambda joint: (lambda q: 6.0 * np.sin(q[joint]) + 2.0))
+
+    def sweep(self, joint, lead):
+        """the groups of the bins of two sweeps (10 and 20 degrees/s) of the joint, and the text that was printed;
+        `lead` is the lead in positions per degree/s that the velocity_feedforward block of the servo gives, None for
+        no block"""
+        robot = self.robot(joint, sag=self.SAG(joint), lag=self.LAG)
+        servo = robot.servo_config.servos[joint]
+        if lead is not None:
+            # the lead in positions is coefficient * degrees per second * 128 / P
+            servo.velocity_feedforward = VelocityFeedforward(lead * servo.p / 128.0, 30)
+        recording, rows, printed = self.record(robot, joint, self.spans(robot, joint, (-30, 30)),
+                                               speeds=(10.0, 20.0))
+        self.assertIsNone(recording.stopped)
+        groups = groups_of(rows, joint)
+        self.assertGreater(len(groups), 15)
+        return servo, groups, printed
+
+    def test_without_a_velocity_feedforward_the_lead_column_is_0_and_the_errors_are_those_of_a_plain_joint(self):
+        servo, groups, printed = self.sweep(5, None)
+        self.assertEqual({'0.00'}, {row['lead'] for group in groups.values() for row in group.values()})
+        for group in groups.values():
+            speed = float(group[UP]['speed'])
+            half = (float(group[UP]['error']) - float(group[DOWN]['error'])) / 2.0
+            self.assertAlmostEqual(-self.LAG * speed, half, delta=0.6, msg='all of what the joint trails')
+        self.assertNotIn('velocity lead', printed)
+
+    def test_the_lead_is_in_its_column_with_opposite_signs_and_not_in_the_errors(self):
+        for joint in (5, 3):  # the positions of joint 3 fall as its angle rises
+            with self.subTest(joint=joint):
+                servo, groups, printed = self.sweep(joint, self.LEAD)
+                sign = position_sign(servo)
+                for group in groups.values():
+                    up, down = group[UP], group[DOWN]
+                    speed = float(up['speed'])
+                    lead = round(self.LEAD * speed)  # whole positions, in the direction of the move
+                    self.assertAlmostEqual(sign * lead, float(up['lead']), delta=0.001)
+                    self.assertAlmostEqual(-sign * lead, float(down['lead']), delta=0.001)
+                    self.assertEqual('{:.2f}'.format(sign * lead), up['lead'], 'formatted like the other means')
+                    # the joint is ahead of its goal by the lead and behind it by what it trails: the error against
+                    # the goal of the angle itself is the difference, which the lead made smaller
+                    centre = np.degrees(float(up['angle']))
+                    sag = 6.0 * np.sin(np.radians(centre)) + 2.0
+                    behind = self.LAG * speed
+                    self.assertAlmostEqual(sag + sign * (lead - behind), float(up['error']), delta=0.6)
+                    self.assertAlmostEqual(sag - sign * (lead - behind), float(down['error']), delta=0.6)
+                    self.assertAlmostEqual(float(up['present_position']) - float(up['error']),
+                                           float(up['goal_position']), delta=0.011)
+                self.assertIn('the velocity lead of', printed)
+
+    def test_the_mean_of_the_two_directions_keeps_the_sag_and_half_the_difference_shrinks(self):
+        joint = 5
+        _, plain, plain_printed = self.sweep(joint, None)
+        servo, led, led_printed = self.sweep(joint, self.LEAD)
+        self.assertEqual(set(plain), set(led), 'the same bins')
+        shrunk = []
+        for number in plain:
+            for name, groups in (('plain', plain), ('led', led)):
+                self.assertTrue(groups[number][UP]['speed'] == plain[number][UP]['speed'], name)
+            speed = float(plain[number][UP]['speed'])
+            sag_plain = (float(plain[number][UP]['error']) + float(plain[number][DOWN]['error'])) / 2.0
+            sag_led = (float(led[number][UP]['error']) + float(led[number][DOWN]['error'])) / 2.0
+            self.assertAlmostEqual(sag_plain, sag_led, delta=0.6, msg='the lead is not part of the sag')
+            half_plain = (float(plain[number][UP]['error']) - float(plain[number][DOWN]['error'])) / 2.0
+            half_led = (float(led[number][UP]['error']) - float(led[number][DOWN]['error'])) / 2.0
+            shrunk.append((half_led - half_plain, round(self.LEAD * speed)))
+        for change, lead in shrunk:
+            self.assertAlmostEqual(lead, change, delta=0.6, msg='half the difference shrank by the lead')
+        self.assertNotIn('velocity lead', plain_printed)
+        self.assertIn('the velocity lead of', led_printed)
+
+    def test_the_sweeps_are_streamed_with_the_velocities_of_the_steps(self):
+        robot = self.robot(5, lag=self.LAG)
+        servo = robot.servo_config.servos[5]
+        servo.velocity_feedforward = VelocityFeedforward(self.LEAD * servo.p / 128.0, 30)
+        poses = plan_poses(robot, 5, self.spans(robot, 5, (-30, 30)), (10.0,))
+        seen = []
+        move_servos = robot.move_servos
+
+        def noted(angles, velocities=None):
+            seen.append(None if velocities is None else float(velocities[5]))
+            move_servos(angles, velocities)
+        robot.move_servos = noted
+        with contextlib.redirect_stdout(io.StringIO()):
+            record_sweeps(robot, 5, poses, csv.DictWriter(io.StringIO(), fieldnames=FIELDS), clock=self.clock,
+                          sleep=self.clock.sleep)
+        sweep = [velocity for velocity in seen[-len(poses[0].sweeps[0].steps):]]
+        self.assertNotIn(None, sweep)
+        self.assertEqual(0.0, sweep[0])
+        self.assertEqual(0.0, sweep[-1])
+        self.assertAlmostEqual(10.0, np.degrees(max(sweep)), delta=0.1, msg='the cruise speed of the sweep')
 
 
 class FitTests(SweepTestCase):

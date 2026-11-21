@@ -13,7 +13,12 @@ from src.robot_controllers.dynamixel_robot.dynamixel_x_config import MAX_PROFILE
     POSITIONS_PER_SECOND_PER_VELOCITY_UNIT
 
 if TYPE_CHECKING:
+    from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
     from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
+
+# the most the velocity lead (in positions, not rounded) may change from one goal to the next: a caller whose speed
+# jumps must not kick the joint, joint 2 swings at 7 Hz when it gets a step
+MAX_LEAD_STEP = 2.0
 
 
 class Servo:
@@ -25,13 +30,16 @@ class Servo:
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
                  d: int = 500, offset: int = 0, goal_current: int | None = None,
-                 compensation: StaticCompensation | None = None, move_time: int | None = None, ff1: int = 0) -> None:
+                 compensation: StaticCompensation | None = None, move_time: int | None = None,
+                 velocity_feedforward: VelocityFeedforward | None = None) -> None:
         """
         :param compensation: a StaticCompensation, the positions it gives for the commanded angles of all joints
             and the P gain of this servo are added to every target position (see static_compensation.py)
         :param move_time: ms the servo gets for each small streamed goal step, None for the velocity-based profile;
             profile_velocity and profile_acceleration then limit a goal that is far away
-        :param ff1: velocity feedforward gain of the position controller
+        :param velocity_feedforward: a VelocityFeedforward, the positions it gives for the commanded velocity of this
+            joint and the P gain of this servo are added to every target position that comes with a velocity (see
+            velocity_feedforward.py)
         """
         self.p = p
         self.i = i
@@ -47,16 +55,28 @@ class Servo:
         self.goal_current = goal_current
         self.compensation = compensation
         self.move_time = move_time
-        self.ff1 = ff1
         self.compensation_positions = 0  # the positions the compensation added to the last target
+        self.velocity_feedforward = velocity_feedforward
+        self.lead_positions = 0  # the positions the velocity lead added to the last target
+        self._lead = 0.0  # the lead of the last target before rounding: the state of its rate limit
 
     def __str__(self) -> str:
         return "p={} i={} d={} max_angle={} min_angle={} min_position={} max_position={} operating_mode={} " \
                "profile_velocity={} profile_acceleration={} offset={} goal_current={} compensation={} move_time={} " \
-               "ff1={}" \
+               "velocity_feedforward={}" \
             .format(self.p, self.i, self.d, self.max_angle, self.min_angle, self.min_position, self.max_position,
                     self.operating_mode, self.profile_velocity, self.profile_acceleration, self.constant_offset,
-                    self.goal_current, self.compensation, self.move_time, self.ff1)
+                    self.goal_current, self.compensation, self.move_time, self.velocity_feedforward)
+
+    @property
+    def trajectory_position(self) -> int:
+        """the goal of the angle itself: the target position without the compensation and without the velocity lead"""
+        return self.target_position - self.compensation_positions - self.lead_positions
+
+    def reset_lead(self) -> None:
+        """drop the velocity lead and the state of its rate limit, for a servo that holds its present position"""
+        self.lead_positions = 0
+        self._lead = 0.0
 
     @property
     def time_based(self) -> bool:
@@ -96,11 +116,17 @@ class Servo:
         return total, min(ramp, total // 2)
 
     # updates the target position of this servo
-    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None,
+                                       velocity: float | None = None) -> None:
         """
         :param angle: the angle to move to
         :param all_angles: the commanded angles of all joints, indexed by servo id; with a compensation the
             positions for the static load of that pose at the P gain of this servo are added to the target
+        :param velocity: the commanded velocity of this joint in radians per second (the angle per second); with a
+            velocity feedforward the positions for that speed at the P gain of this servo are added to the target, in
+            the direction the position turns, which is not that of the angle when the position falls as the angle
+            rises. The lead changes by at most MAX_LEAD_STEP positions per call. Without a velocity, or a velocity
+            feedforward, there is no lead, at once.
         """
         if angle > self.max_angle:
             logging.debug("input angle is bigger than max input angle")
@@ -116,6 +142,20 @@ class Servo:
             self.compensation_positions = self.compensation.positions(all_angles, self.p)
             self.target_position += self.compensation_positions
 
+        self.lead_positions = self._rate_limited_lead(velocity)
+        self.target_position += self.lead_positions
+
+    def _rate_limited_lead(self, velocity: float | None) -> int:
+        """the whole positions of velocity lead for the commanded velocity of the angle, updates the rate limit state"""
+        if self.velocity_feedforward is None or velocity is None:
+            self._lead = 0.0
+            return 0
+        # the position turns with the angle by the slope of the interpolation of the target, which can be negative
+        direction = float(np.sign(self.max_position - self.min_position) * np.sign(self.max_angle - self.min_angle))
+        wanted = self.velocity_feedforward.positions(velocity * direction, self.p)
+        self._lead += float(np.clip(wanted - self._lead, -MAX_LEAD_STEP, MAX_LEAD_STEP))
+        return int(np.rint(self._lead))
+
     def calibrated_range(self) -> tuple[int, int]:
         """the lowest and the highest raw position of the calibrated range of this servo, offset included"""
         return (min(self.min_position, self.max_position) + self.constant_offset,
@@ -128,11 +168,12 @@ class Servo:
 
     def clamp_target_position(self) -> int:
         """
-        the target position with the uncompensated part clamped to the calibrated range, so the compensation is
-        kept at the ends of the range (the goal position may exceed the calibrated range by the compensation, the
-        servo handler clamps it to the physical range of the servo)
+        the target position with the goal of the angle itself (trajectory_position, without the compensation and
+        the velocity lead) clamped to the calibrated range, so both shifts are kept at the ends of the range (the
+        goal position may exceed the calibrated range by them, the servo handler clamps it to the physical range of
+        the servo)
         """
-        return self.clamp_position(self.target_position - self.compensation_positions) + self.compensation_positions
+        return self.clamp_position(self.trajectory_position) + self.compensation_positions + self.lead_positions
 
     def get_angle_from_position(self, position: int | None) -> float:
         if position is None:
@@ -170,10 +211,9 @@ class ServoWithOffsetFunction(Servo):
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  offset_function_up: Callable[[np.ndarray], int], offset_function_down: Callable[[np.ndarray], int],
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
-                 d: int = 500, offset: int = 0, goal_current: int | None = None, move_time: int | None = None,
-                 ff1: int = 0) -> None:
+                 d: int = 500, offset: int = 0, goal_current: int | None = None, move_time: int | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
-                         profile_acceleration, p, i, d, offset, goal_current, move_time=move_time, ff1=ff1)
+                         profile_acceleration, p, i, d, offset, goal_current, move_time=move_time)
         if offset_function_up is None or offset_function_down is None:
             raise ValueError("Should have gotten offset functions")
         self.offset_function_up = offset_function_up
@@ -181,8 +221,9 @@ class ServoWithOffsetFunction(Servo):
         self._last_commanded_angle = 0.0
         self._last_adjustment_direction = AdjustmentDirections.UP
 
-    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
-        super().set_target_position_from_angle(angle)
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None,
+                                       velocity: float | None = None) -> None:
+        super().set_target_position_from_angle(angle, velocity=velocity)
         if all_angles is None:
             return
 
@@ -217,16 +258,16 @@ class Servo2(Servo):
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
                  d: int = 500, offset: int = 0, goal_current: int | None = None,
-                 dynamic_offsets: dict[str, dict[str, int]] | None = None, move_time: int | None = None,
-                 ff1: int = 0) -> None:
+                 dynamic_offsets: dict[str, dict[str, int]] | None = None, move_time: int | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode, profile_velocity,
-                         profile_acceleration, p, i, d, offset, goal_current, move_time=move_time, ff1=ff1)
+                         profile_acceleration, p, i, d, offset, goal_current, move_time=move_time)
         if dynamic_offsets is None:
             raise ValueError('Servo2 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
 
-    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
-        super().set_target_position_from_angle(angle)
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None,
+                                       velocity: float | None = None) -> None:
+        super().set_target_position_from_angle(angle, velocity=velocity)
         self.target_position -= self._get_dynamic_offsets(all_angles)
 
     def _get_dynamic_offsets(self, all_angles: np.ndarray | None) -> int:
@@ -242,16 +283,17 @@ class Servo3(Servo):
     def __init__(self, min_position: int, max_position: int, min_angle: float, max_angle: float, operating_mode: int,
                  profile_velocity: int = 100, profile_acceleration: int = 50, p: int = 1000, i: int = 600,
                  d: int = 500, offset: int = 0, goal_current: int | None = None,
-                 dynamic_offsets: dict[str, int] | None = None, move_time: int | None = None, ff1: int = 0) -> None:
+                 dynamic_offsets: dict[str, int] | None = None, move_time: int | None = None) -> None:
         super().__init__(min_position, max_position, min_angle, max_angle, operating_mode,
                          profile_velocity, profile_acceleration, p, i, d, offset, goal_current,
-                         move_time=move_time, ff1=ff1)
+                         move_time=move_time)
         if dynamic_offsets is None:
             raise ValueError('Servo3 needs the dynamic offsets')
         self.dynamic_offsets = dynamic_offsets
 
-    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None) -> None:
-        super().set_target_position_from_angle(angle)
+    def set_target_position_from_angle(self, angle: float, all_angles: np.ndarray | None = None,
+                                       velocity: float | None = None) -> None:
+        super().set_target_position_from_angle(angle, velocity=velocity)
         self.target_position -= self._get_dynamic_offsets(all_angles)
 
     def _get_dynamic_offsets(self, all_angles: np.ndarray | None) -> int:

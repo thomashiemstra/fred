@@ -11,6 +11,7 @@ from src.global_constants import POSITION_CONTROL_MODE, EXTENDED_POSITION_CONTRO
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot import servo_handler as servo_handler_module
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoHandler, ServoState
 from tests.servo_controller_tests.dynamixel_robot_controller_tests import FakeBus
@@ -485,6 +486,65 @@ class TestServoHandlerCommunication(unittest.TestCase):
         self.assertEqual(0, servo.compensation_positions)
         self.assertEqual(2000, servo.clamp_target_position())
 
+    def give_velocity_feedforwards(self):
+        """a velocity feedforward for servos 1 and 2: a degree per second is 2 positions at their P gain"""
+        for servo in self.servos[:2]:
+            servo.velocity_feedforward = VelocityFeedforward(servo.p / 128 * 2.0, 30)
+
+    def test_set_angle_passes_the_velocity_to_the_servo_with_the_id(self):
+        self.give_velocity_feedforwards()
+        for _ in range(10):
+            self.handler.set_angle(1, pi / 2, None, math.radians(3.0))
+            self.handler.set_angle(2, 0.0, None, math.radians(3.0))
+        self.assertEqual(6, self.servos[0].lead_positions)
+        self.assertEqual(1024 + (3072 - 1024) // 2 + 100 + 6, self.servos[0].target_position)
+        # the second servo is mounted the other way around: its position falls as the angle rises
+        self.assertEqual(-6, self.servos[1].lead_positions)
+        self.assertEqual(2048 - 6, self.servos[1].target_position)
+        # the servos without a velocity_feedforward are not touched
+        self.assertEqual(0, self.servos[2].lead_positions)
+
+    def test_set_angle_without_a_velocity_gives_no_lead(self):
+        self.give_velocity_feedforwards()
+        self.handler.set_angle(1, pi / 2)
+        self.handler.set_angle(1, pi / 2, None)
+        self.assertEqual(0, self.servos[0].lead_positions)
+        self.assertEqual(2048 + 100, self.servos[0].target_position)
+
+    def test_the_lead_is_written_with_the_goal_and_kept_at_the_end_of_the_calibrated_range(self):
+        self.give_velocity_feedforwards()
+        for _ in range(10):
+            self.handler.set_angle(1, pi / 2, None, math.radians(3.0))
+        self.assertTrue(self.handler.move_to_angles([1]))
+        self.assertEqual(2048 + 100 + 6, self.goal_position(1))
+        # at the end of the range the lead stays on the target
+        for _ in range(10):
+            self.handler.set_angle(1, 2 * pi, None, math.radians(3.0))
+        self.assertTrue(self.handler.move_to_angles([1]))
+        self.assertEqual(3072 + 100 + 6, self.goal_position(1))
+        # a target beyond the range (set directly) is clamped without its lead
+        self.servos[0].target_position = 3300 + 6
+        self.servos[0].lead_positions = 6
+        with self.assertLogs(servo_handler_module.logger, 'WARNING'):
+            self.assertTrue(self.handler.move_to_angles([1]))
+        self.assertEqual(3072 + 100 + 6, self.goal_position(1))
+
+    def test_hold_current_position_drops_the_lead_and_its_rate_limit(self):
+        self.give_velocity_feedforwards()
+        servo = self.servos[0]
+        for _ in range(10):
+            self.handler.set_angle(1, pi / 2, None, math.radians(3.0))
+        self.assertEqual(6, servo.lead_positions)
+        self.bus.set_position(1, 2000)
+        self.assertTrue(self.handler.hold_current_position([1]))
+        self.assertEqual(2000, servo.target_position)
+        self.assertEqual(0, servo.lead_positions)
+        self.assertEqual(2000, servo.clamp_target_position())
+        self.assertEqual(2000, self.goal_position(1))
+        # the next goals build the lead up from 0, not from 6
+        self.handler.set_angle(1, pi / 2, None, math.radians(3.0))
+        self.assertEqual(2, servo.lead_positions)
+
     def test_the_compensation_never_leaves_the_physical_range(self):
         servo = self.servos[2]  # 0-4096
         servo.target_position = 4110
@@ -599,7 +659,7 @@ class TestServoHandlerBlockReads(unittest.TestCase):
 
 
 class TestServoHandlerTimeBasedProfile(unittest.TestCase):
-    """the drive mode, the profile registers, the feedforward and the goal writes of servos with a move time; servos 1
+    """the drive mode, the profile registers and the goal writes of servos with a move time; servos 1
     and 3 are time-based, 2 and 4 velocity-based"""
 
     BUSES = ((1, 2), (3, 4))
@@ -607,9 +667,8 @@ class TestServoHandlerTimeBasedProfile(unittest.TestCase):
     def setUp(self):
         self.servos = [
             Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=250, profile_acceleration=100,
-                  move_time=15, ff1=40),
-            Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=250, profile_acceleration=100,
-                  ff1=cfg.MAX_GAIN),
+                  move_time=15),
+            Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=250, profile_acceleration=100),
             Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=500, profile_acceleration=50,
                   move_time=20),
             Servo(0, 4095, 0, 2 * pi, POSITION_CONTROL_MODE, profile_velocity=300, profile_acceleration=70),
@@ -633,11 +692,9 @@ class TestServoHandlerTimeBasedProfile(unittest.TestCase):
 
     # construction
 
-    def test_the_goal_and_feedforward_registers_have_to_be_adjacent_too(self):
+    def test_the_goal_registers_have_to_be_adjacent_too(self):
         config_values = {name: getattr(cfg, name) for name in dir(cfg) if name.isupper()}
-        for changes in ({'ADDR_GOAL_POSITION': cfg.ADDR_GOAL_POSITION + 4},
-                        {'ADDR_FEEDFORWARD_1ST_GAIN': cfg.ADDR_FEEDFORWARD_1ST_GAIN + 2},
-                        {'ADDR_FEEDFORWARD_2ND_GAIN': cfg.ADDR_FEEDFORWARD_2ND_GAIN - 2}):
+        for changes in ({'ADDR_GOAL_POSITION': cfg.ADDR_GOAL_POSITION + 4},):
             config = types.SimpleNamespace(**dict(config_values, **changes))
             with self.assertRaises(ValueError):
                 ServoHandler({1: self.servos[0]}, config, None, None)
@@ -774,43 +831,6 @@ class TestServoHandlerTimeBasedProfile(unittest.TestCase):
         self.handler.move_servo_to_pos(1, 3000)
         self.assertEqual(servo.goal_timing(1000)[0], self.bus.get(1, cfg.ADDR_PROFILE_VELOCITY, 4))
         self.assertLess(servo.goal_timing(1000)[0], servo.goal_timing(1000, 0.5)[0])
-
-    # feedforward
-
-    def test_feedforward_is_written_in_one_packet_as_second_and_first_gain(self):
-        self.assertTrue(self.handler.set_feedforward())
-        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [1, 2, 3, 4])], self.bus.packets)
-        # little endian, the 2nd gain 0 and then the 1st
-        self.assertEqual([0, 0, 40, 0], self.raw(1, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
-        self.assertEqual([0, 0, 0xFF, 0x3F], self.raw(2, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
-        self.assertEqual([0, 0, 0, 0], self.raw(3, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
-        self.assertEqual({1: (40, 0), 2: (cfg.MAX_GAIN, 0), 3: (0, 0), 4: (0, 0)}, self.handler.read_feedforward())
-
-    def test_feedforward_of_some_servos(self):
-        self.assertTrue(self.handler.set_feedforward([1]))
-        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [1])], self.bus.packets)
-
-    def test_single_servo_feedforward(self):
-        self.assertTrue(self.handler.set_feedforward_single_servo(3, 100))
-        self.assertEqual([('sync_write', cfg.ADDR_FEEDFORWARD_2ND_GAIN, [3])], self.bus.packets)
-        self.assertEqual([0, 0, 100, 0], self.raw(3, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
-        self.assertTrue(self.handler.set_feedforward_single_servo(3, 100, 7))
-        self.assertEqual([7, 0, 100, 0], self.raw(3, cfg.ADDR_FEEDFORWARD_2ND_GAIN, 4))
-        self.assertEqual({3: (100, 7)}, self.handler.read_feedforward([3]))
-        self.assertEqual(0, self.servos[2].ff1, 'the configured value stays')
-        self.assertTrue(self.handler.set_feedforward([3]))
-        self.assertEqual({3: (0, 0)}, self.handler.read_feedforward([3]))
-
-    def test_feedforward_outside_the_firmware_range_is_refused(self):
-        for first, second in ((-1, 0), (cfg.MAX_GAIN + 1, 0), (0, -1), (0, cfg.MAX_GAIN + 1)):
-            with self.assertRaises(ValueError):
-                self.handler.set_feedforward_single_servo(3, first, second)
-        self.assertEqual([], self.bus.packets)
-        self.assertTrue(self.handler.set_feedforward_single_servo(3, cfg.MAX_GAIN, cfg.MAX_GAIN))
-
-    def test_feedforward_read_fails_when_a_servo_does_not_answer(self):
-        self.bus.unresponsive = {2}
-        self.assertIsNone(self.handler.read_feedforward())
 
     # goals
 

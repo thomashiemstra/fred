@@ -313,6 +313,208 @@ class ReportTests(unittest.TestCase):
         self.assertIn('every pose', check_static_load.report(poses, [2], with_table=True))
 
 
+def lead_rows(pose, angle, error_up, error_down, lead, joint=2, **kwargs):
+    """the rows of a sweep pose recorded with a velocity lead: +lead positions arriving from below, -lead from above"""
+    rows = pose_rows(pose, angle, error_up, error_down, joint=joint, mode='sweep', speed=5, **kwargs)
+    rows[0]['lead'], rows[1]['lead'] = str(lead), str(-lead)
+    return rows
+
+
+# the report of three poses written by the script before it knew the lead, joint 2, P 2000, compensation -1 / 1 / 2
+REPORT_WITHOUT_LEAD = """\
+joint 2: 3 poses with an error in both directions, P 2000, mode static
+  sag that is left (mean of up and down, with the compensation as recorded):
+    mean +1.50, rms 2.53, lowest -1.00, highest +4.00 positions
+    rms 0.223 degrees, largest absolute value 4.00 positions (0.352 degrees)
+  sag without the compensation (sag less compensation):
+    mean +0.83, rms 1.19, lowest +0.00, highest +2.00 positions
+    rms 0.105 degrees, largest absolute value 2.00 positions (0.176 degrees)
+  rms 1.19 without, 2.53 with: 113% more
+  compensation added: from -1.0 to +2.0 positions, mean +0.7
+  arriving from below (up): mean +0.50, from -2.00 to +3.00 positions
+  arriving from above (down): mean +2.50, from +0.00 to +5.00 positions
+  largest absolute error of either direction: 5.00 positions (0.439 degrees)
+  friction band (half the up/down difference, not compensated): mean 1.00, largest 1.00 positions
+  poses over 1.0 positions, largest sag first (angles of joints 1 to 6 in degrees):
+                         q1 .. q6    comp       up     down      sag
+       -   70    -    -    -    -    +2.0    +3.00    +5.00    +4.00
+       -   40    -    -    -    -    +1.0    +0.50    +2.50    +1.50
+  2 of 3 poses are over 1.0 positions
+
+joint 2: every pose, by the angle of the joint (angles in degrees, errors in positions)
+       q1      q2      q3      q4      q5      q6    comp       up     down      sag
+        -    10.0       -       -       -       -    -1.0    -2.00    -0.00    -1.00
+        -    40.0       -       -       -       -    +1.0    +0.50    +2.50    +1.50
+        -    70.0       -       -       -       -    +2.0    +3.00    +5.00    +4.00"""
+
+
+class LeadTests(unittest.TestCase):
+
+    def lead_poses(self):
+        """two sweep poses of joint 2 at P 1000 with hand-made numbers, errors as recorded with the lead:
+        pose 0: lead 3, errors -1.0 and +1.0, so without the lead -1 - 3 = -4.0 and +1 + 3 = +4.0
+        pose 1: lead 1, errors -0.5 and +1.5, so without the lead -1.5 and +2.5"""
+        rows = lead_rows(0, 10, -1.0, 1.0, 3.0) + lead_rows(1, 40, -0.5, 1.5, 1.0)
+        return check_static_load.poses_from_rows(rows)
+
+    def test_the_lead_of_both_directions_is_read(self):
+        first, second = self.lead_poses()[2]
+        self.assertEqual((3.0, -3.0), (first.lead_up, first.lead_down))
+        self.assertEqual((1.0, -1.0), (second.lead_up, second.lead_down))
+        pose = first
+        self.assertAlmostEqual(3.0, pose.lead, msg='the size of the lead is the mean of the absolute values')
+
+    def test_a_missing_or_blank_lead_is_0(self):
+        # no column at all
+        pose = check_static_load.poses_from_rows(pose_rows(0, 30, -2.0, -1.0))[2][0]
+        self.assertEqual((0.0, 0.0), (pose.lead_up, pose.lead_down))
+        # a blank cell, and a column that only one direction has filled
+        rows = pose_rows(0, 30, -2.0, -1.0)
+        rows[0]['lead'], rows[1]['lead'] = '', '  '
+        pose = check_static_load.poses_from_rows(rows)[2][0]
+        self.assertEqual((0.0, 0.0), (pose.lead_up, pose.lead_down))
+        rows[0]['lead'] = '2.5'
+        pose = check_static_load.poses_from_rows(rows)[2][0]
+        self.assertEqual((2.5, 0.0), (pose.lead_up, pose.lead_down))
+
+    def test_a_lead_that_is_not_a_number_names_the_file_and_the_pose(self):
+        rows = lead_rows(3, 30, -2.0, -1.0, 1.0, file='new.csv')
+        rows[1]['lead'] = 'fast'
+        with self.assertRaisesRegex(ValueError, r"new\.csv: pose 3 servo 2 has lead 'fast'"):
+            check_static_load.poses_from_rows(rows)
+
+    def test_the_sag_and_the_sag_without_the_compensation_do_not_depend_on_the_lead(self):
+        # the lead is not part of the error any more and cancels in the mean of the two directions
+        with_lead = self.lead_poses()[2]
+        without = check_static_load.poses_from_rows(
+            pose_rows(0, 10, -1.0, 1.0, mode='sweep') + pose_rows(1, 40, -0.5, 1.5, mode='sweep'))[2]
+        self.assertEqual([pose.sag for pose in without], [pose.sag for pose in with_lead])
+        self.assertEqual([pose.uncompensated for pose in without], [pose.uncompensated for pose in with_lead])
+        self.assertEqual([pose.friction for pose in without], [pose.friction for pose in with_lead])
+
+    def test_without_the_lead_the_joint_trails_the_trajectory_by_the_lead_more(self):
+        # the goal that was sent is the trajectory plus the lead. Moving up (lead +3) the joint rests 1.0 below the
+        # trajectory with the lead, so 4.0 below it without; moving down (lead -3) it rests 1.0 above, so 4.0 above
+        pose = self.lead_poses()[2][0]
+        self.assertAlmostEqual(-4.0, pose.error_up_without_lead)
+        self.assertAlmostEqual(4.0, pose.error_down_without_lead)
+        self.assertAlmostEqual(4.0, pose.friction_without_lead)
+        self.assertAlmostEqual(1.0, pose.friction, msg='with the lead the half difference is smaller')
+        # the P term works on goal sent - present = -(error - compensation - lead) and has the same drive either way:
+        # error - lead without the lead plus the lead added to the goal gives the error that was recorded
+        self.assertAlmostEqual(pose.error_up, pose.error_up_without_lead + pose.lead_up)
+        self.assertAlmostEqual(pose.error_down, pose.error_down_without_lead + pose.lead_down)
+
+    def test_the_summary_has_no_lead_when_it_was_0_in_every_row(self):
+        self.assertIsNone(check_static_load.summarise(2, [pose_joint(0, 1.0, 2.0), pose_joint(10, 0.0, 1.0)]).lead)
+
+    def test_the_summary_of_the_lead(self):
+        lead = check_static_load.summarise(2, self.lead_poses()[2]).lead
+        self.assertAlmostEqual(2.0, lead.mean)  # (3 + 1) / 2
+        self.assertAlmostEqual(3.0, lead.largest)
+        self.assertAlmostEqual(-2.75, lead.up_without.mean)  # (-4.0 + -1.5) / 2
+        self.assertEqual((-4.0, -1.5), (lead.up_without.low, lead.up_without.high))
+        self.assertAlmostEqual(3.25, lead.down_without.mean)  # (4.0 + 2.5) / 2
+        self.assertEqual((2.5, 4.0), (lead.down_without.low, lead.down_without.high))
+        self.assertAlmostEqual(3.0, lead.friction_mean)  # (4.0 + 2.0) / 2
+        self.assertAlmostEqual(4.0, lead.friction_max)
+        self.assertAlmostEqual(100 * (1 - 1.0 / 3.0), lead.friction_reduction)  # 1.0 with the lead
+
+    def test_a_lead_in_one_direction_only_is_found(self):
+        pose = pose_joint(10, 1.0, -1.0)
+        pose.lead_down = -2.0
+        self.assertIsNotNone(check_static_load.summarise(2, [pose]).lead)
+
+    def test_the_lead_lines_are_in_the_report_only_when_a_lead_was_active(self):
+        text = check_static_load.describe(check_static_load.summarise(2, self.lead_poses()[2]))
+        self.assertIn('  velocity lead was active: mean absolute lead 2.00, largest 3.00 positions', text)
+        self.assertIn('without the lead (error less lead, the joint would trail by the lead more):', text)
+        self.assertIn('    up: mean -2.75, from -4.00 to -1.50; down: mean +3.25, from +2.50 to +4.00 positions', text)
+        self.assertIn('    friction band: mean 3.00, largest 4.00 positions', text)
+        self.assertIn('    the lead made the mean friction band 3.00 -> 1.00 positions, 67% smaller', text)
+        # the lead line is under the header lines, before the numbers; the lines about the errors follow the friction
+        lines = text.splitlines()
+        self.assertLess(lines.index('  velocity lead was active: mean absolute lead 2.00, largest 3.00 positions'),
+                        next(i for i, line in enumerate(lines) if line.startswith('  sag that is left')))
+        self.assertLess(next(i for i, line in enumerate(lines) if line.startswith('  friction band')),
+                        next(i for i, line in enumerate(lines) if line.startswith('  without the lead')))
+        # without a lead none of it is there
+        text = check_static_load.describe(check_static_load.summarise(2, [pose_joint(10, 1.0, -1.0, mode='sweep')]))
+        self.assertNotIn('lead', text)
+
+    def test_the_lead_lines_belong_to_the_joint_that_had_a_lead(self):
+        rows = lead_rows(0, 10, -1.0, 1.0, 3.0, joint=2) + pose_rows(0, 20, 1.0, 1.0, joint=3, mode='sweep')
+        text = check_static_load.report(check_static_load.poses_from_rows(rows), [2, 3])
+        joint_2, joint_3 = text.split('\n\njoint 3')
+        self.assertIn('velocity lead was active', joint_2)
+        self.assertNotIn('lead', joint_3)
+
+    def test_a_lead_that_makes_the_friction_band_larger_says_larger(self):
+        # errors +3.0 / -3.0 with a lead of 1: without it +2.0 / -2.0, so the band went from 2.0 to 3.0
+        poses = check_static_load.poses_from_rows(lead_rows(0, 10, 3.0, -3.0, 1.0))[2]
+        text = check_static_load.describe(check_static_load.summarise(2, poses))
+        self.assertIn('the lead made the mean friction band 2.00 -> 3.00 positions, 50% larger', text)
+
+    def test_without_a_friction_band_left_there_is_no_percentage(self):
+        # without the lead both directions would have rested at 0.0: all of the band is the lead
+        poses = check_static_load.poses_from_rows(lead_rows(0, 10, 1.0, -1.0, 1.0))[2]
+        text = check_static_load.describe(check_static_load.summarise(2, poses))
+        self.assertIn('    friction band: mean 0.00, largest 0.00 positions', text)
+        self.assertNotIn('the lead made', text)
+
+    def rows_without_a_lead(self):
+        rows = []
+        for pose, (angle, up, down, comp) in enumerate([(10, -2.0, -0.0, -1.0), (40, 0.5, 2.5, 1.0),
+                                                        (70, 3.0, 5.0, 2.0)]):
+            rows += pose_rows(pose, angle, up, down, joint=2, compensation=comp, p=2000)
+        return rows
+
+    def test_the_report_without_a_lead_is_unchanged(self):
+        rows = self.rows_without_a_lead()
+        text = check_static_load.report(check_static_load.poses_from_rows(rows), [2], with_table=True)
+        self.assertEqual(REPORT_WITHOUT_LEAD, text, 'rows without a lead column')
+        for value in ('0', '0.0', ''):
+            for r in rows:
+                r['lead'] = value
+            text = check_static_load.report(check_static_load.poses_from_rows(rows), [2], with_table=True)
+            self.assertEqual(REPORT_WITHOUT_LEAD, text, 'a lead column of {!r}'.format(value))
+
+    def test_the_table_has_a_lead_column_only_with_a_lead(self):
+        without = check_static_load.table(2, check_static_load.poses_from_rows(self.rows_without_a_lead())[2])
+        self.assertNotIn('lead', without)
+        lines = check_static_load.table(2, self.lead_poses()[2]).splitlines()
+        self.assertEqual(['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'deg/s', 'comp', 'lead', 'up', 'down', 'sag'],
+                         lines[1].split())
+        self.assertEqual(1, len({len(line) for line in lines[1:]}), 'one width for header and rows')
+        # the size of the lead of the pose, the errors as recorded
+        self.assertEqual(['10.0', '-', '-', '-', '-', '5', '+0.0', '3.0', '-1.00', '+1.00', '+0.00'],
+                         lines[2].split()[1:])
+        self.assertEqual(['5', '+0.0', '1.0', '-0.50', '+1.50', '+0.50'], lines[3].split()[6:])
+
+    def test_the_lead_column_of_the_table_is_per_joint(self):
+        rows = lead_rows(0, 10, -1.0, 1.0, 3.0, joint=2) + pose_rows(0, 20, 1.0, 1.0, joint=3, mode='sweep')
+        poses = check_static_load.poses_from_rows(rows)
+        self.assertIn('lead', check_static_load.table(2, poses[2]))
+        self.assertNotIn('lead', check_static_load.table(3, poses[3]))
+
+    def test_main_prints_the_lead_and_the_table_column(self):
+        fields = FIELDS + ['lead']
+        rows = lead_rows(0, 10, -1.0, 1.0, 3.0) + lead_rows(1, 40, -0.5, 1.5, 1.0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'sweep.csv')
+            with open(path, 'w', newline='') as csv_file:
+                writer = csv.DictWriter(csv_file, fieldnames=fields, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(rows)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(0, check_static_load.main([path, '--table']))
+            text = output.getvalue()
+        self.assertIn('velocity lead was active: mean absolute lead 2.00, largest 3.00 positions', text)
+        self.assertIn('the lead made the mean friction band 3.00 -> 1.00 positions, 67% smaller', text)
+        self.assertIn('comp    lead', text)
+
+
 class MainTests(unittest.TestCase):
 
     def run_main(self, *argv):

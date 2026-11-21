@@ -109,22 +109,43 @@ def check_move(move: PlannedMove, robot: AbstractRobotController, current_angles
         robot.check_workspace(angles)
 
 
+def step_velocities(angles: np.ndarray, dt: float) -> np.ndarray:
+    """
+    the velocity of every joint at every step of a planned movement, for the velocity lead of the servos
+    :param angles: array of shape (steps, 7), the angles of every step
+    :param dt: the time between two steps in seconds
+    :return: array of the same shape in rad/s: central differences inside the movement, zero at the first and the
+        last step. A movement starts and ends at rest, and the last goal must carry no lead or the end point of the
+        movement would be off.
+    """
+    angles = np.asarray(angles, dtype=np.float64)
+    velocities = np.zeros(angles.shape, dtype=np.float64)
+    if len(angles) > 2:
+        velocities[1:-1] = np.gradient(angles, dt, axis=0)[1:-1]
+    return velocities
+
+
 def execute_move(robot: AbstractRobotController, move: PlannedMove,
                  should_stop: Callable[[], bool] | None = None) -> bool:
     """
-    send every step of a planned movement to the robot, at src.global_constants.steps_per_second. A step that goes
-    out late (a stall of the PC) does not make the next ones hurry: they follow one period after it, so the movement
-    ends later by the stall and no step is skipped.
+    send every step of a planned movement to the robot, at src.global_constants.steps_per_second, together with the
+    velocity of every joint at that step (see step_velocities). A step that goes out late (a stall of the PC) does
+    not make the next ones hurry: they follow one period after it, so the movement ends later by the stall and no
+    step is skipped.
+
+    A movement that is stopped half way leaves the joints up to their lead beyond the last commanded step; no
+    correcting goal is sent, that would be a kick backwards.
     :param move: the PlannedMove to be executed
     :param should_stop: optional function that is checked before every step, the movement stops when it returns True
     :return: True if the whole movement was executed, False if it was stopped
     """
     dt = 1.0 / src.global_constants.steps_per_second
+    velocities = step_velocities(move.angles, dt)
     next_step = perf_counter()
-    for angles in move.angles:
+    for angles, step_velocity in zip(move.angles, velocities):
         if should_stop is not None and should_stop():
             return False
-        robot.move_servos(angles)
+        robot.move_servos(angles, step_velocity)
         next_step += dt
         time_to_sleep = next_step - perf_counter()
         if time_to_sleep > 0:

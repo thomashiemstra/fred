@@ -3,8 +3,11 @@ import unittest
 
 from src.global_constants import EXTENDED_POSITION_CONTROL
 from src.robot_controllers.dynamixel_robot.dynamixel_x_config import MAX_PROFILE_TIME
-from src.robot_controllers.dynamixel_robot.servo import Servo, Servo2, Servo3, ServoWithOffsetFunction
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
+from src.robot_controllers.dynamixel_robot.servo import Servo, Servo2, Servo3, ServoWithOffsetFunction, \
+    MAX_LEAD_STEP
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
+import numpy as np
 from numpy import pi
 
 # the servo configuration of the tests, so a new calibration of the robot doesn't change them
@@ -414,6 +417,198 @@ class ServoCompensationTest(unittest.TestCase):
         self.assertEqual(1024 + 10, self.servo.clamp_target_position())
 
 
+def degrees_per_second(degrees):
+    """the commanded velocity of a joint in rad/s"""
+    return float(np.radians(degrees))
+
+
+class ServoVelocityFeedforwardTest(unittest.TestCase):
+    """a Servo with a velocity feedforward adds the positions for the commanded velocity to the target"""
+
+    def setUp(self):
+        # the coefficient is in pwm per degree/s: at P 640 the 10 pwm of 1 degree/s are 2 positions
+        self.feedforward = VelocityFeedforward(10.0, 30)
+        self.servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, offset=10,
+                           velocity_feedforward=self.feedforward)
+        # mounted the other way around: the position falls as the angle rises
+        self.reversed = Servo(3072, 1024, -pi / 2, pi / 2, EXTENDED_POSITION_CONTROL, p=640,
+                              velocity_feedforward=self.feedforward)
+
+    @staticmethod
+    def leads(servo, angle, degrees, calls, all_angles=None):
+        """the lead after each of a number of calls at the same angle and velocity"""
+        leads = []
+        for _ in range(calls):
+            servo.set_target_position_from_angle(angle, all_angles, degrees_per_second(degrees))
+            leads.append(servo.lead_positions)
+        return leads
+
+    def test_the_lead_has_the_sign_of_the_velocity_for_a_position_that_rises_with_the_angle(self):
+        self.leads(self.servo, 0.5 * pi, 3.0, 10)
+        self.assertEqual(6, self.servo.lead_positions)
+        self.assertEqual(2048 + 10 + 6, self.servo.target_position)
+        self.leads(self.servo, 0.5 * pi, -3.0, 20)
+        self.assertEqual(-6, self.servo.lead_positions)
+        self.assertEqual(2048 + 10 - 6, self.servo.target_position)
+
+    def test_the_lead_follows_the_direction_of_the_position_for_a_position_that_falls_as_the_angle_rises(self):
+        # the angle rises, so the position falls and has to be led downwards
+        self.leads(self.reversed, 0.0, 3.0, 10)
+        self.assertEqual(-6, self.reversed.lead_positions)
+        self.assertEqual(2048 - 6, self.reversed.target_position)
+        self.leads(self.reversed, 0.0, -3.0, 20)
+        self.assertEqual(6, self.reversed.lead_positions)
+        self.assertEqual(2048 + 6, self.reversed.target_position)
+
+    def test_the_lead_is_rounded_to_whole_positions(self):
+        for degrees, lead in ((2.6, 5), (2.8, 6), (-2.6, -5), (-2.8, -6), (0.2, 0)):
+            servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, velocity_feedforward=self.feedforward)
+            self.leads(servo, 0.5 * pi, degrees, 10)
+            self.assertEqual(lead, servo.lead_positions, msg=str(degrees))
+            self.assertIsInstance(servo.lead_positions, int)
+            self.assertIsInstance(servo.target_position, int)
+
+    def test_the_lead_uses_the_p_gain_of_the_servo(self):
+        # the same drive is half the positions at twice the P gain
+        self.servo.p = 1280
+        self.leads(self.servo, 0.5 * pi, 3.0, 10)
+        self.assertEqual(3, self.servo.lead_positions)
+
+    def test_the_lead_is_clipped_by_the_velocity_feedforward_to_its_maximum(self):
+        self.leads(self.servo, 0.5 * pi, 100.0, 100)
+        self.assertEqual(30, self.servo.lead_positions)
+        self.leads(self.servo, 0.5 * pi, -100.0, 100)
+        self.assertEqual(-30, self.servo.lead_positions)
+
+    def test_the_lead_adds_to_the_compensation(self):
+        from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
+        # 100 pwm are 20 positions at P 640
+        servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, offset=10,
+                      velocity_feedforward=self.feedforward, compensation=StaticCompensation(3, {'sin_phi': 100.0}, 60))
+        angles = [0.0, 0.0, 0.0, 0.5 * pi, 0.0, 0.0, 0.0]  # phi = pi/2, sin(phi) = 1
+        self.leads(servo, 0.5 * pi, 3.0, 10, angles)
+        self.assertEqual(20, servo.compensation_positions)
+        self.assertEqual(6, servo.lead_positions)
+        self.assertEqual(2048 + 10 + 20 + 6, servo.target_position)
+
+    def test_without_a_velocity_there_is_no_lead_at_once(self):
+        self.leads(self.servo, 0.5 * pi, 3.0, 10)
+        self.assertEqual(6, self.servo.lead_positions)
+        self.servo.set_target_position_from_angle(0.5 * pi)
+        self.assertEqual(0, self.servo.lead_positions)
+        self.assertEqual(2048 + 10, self.servo.target_position)
+        self.servo.set_target_position_from_angle(0.5 * pi, None, None)
+        self.assertEqual(0, self.servo.lead_positions)
+
+    def test_without_a_velocity_feedforward_there_is_no_lead_whatever_the_velocity(self):
+        plain = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, offset=10)
+        self.assertIsNone(plain.velocity_feedforward)
+        self.leads(plain, 0.5 * pi, 50.0, 10)
+        self.assertEqual(0, plain.lead_positions)
+        self.assertEqual(2048 + 10, plain.target_position)
+
+    def test_a_velocity_of_zero_gives_no_lead(self):
+        self.leads(self.servo, 0.5 * pi, 0.0, 5)
+        self.assertEqual(0, self.servo.lead_positions)
+        self.assertEqual(2048 + 10, self.servo.target_position)
+
+    def test_a_step_in_the_velocity_reaches_its_lead_in_steps_of_at_most_2_positions(self):
+        self.assertEqual(2.0, MAX_LEAD_STEP)
+        # 5 degrees/s are 10 positions
+        self.assertEqual([2, 4, 6, 8, 10, 10, 10], self.leads(self.servo, 0.5 * pi, 5.0, 7))
+        # and the lead comes down the same way when the joint stops
+        self.assertEqual([8, 6, 4, 2, 0, 0], self.leads(self.servo, 0.5 * pi, 0.0, 6))
+        # also straight to the other direction
+        self.assertEqual([-2, -4, -6, -8, -10, -10], self.leads(self.servo, 0.5 * pi, -5.0, 6))
+
+    def test_a_step_on_the_reversed_servo_is_limited_the_same_way(self):
+        self.assertEqual([-2, -4, -6, -8, -10, -10], self.leads(self.reversed, 0.0, 5.0, 6))
+        self.assertEqual([-8, -6, -4, -2, 0, 0], self.leads(self.reversed, 0.0, 0.0, 6))
+
+    def test_the_rate_limit_works_on_the_lead_before_rounding(self):
+        # 1.55 degrees/s are 3.1 positions: the lead goes 2.0 then 3.1, and a rounded one would stop at 2 or 4
+        self.assertEqual([2, 3, 3], self.leads(self.servo, 0.5 * pi, 1.55, 3))
+        # 0.9 degrees/s are 1.8 positions, below the step: reached at once
+        servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, velocity_feedforward=self.feedforward)
+        self.assertEqual([2, 2], self.leads(servo, 0.5 * pi, 0.9, 2))
+        # a slowly rising velocity is followed in steps below the limit, rounding does not add up
+        servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, velocity_feedforward=self.feedforward)
+        leads = [self.lead_after(servo, 0.1 * step) for step in range(1, 21)]  # 0.2 positions more every call
+        self.assertEqual([round(0.2 * step) for step in range(1, 21)], leads)
+
+    @staticmethod
+    def lead_after(servo, degrees):
+        servo.set_target_position_from_angle(0.5 * pi, None, degrees_per_second(degrees))
+        return servo.lead_positions
+
+    def test_a_missing_velocity_resets_the_rate_limit(self):
+        self.leads(self.servo, 0.5 * pi, 5.0, 10)
+        self.assertEqual(10, self.servo.lead_positions)
+        self.servo.set_target_position_from_angle(0.5 * pi)
+        # the next velocity starts from 0 again
+        self.assertEqual([2, 4], self.leads(self.servo, 0.5 * pi, 5.0, 2))
+
+    def test_reset_lead_drops_the_lead_and_the_rate_limit(self):
+        self.leads(self.servo, 0.5 * pi, 5.0, 10)
+        self.servo.reset_lead()
+        self.assertEqual(0, self.servo.lead_positions)
+        self.assertEqual([2, 4], self.leads(self.servo, 0.5 * pi, 5.0, 2))
+
+    def test_a_new_servo_has_no_lead(self):
+        self.assertEqual(0, self.servo.lead_positions)
+        self.assertIs(self.feedforward, self.servo.velocity_feedforward)
+        self.assertIsNone(Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL).velocity_feedforward)
+
+    def test_the_trajectory_position_is_the_target_without_the_compensation_and_the_lead(self):
+        from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation
+        servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640, offset=10,
+                      velocity_feedforward=self.feedforward, compensation=StaticCompensation(3, {'sin_phi': 100.0}, 60))
+        angles = [0.0, 0.0, 0.0, 0.5 * pi, 0.0, 0.0, 0.0]
+        self.leads(servo, 0.5 * pi, 3.0, 10, angles)
+        self.assertEqual(2048 + 10 + 20 + 6, servo.target_position)
+        self.assertEqual(2048 + 10, servo.trajectory_position)
+        servo.set_target_position_from_angle(0.5 * pi)
+        self.assertEqual(servo.target_position, servo.trajectory_position)
+
+    def test_clamp_target_position_keeps_the_compensation_and_the_lead_at_the_end_of_the_range(self):
+        self.servo.target_position = 3300
+        self.servo.compensation_positions = 30
+        self.servo.lead_positions = 10
+        self.assertEqual(3072 + 10 + 30 + 10, self.servo.clamp_target_position())
+        self.servo.target_position = 900
+        self.servo.compensation_positions = -30
+        self.servo.lead_positions = -10
+        self.assertEqual(1024 + 10 - 30 - 10, self.servo.clamp_target_position())
+        # inside the range nothing is clamped
+        self.servo.target_position = 2000
+        self.servo.compensation_positions = 5
+        self.servo.lead_positions = -4
+        self.assertEqual(2000, self.servo.clamp_target_position())
+
+    def test_a_target_beyond_the_range_keeps_its_lead_when_it_is_clamped(self):
+        self.leads(self.servo, pi + 0.5, 5.0, 10)
+        self.assertEqual(10, self.servo.lead_positions)
+        self.assertEqual(3072 + 10 + 10, self.servo.clamp_target_position())
+
+    def test_the_legacy_subclasses_take_the_velocity(self):
+        offsets = {"0.0": {"0.0": -10}}
+        servo2 = Servo2(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, dynamic_offsets=offsets)
+        servo2.set_target_position_from_angle(50, [0.0] * 7, 0.3)
+        self.assertEqual(50 + 10, servo2.target_position)
+        servo3 = Servo3(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, dynamic_offsets={"0.0": 10})
+        servo3.set_target_position_from_angle(50, [0.0] * 7, 0.3)
+        self.assertEqual(50 - 10, servo3.target_position)
+        with_function = ServoWithOffsetFunction(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, lambda angles: 0,
+                                                lambda angles: 0)
+        with_function.set_target_position_from_angle(50, [0.0] * 7, 0.3)
+        self.assertEqual(50, with_function.target_position)
+
+    def test_the_string_of_the_servo_shows_the_velocity_feedforward(self):
+        self.assertIn('velocity_feedforward=VelocityFeedforward(pwm_per_degree_per_second=10.0, max_positions=30)',
+                      str(self.servo))
+        self.assertIn('velocity_feedforward=None', str(Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL)))
+
+
 
 class TimeBasedProfileTests(unittest.TestCase):
 
@@ -426,24 +621,23 @@ class TimeBasedProfileTests(unittest.TestCase):
         servo = Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL, profile_velocity=300, profile_acceleration=100)
         self.assertFalse(servo.time_based)
         self.assertIsNone(servo.move_time)
-        self.assertEqual(0, servo.ff1)
         self.assertEqual((300, 100), servo.profile_registers())
 
     def test_time_based(self):
-        servo = self.servo(ff1=700)
+        servo = self.servo()
         self.assertTrue(servo.time_based)
         self.assertEqual((15, 0), servo.profile_registers())
-        self.assertEqual((15, 700), (servo.move_time, servo.ff1))
-        self.assertIn('move_time=15 ff1=700', str(servo))
+        self.assertEqual(15, servo.move_time)
+        self.assertIn('move_time=15 velocity_feedforward=None', str(servo))
 
-    def test_subclasses_take_move_time_and_ff1(self):
+    def test_subclasses_take_move_time(self):
         offsets = {'0.0': {'0.0': 0}}
         servos = (ServoWithOffsetFunction(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, lambda angles: 0,
-                                          lambda angles: 0, move_time=12, ff1=3),
-                  Servo2(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offsets, move_time=12, ff1=3),
-                  Servo3(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets={'0.0': 0}, move_time=12, ff1=3))
+                                          lambda angles: 0, move_time=12),
+                  Servo2(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets=offsets, move_time=12),
+                  Servo3(0, 100, 0, pi, EXTENDED_POSITION_CONTROL, dynamic_offsets={'0.0': 0}, move_time=12))
         for servo in servos:
-            self.assertEqual((12, 3, True), (servo.move_time, servo.ff1, servo.time_based), type(servo).__name__)
+            self.assertEqual((12, True), (servo.move_time, servo.time_based), type(servo).__name__)
 
     def test_a_small_distance_gets_the_move_time(self):
         servo = self.servo()

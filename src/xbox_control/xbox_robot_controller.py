@@ -52,6 +52,9 @@ GRIPPER_STEP = 1
 GRIPPER_MAX_LEAD = 25
 # a stick step that is too fast is slowed down to this fraction of recommended_max_servo_speed, below the speed check
 SLOW_DOWN_MARGIN = 0.95
+# set to False the gamepad sends its steps without velocities, as before 21 November 2026, to compare by hand how the
+# arm follows the sticks with and without the velocity lead of the servos
+SEND_VELOCITIES = True
 # recorded moves are saved to and restored from this directory, next to src, by a name of letters, digits, - and _
 RECORDED_MOVES_DIR = get_project_root().parent / 'recorded_moves'
 RECORDED_MOVES_NAME = re.compile(r'[A-Za-z0-9_-]{1,100}')
@@ -82,8 +85,10 @@ class XboxRobotController:
         self._crashed = False
         self._start_move: PlannedMove | None = None
         self._step_skipped = False  # the gamepad asks for a step that fails a check, the robot holds
-        # the pose and the angles of the last step of the sticks, the angles the control loop sends
-        self._step: tuple[Pose, np.ndarray] | None = None
+        # the pose, the angles and the velocities of the last step of the sticks, what the control loop sends. The
+        # velocities are in rad/s like the angles, indexed by servo id, index 0 unused. The step belongs to the
+        # current pose only while the pose is this very object, a pose some other part set is not a step
+        self._step: tuple[Pose, np.ndarray, np.ndarray] | None = None
         self.recorded_positions: list[Pose] = []
         self.current_pose: Pose = None  # type: ignore[assignment]  # set by start before the control loop uses it
         self.thread: threading.Thread | None = None
@@ -270,8 +275,15 @@ class XboxRobotController:
         """
         the pose the gamepad asks for becomes the current pose when the step to it is safe (see _choose_step),
         otherwise the robot holds the current pose: logged as a warning when the holding starts, and at debug level
-        while it lasts
+        while it lasts.
+
+        The velocities of a taken step are the change of the angles of the step divided by step_time, the time that
+        really passed, so also when a long pass limited the size of the step: the average speed over the time that
+        passed is what the arm does. A held pose gets zero velocities, so the velocity lead of the servos comes down
+        at its rate limit instead of dropping at once.
+        :param step_time: the seconds that passed since the previous step, 0 or less gives zero velocities
         """
+        start_angles = self._step_angles()
         try:
             self.current_pose, angles = self._choose_step(new_pose, step_time)
         except MovementException as e:
@@ -280,8 +292,10 @@ class XboxRobotController:
             else:
                 logger.debug('holding the pose, skipping the step the gamepad asks for: %s', e)
             self._step_skipped = True
+            if self._step is not None and self._step[0] is self.current_pose:
+                self._step = (self._step[0], self._step[1], np.zeros_like(self._step[2]))
             return
-        self._step = (self.current_pose, angles)
+        self._step = (self.current_pose, angles, _step_velocities(start_angles, angles, step_time))
         self._step_skipped = False
 
     def _step_angles(self) -> np.ndarray:
@@ -294,12 +308,17 @@ class XboxRobotController:
     def _send_current_pose(self) -> None:
         """
         sends the angles of the last step, which can be between the two wrist solutions while the wrist turns over;
-        they are within the joint speed limit for the time of the step, so there is no extra time to wait for
+        they are within the joint speed limit for the time of the step, so there is no extra time to wait for. The
+        velocities of the step go with them (unless SEND_VELOCITIES is False), a pose some other part set is sent
+        with move_to_pose, without velocities.
         """
         if self._step is None or self._step[0] is not self.current_pose:
             self.robot.move_to_pose(self.current_pose)
             return
-        self.robot.move_servos(self._step[1])
+        if SEND_VELOCITIES:
+            self.robot.move_servos(self._step[1], self._step[2])
+        else:
+            self.robot.move_servos(self._step[1])
 
     def _choose_step(self, new_pose: Pose, step_time: float) -> tuple[Pose, np.ndarray]:
         """
@@ -463,8 +482,10 @@ class XboxRobotController:
             logger.warning('can not reset the orientation: %s', e)
 
     def _toggle_flip(self) -> None:
-        # the next steps turn the wrist over at the joint speed limit, starting from the angles it was sent with
-        self._step = (self.current_pose, self._step_angles())
+        # the next steps turn the wrist over at the joint speed limit, starting from the angles it was sent with; a step
+        # set by hand has no speed, the next step measures its own velocities
+        angles = self._step_angles()
+        self._step = (self.current_pose, angles, np.zeros_like(angles))
         self.current_pose.flip = not self.current_pose.flip
 
     def _recording_flip(self) -> bool | None:
@@ -617,6 +638,21 @@ class XboxRobotController:
             return reached_pose
 
         return recorded_moves[-1].poses[-1]
+
+
+def _step_velocities(start_angles: np.ndarray, angles: np.ndarray, step_time: float) -> np.ndarray:
+    """
+    the velocities of a step in rad/s, indexed by servo id like the angles: the change of the angles over the time
+    the step covers. Zero when there is no time, or when an angle is not a number (the step was checked, but the angles
+    it started from came from the inverse kinematics of a pose some other part set).
+    """
+    velocities = np.zeros_like(angles, dtype=np.float64)
+    if step_time > 0:
+        velocities = (angles - start_angles) / step_time
+        velocities[0] = 0.0  # servo id 0 doesn't exist
+        if not np.all(np.isfinite(velocities)):
+            velocities = np.zeros_like(velocities)
+    return velocities
 
 
 def _with_flip(pose: Pose, flip: bool) -> Pose:

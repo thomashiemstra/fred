@@ -23,11 +23,13 @@ supported before the torque goes off (the same prompt comes when the arm can't b
 hardware error). Without any input to answer that prompt the servos keep holding their position, and
 calibration/lower_arm.py lowers the arm later.
 
-Logged per servo and pose direction: the commanded angle, the goal position of the angle without any compensation,
-the compensation that was added to it (0 unless the yaml has one), the present position and the error (present
-minus the uncompensated goal, in positions) as the mean of --readings readings 0.05 s apart (samples is their
-number), the gains p, i and d of the servo, the measured present pwm (mean, 885 is full drive), the present current
-register (mA for the XM and XL servos, 0.1% load for the XC430), the temperature and the input voltage. With a
+Logged per servo and pose direction: the commanded angle, the goal position of the angle without any compensation
+and without any velocity lead (Servo.trajectory_position), the compensation that was added to it (0 unless the yaml has
+one), the velocity lead that was added to it (0 at rest, and the arm is at rest here; the column is there because the
+sweep recordings, which move, fill it), the present position and the error (present minus the goal of the angle itself,
+in positions) as the mean of --readings readings 0.05 s apart (samples is their number), the gains p, i and d of the
+servo, the measured present pwm (mean, 885 is full drive), the present current register (mA for the XM and XL servos,
+0.1% load for the XC430), the temperature and the input voltage. With a
 compensation active the error is the sag that remains: the whole static load is error minus compensation, which
 fit_static_load.py uses, together with p to convert it to the holding drive in pwm units. The mode column is
 'static' for these rows, speed is blank (a recording of sweeps fills both).
@@ -66,9 +68,9 @@ CURRENT_UNITS = {
     'XC430-W240': ('load_0.1%', 1.0),  # no current sensor, the register is the present load
     'XC430-W150': ('load_0.1%', 1.0),
 }
-FIELDS = ('time', 'pose', 'direction', 'servo', 'angle', 'goal_position', 'compensation', 'present_position', 'error',
-          'current_raw', 'current', 'current_unit', 'temperature', 'voltage', 'mode', 'speed', 'samples', 'p', 'i', 'd',
-          'pwm')
+FIELDS = ('time', 'pose', 'direction', 'servo', 'angle', 'goal_position', 'compensation', 'lead', 'present_position',
+          'error', 'current_raw', 'current', 'current_unit', 'temperature', 'voltage', 'mode', 'speed', 'samples', 'p',
+          'i', 'd', 'pwm')
 MODE = 'static'  # the value of the mode column for the rows of this script
 DEFAULT_JOINTS = (2, 3, 4, 5)
 # readings of the servos per row, and the pause between them in seconds: the position of a servo that holds a load
@@ -227,14 +229,15 @@ def readings(robot: DynamixelRobotController | CombinedRobot, models: dict[int, 
     rows = []
     for servo_id in ARM_IDS:
         servo = robot.servo_handler.get_servo(servo_id)
-        # the error is measured against the goal of the angle itself, whatever compensation was added to it
-        goal = servo.target_position - servo.compensation_positions
+        # the error is measured against the goal of the angle itself, whatever compensation and velocity lead were
+        # added to it (the lead is 0 at rest)
+        goal = servo.trajectory_position
         position = float(np.mean(positions[servo_id]))
         current, unit = current_in_units(currents[servo_id], models.get(servo_id))
         temperature, voltage = status[servo_id]
         rows.append({'time': now, 'pose': pose_index, 'direction': direction, 'servo': servo_id,
                      'angle': '{:.6f}'.format(angles[servo_id]), 'goal_position': goal,
-                     'compensation': servo.compensation_positions,
+                     'compensation': servo.compensation_positions, 'lead': servo.lead_positions,
                      'present_position': '{:.2f}'.format(position), 'error': '{:.2f}'.format(position - goal),
                      'current_raw': currents[servo_id], 'current': '' if current is None else '{:.2f}'.format(current),
                      'current_unit': unit, 'temperature': temperature, 'voltage': voltage, 'mode': MODE,

@@ -37,6 +37,7 @@ class FakeServoController:
             current_angles = inverse_kinematics(current_pose, test_config)
         self.current_angles = current_angles
         self.sent_angles = []
+        self.sent_velocities = []
 
     def get_angle_limits(self):
         return None
@@ -47,9 +48,10 @@ class FakeServoController:
     def check_workspace(self, angles):
         workspace.check_workspace(angles, self.robot_config, self.workspace_limits)
 
-    def move_servos(self, angles):
+    def move_servos(self, angles, velocities=None):
         # the caller may reuse the array, so copy it
         self.sent_angles.append(np.array(angles, dtype=np.float64))
+        self.sent_velocities.append(None if velocities is None else np.array(velocities, dtype=np.float64))
 
     def get_current_angles(self):
         return self.current_angles
@@ -141,6 +143,22 @@ class JointMoveTests(unittest.TestCase):
         self.assertEqual(ceil(0.6 * global_constants.steps_per_second) + 1, len(sent))
         test.assert_allclose(angles_of(start_pose), sent[0], atol=1e-9)
         test.assert_allclose(angles_of(stop_pose), sent[-1], atol=1e-9)
+
+    def test_the_steps_of_a_joint_move_come_with_their_velocities(self):
+        robot = FakeServoController()
+        with mock.patch.object(movement, 'sleep'):
+            move_between_poses(robot, Pose(25, 25, 10), Pose(0, 30, 10, time=0.6))
+
+        self.assertEqual(len(robot.sent_angles), len(robot.sent_velocities))
+        velocities = np.array(robot.sent_velocities)
+        # at rest at both ends, moving in between: the base turns in one direction only
+        test.assert_array_equal(np.zeros(7), velocities[0])
+        test.assert_array_equal(np.zeros(7), velocities[-1])
+        self.assertTrue(np.all(velocities[1:-1, 1] * (robot.sent_angles[-1][1] - robot.sent_angles[0][1]) > 0))
+        # a velocity of a joint is the change of its angle per second
+        step = len(robot.sent_angles) // 2
+        expected = (robot.sent_angles[step + 1] - robot.sent_angles[step - 1]) * global_constants.steps_per_second / 2
+        test.assert_allclose(expected, velocities[step], atol=1e-9)
 
     def test_already_at_the_target_does_not_move(self):
         target = Pose(25, 25, 10)

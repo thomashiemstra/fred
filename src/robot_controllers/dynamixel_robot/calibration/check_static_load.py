@@ -12,21 +12,34 @@ error is what is left of the sag. Friction rests a joint off its goal with the s
 (up: from below, down: from above), so at every pose the mean of the two directions is the sag, the gravity that is
 not compensated, and half the difference is the friction band. A joint is reported from the poses where it has an
 error in both directions; the recordings are pooled, a pose is identified by its file and its index in the file.
+A csv recorded with a velocity lead (see velocity_feedforward.py) has a column lead: the positions the lead added to the
+goal, signed like the position, so opposite in the two directions of a sweep (0 at rest). The error is measured
+against the goal without the compensation and without the lead, so the lead is not part of it. It cancels in the mean
+of the two directions like friction does, so the sag and the sag without the compensation are what they would be
+without it. A csv without the column, or a blank lead, means 0 and the report is then the one it always was.
 
 How to read the report, per joint:
 - the sag that is left: the sag (mean of up and down) of every pose, with the compensation as it was recorded. This is
   the number to judge the compensation by: it should be close to 0 and without a trend over the range of the joint.
 - the sag without the compensation: the sag less the compensation, what the joint would have had without it, and how
   much smaller the rms has become. Left out when no compensation was active in the recording.
+- the lead, in one line under the header, only when a lead was active: the mean absolute lead and the largest, in
+  positions.
 - the error of each direction, the largest absolute error of either, and the friction band. The friction is not
   compensated, it is the part of the error that stays when the sag is gone.
+- only when a lead was active, what the errors of the directions would have been without it, and the friction band
+  that goes with them. The goal that was sent is the trajectory plus the lead, so without the lead the joint trails
+  its trajectory by the lead more: error without the lead = error - lead. In a sweep the lead takes the lag of the
+  speed out of the errors, so the friction band is smaller than it would have been; the line gives how much.
 - the poses where the absolute sag is over --limit (positions), largest first, at most --worst of them, with the
   angles of joints 1 to 6 in whole degrees, and one verdict line.
 - with --table every pose of the joint, sorted by the angle of the joint and then by the other angles, to read a trend
-  along the range of the joint off the sag column.
+  along the range of the joint off the sag column. When a lead was active in the rows of the joint the table has a
+  column lead, the mean of the absolute lead of the two directions.
 In a sweep the joint moves while it is measured, so the errors of the two directions include the lag of the speed (it
-has opposite signs and cancels in the mean): the sag is right, the friction band is larger than at rest. A joint with
-rows of both modes (static and sweep) is warned about, since the two are mixed in its statistics.
+has opposite signs and cancels in the mean): the sag is right, the friction band is larger than at rest, unless a lead
+took the lag out of the errors. A joint with rows of both modes (static and sweep) is warned about, since the two are
+mixed in its statistics.
 """
 import argparse
 import csv
@@ -59,6 +72,29 @@ class PoseJoint:
     p: float | None  # the P gain of the servo, None when the csv has none
     mode: str  # 'static' or 'sweep'
     speed: float | None = None  # degrees per second of a sweep, None at rest
+    lead_up: float = 0.0  # positions the velocity lead added to the goal arriving from below, 0 without a lead
+    lead_down: float = 0.0  # the same arriving from above, opposite in sign in a sweep
+
+    @property
+    def lead(self) -> float:
+        """the size of the lead at the pose: the mean of the absolute lead of the two directions"""
+        return (abs(self.lead_up) + abs(self.lead_down)) / 2.0
+
+    @property
+    def error_up_without_lead(self) -> float:
+        """the error arriving from below if no lead had been added. The goal that was sent is the trajectory plus the
+        lead, so without it the joint would have trailed the trajectory by the lead more: error - lead"""
+        return self.error_up - self.lead_up
+
+    @property
+    def error_down_without_lead(self) -> float:
+        """the error arriving from above if no lead had been added, error - lead (the lead is negative here)"""
+        return self.error_down - self.lead_down
+
+    @property
+    def friction_without_lead(self) -> float:
+        """half the difference between the directions if no lead had been added"""
+        return abs(self.error_up_without_lead - self.error_down_without_lead) / 2.0
 
     @property
     def compensation(self) -> float:
@@ -92,6 +128,18 @@ class Stats:
 
 
 @dataclass
+class LeadSummary:
+    """what a velocity lead did to the errors of a joint, in positions"""
+    mean: float  # the mean absolute lead over both directions of all poses
+    largest: float  # the largest absolute lead
+    up_without: Stats  # the errors arriving from below if no lead had been added
+    down_without: Stats
+    friction_mean: float  # half the difference of the directions without the lead
+    friction_max: float
+    friction_reduction: float | None  # percent the mean friction band is smaller than without, None if that is 0
+
+
+@dataclass
 class JointSummary:
     """the numbers of the report of one joint"""
     joint: int
@@ -110,6 +158,7 @@ class JointSummary:
     rms_reduction: float | None  # percent the rms is smaller than without the compensation, None without one
     limit: float
     over: list[PoseJoint]  # the poses whose absolute sag is over the limit, the largest first
+    lead: LeadSummary | None = None  # None when the lead was 0 in every row
 
 
 def _blank(value: str | None) -> bool:
@@ -173,7 +222,8 @@ def poses_from_rows(rows: Iterable[dict[str, str]]) -> dict[int, list[PoseJoint]
                 error_up=_number(up, 'error'), error_down=_number(down, 'error'),
                 compensation_up=_optional(up, 'compensation') or 0.0,
                 compensation_down=_optional(down, 'compensation') or 0.0,
-                p=_optional(up, 'p'), mode=(up.get('mode') or '').strip() or 'static', speed=_optional(up, 'speed')))
+                p=_optional(up, 'p'), mode=(up.get('mode') or '').strip() or 'static', speed=_optional(up, 'speed'),
+                lead_up=_optional(up, 'lead') or 0.0, lead_down=_optional(down, 'lead') or 0.0))
     return poses
 
 
@@ -201,6 +251,18 @@ def summarise(joint: int, poses: Sequence[PoseJoint], limit: float = DEFAULT_LIM
     over = sorted((pose for pose in poses if abs(pose.sag) > limit), key=lambda pose: -abs(pose.sag))
     up = stats_of([pose.error_up for pose in poses])
     down = stats_of([pose.error_down for pose in poses])
+    lead = None
+    if any(pose.lead_up != 0 or pose.lead_down != 0 for pose in poses):
+        frictions_without = [pose.friction_without_lead for pose in poses]
+        friction_without = float(np.mean(frictions_without))
+        lead_largest = max(max(abs(pose.lead_up), abs(pose.lead_down)) for pose in poses)
+        lead = LeadSummary(
+            mean=float(np.mean([pose.lead for pose in poses])), largest=lead_largest,
+            up_without=stats_of([pose.error_up_without_lead for pose in poses]),
+            down_without=stats_of([pose.error_down_without_lead for pose in poses]),
+            friction_mean=friction_without, friction_max=max(frictions_without),
+            friction_reduction=100.0 * (1.0 - float(np.mean(frictions)) / friction_without)
+            if friction_without > 0 else None)
     return JointSummary(
         joint=joint, count=len(poses), gains=tuple(sorted({pose.p for pose in poses if pose.p is not None})),
         modes=tuple(sorted({pose.mode for pose in poses})),
@@ -208,7 +270,7 @@ def summarise(joint: int, poses: Sequence[PoseJoint], limit: float = DEFAULT_LIM
         sag=sag, uncompensated=uncompensated, compensation=stats_of([pose.compensation for pose in poses])
         if active else None, up=up, down=down, largest_error=max(up.largest, down.largest),
         friction_mean=float(np.mean(frictions)), friction_max=max(frictions), rms_reduction=reduction, limit=limit,
-        over=over)
+        over=over, lead=lead)
 
 
 def _degrees(positions: float) -> float:
@@ -254,6 +316,9 @@ def describe(summary: JointSummary, worst: int = DEFAULT_WORST) -> str:
     if len(summary.modes) > 1:
         lines.append('  warning: the rows are of both modes ({}), the statistics mix them'.format(
             ' and '.join(summary.modes)))
+    if summary.lead is not None:
+        lines.append('  velocity lead was active: mean absolute lead {:.2f}, largest {:.2f} positions'.format(
+            summary.lead.mean, summary.lead.largest))
     lines += _stats_line('sag that is left (mean of up and down, with the compensation as recorded)', summary.sag)
     if summary.compensation is None:
         lines.append('  no compensation was active in these rows: the sag above is the sag of the joint')
@@ -273,8 +338,27 @@ def describe(summary: JointSummary, worst: int = DEFAULT_WORST) -> str:
         summary.largest_error, _degrees(summary.largest_error)))
     lines.append('  friction band (half the up/down difference, not compensated): mean {:.2f}, largest {:.2f} '
                  'positions'.format(summary.friction_mean, summary.friction_max))
+    if summary.lead is not None:
+        lines += _lead_lines(summary.lead, summary.friction_mean)
     lines += _over_lines(summary, worst)
     return '\n'.join(lines)
+
+
+def _lead_lines(lead: LeadSummary, friction_mean: float) -> list[str]:
+    """
+    what the errors of the directions would have been without the lead, and what the lead did to the friction band
+    :param friction_mean: the mean friction band of the errors as recorded, with the lead
+    """
+    lines = ['  without the lead (error less lead, the joint would trail by the lead more):',
+             '    up: mean {:+.2f}, from {:+.2f} to {:+.2f}; down: mean {:+.2f}, from {:+.2f} to {:+.2f} '
+             'positions'.format(lead.up_without.mean, lead.up_without.low, lead.up_without.high,
+                                lead.down_without.mean, lead.down_without.low, lead.down_without.high),
+             '    friction band: mean {:.2f}, largest {:.2f} positions'.format(lead.friction_mean, lead.friction_max)]
+    if lead.friction_reduction is not None:
+        lines.append('    the lead made the mean friction band {:.2f} -> {:.2f} positions, {:.0f}% {}'.format(
+            lead.friction_mean, friction_mean, abs(lead.friction_reduction),
+            'smaller' if lead.friction_reduction >= 0 else 'larger'))
+    return lines
 
 
 def _over_lines(summary: JointSummary, worst: int) -> list[str]:
@@ -313,10 +397,14 @@ def table(joint: int, poses: Sequence[PoseJoint]) -> str:
         return (angles[joint - 1], *angles)
 
     with_speed = any(pose.speed is not None for pose in poses)
+    with_lead = any(pose.lead_up != 0 or pose.lead_down != 0 for pose in poses)
     header = '  ' + ' '.join('{:>7s}'.format('q{}'.format(joint_id)) for joint_id in ARM_JOINTS)
     if with_speed:
         header += '  {:>6s}'.format('deg/s')
-    header += '  {:>6s}  {:>7s}  {:>7s}  {:>7s}'.format('comp', 'up', 'down', 'sag')
+    header += '  {:>6s}'.format('comp')
+    if with_lead:
+        header += '  {:>6s}'.format('lead')
+    header += '  {:>7s}  {:>7s}  {:>7s}'.format('up', 'down', 'sag')
     lines = ['joint {}: every pose, by the angle of the joint (angles in degrees, errors in positions)'.format(joint),
              header]
     for pose in sorted(poses, key=key):
@@ -324,8 +412,10 @@ def table(joint: int, poses: Sequence[PoseJoint]) -> str:
                                for angle in pose.angles[1:7])
         if with_speed:
             line += '  {:>6s}'.format('' if pose.speed is None else '{:g}'.format(pose.speed))
-        line += '  {:+6.1f}  {:+7.2f}  {:+7.2f}  {:+7.2f}'.format(
-            pose.compensation, pose.error_up, pose.error_down, pose.sag)
+        line += '  {:+6.1f}'.format(pose.compensation)
+        if with_lead:
+            line += '  {:6.1f}'.format(pose.lead)
+        line += '  {:+7.2f}  {:+7.2f}  {:+7.2f}'.format(pose.error_up, pose.error_down, pose.sag)
         lines.append(line)
     return '\n'.join(lines)
 

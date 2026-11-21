@@ -3,6 +3,74 @@
 Written 18 November 2026. Not a priority: it only matters for how closely the arm follows a trajectory while it
 moves fast. The end point of a move is not affected.
 
+## Built and measured on 21 November 2026
+
+The lead exists and all six arm joints have one in `servo_config.yaml`. What follows this section is the plan as it
+was written on 18 November; where the two differ, this section is what the code does.
+
+What was built:
+
+- A `velocity_feedforward` block per servo: `pwm_per_degree_per_second`, the drive the motor needs per degree/s of
+  the joint in pwm units, and `max_positions`, the clamp. The lead is
+  `pwm_per_degree_per_second * degrees/s * 128 / P` positions
+  (`velocity_feedforward.py`). The plan below has a `lead_time` in ms; that changes with P (joint 2: 64 ms at P 2500,
+  79 ms at P 2000), the coefficient in pwm units does not (14.29 and 13.97).
+- The caller hands the velocity over: `move_servos(angles, velocities)`, and `Servo.set_target_position_from_angle`
+  adds the lead next to the static compensation (`Servo.lead_positions`; `Servo.trajectory_position` is the target
+  without both). `execute_move` and the sweeps of the calibration scripts compute the velocities from their own
+  steps (`movement.step_velocities`: central differences, zero at the first and the last step, so the end point of
+  a move carries no lead); the gamepad loop from its own steps, see "Open". A caller that passes no velocities gets
+  no lead. The lead is not derived from
+  successive goals inside the servo, so a single goal far away can not be mistaken for speed.
+- The lead changes by at most 2 positions per write (`MAX_LEAD_STEP`), and it is rounded to whole positions.
+- A move that is stopped half way leaves the joint up to its lead beyond the last commanded step; no correcting
+  goal is sent.
+- `calibration/fit_velocity_lead.py` fits the coefficient from `_ff.csv` recordings, from the lag and from the
+  measured pwm; the feedforward stage of `tune_servo_gains.py` uses the same code, measures without a lead, then
+  with it, and prints the block for the yaml.
+- The servo's own feedforward gain (FF1, `ff1`) is gone from the code and the yaml: nothing parses, writes or reads
+  it, the register stays at its power-on default of 0. The rest of this document is the only record of why. The
+  recordings of 18 November contain passes with that gain on; `fit_velocity_lead.py` refuses them.
+- The load recorders measure their error against the goal without the lead and log it (`lead` column);
+  `check_static_load.py` and `fit_static_load.py` read it.
+
+Results (lag in positions without and with the lead, at the speeds of the stage; the table with all speeds is in
+`Tuning the servo gains.md`):
+
+| Joint | Coefficient (pwm per degree/s) | Fastest speed | Lag without | Lag with | Left at every speed |
+|---|---|---|---|---|---|
+| 1 | 10.54 | 15 degrees/s | 11.2 | 1.4 | 1.0 to 1.5 |
+| 2 | 13.97 | 15 degrees/s | 15.6 | 2.6 | 1.9 to 2.6 |
+| 3 | 3.07 | 30 degrees/s | 3.5 | 0.5 | 0.5 to 0.9 |
+| 4 | 1.45 | 30 degrees/s | 11.5 | 4.5 | 4.3 to 4.5 |
+| 5 | 2.50 | 30 degrees/s | 14.2 | 1.2 | 1.2 to 2.5 |
+| 6 | 4.45 | 30 degrees/s | 16.1 | 1.0 | 0.6 to 1.4 |
+
+- On joints 1 to 5 the coefficient from the lag and the one from the measured pwm agree within 3%: the lag is the
+  drive the turning motor needs and nothing else. On joint 6 the measured pwm is half of P / 128 times the error
+  (ratio 0.51 on 18 and on 21 November); the lead uses the lag and works, the reason is not known.
+- The load sweeps of joint 2 of 20 November, recorded again with the lead
+  (`calibration/tuning/load_sweep_joint2_20261121_lead.csv`, 68 bins at 5 and 10 degrees/s): the error while moving
+  went from -9.1 going up and +9.1 going down (12.3 at most) to -2.4 and +2.5 (3.5 at most). At full reach that is
+  about 11 mm down to 3 mm at the tip. The sag did not change (0.27 positions rms).
+- Joint 2 swings a little more with the lead: 0.82 to 0.86 positions with the angle falling at P 2000 against about
+  0.7 on 20 November, and 0.1 position more std of the error at 10 and 15 degrees/s in the stage. Under the limit of
+  1 position.
+
+Open:
+
+- The gamepad loop (`xbox_robot_controller.py`) sends velocities since 21 November: the change of the angles of
+  each step over the time that really passed, zeros while a refused step holds the pose (the lead then comes down
+  at its rate limit) and after the flip button. `SEND_VELOCITIES = False` in that file sends the steps without
+  them, to compare by hand. Tested on the fakes only, NOT tried on the arm: its speed can jump (a stick pushed over
+  or let go), which is what the rate limit is for, a step can ask up to 218 degrees/s of a joint, where every lead
+  sits at its clamp of 30 positions, and the gamepad has not run on the arm since the time-based profile of 18
+  November either. First try: slowly, with the arm folded, joint 2 last.
+- What is left is friction, largest on joint 4 (4.5 positions): a term on the same commanded velocity, in the same
+  `velocity_feedforward` block, is the next step.
+- Every joint was measured at one pose. That the coefficient does not depend on the pose is assumed.
+- Not tried above 15 degrees/s on joints 1 and 2 and 30 on the others.
+
 ## The problem
 
 A joint that moves trails the trajectory of its servo, and the faster it moves the further it trails. The servo's

@@ -10,11 +10,14 @@ from numpy import pi
 from src import global_constants
 from src.kinematics.kinematics import inverse_kinematics, forward_kinematics, forward_position_kinematics
 from src.kinematics.kinematics_utils import Pose, RobotConfig
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
+from src.robot_controllers.dynamixel_robot.servo import Servo, MAX_LEAD_STEP
 from src.utils import movement, workspace
 from src.utils.movement import SplineMovement, PoseToPoseMovement
 from src.utils.movement_exception import MovementException
 from src.xbox_control import xbox_robot_controller
 from src.xbox_control.xbox360controller.Xbox360Controller import Buttons
+from src.xbox_control.xbox360controller.xbox_pose_updater import MAX_STEP_TIME
 from src.xbox_control.xbox_robot_controller import determine_time, create_move, XboxRobotController
 
 test_config = RobotConfig(d1=13.92, a2=20, d4=22, d6=12)
@@ -109,6 +112,7 @@ class FakeRobot:
         self.calls = []
         self.poses = []  # the poses of move_to_pose
         self.sent_angles = []  # the angles of move_servos
+        self.sent_velocities = []  # the velocities of move_servos, None for a call without
         self.angle_limits = angle_limits
         self.physics_client = 3
         # optional function called before every step of a straight line movement
@@ -140,12 +144,13 @@ class FakeRobot:
         self.calls.append('disable_servos')
         self.enabled = False
 
-    def move_servos(self, angles):
+    def move_servos(self, angles, velocities=None):
         self.moving_threads.add(threading.current_thread().name)
         if self.on_move_servos is not None:
             self.on_move_servos()
         self.angles = np.array(angles, dtype=np.float64)
         self.sent_angles.append(self.angles.copy())
+        self.sent_velocities.append(None if velocities is None else np.array(velocities, dtype=np.float64))
 
     def move_to_pose(self, pose):
         self.moving_threads.add(threading.current_thread().name)
@@ -1208,6 +1213,274 @@ class StickStepTests(unittest.TestCase):
         self.assertLess(max(position[0] for position in positions), 31.5)
         for position, next_position in zip(positions, positions[1:]):
             self.assertLess(abs(next_position[0] - position[0]), 0.5)
+
+
+class StickVelocityTests(unittest.TestCase):
+    """every step of the sticks goes to the robot with its velocities, the change of the angles over the step time"""
+
+    def controller_at(self, pose, robot=None):
+        robot = robot or FakeRobot()
+        controller = make_controller(robot)
+        controller.current_pose = pose
+        return controller
+
+    def pass_of(self, controller, new_pose, step_time=0.01):
+        """one pass of the control loop: take the step and send it"""
+        controller._take_step(new_pose, step_time)
+        controller._send_current_pose()
+
+    def assert_zero_velocities(self, velocities):
+        self.assertIsNotNone(velocities, 'zero velocities, not a call without velocities')
+        np.testing.assert_array_equal(np.zeros(7), velocities)
+
+    def test_a_step_sends_the_change_of_the_angles_over_the_step_time(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        before = controller._step_angles().copy()
+
+        self.pass_of(controller, Pose(30.05, 22, 4))
+
+        expected = (robot.sent_angles[-1] - before) / 0.01
+        expected[0] = 0
+        self.assertEqual(7, len(robot.sent_velocities[-1]))
+        self.assertEqual(0, robot.sent_velocities[-1][0])
+        np.testing.assert_allclose(expected, robot.sent_velocities[-1], atol=1e-12)
+        self.assertGreater(np.abs(robot.sent_velocities[-1]).max(), 0.01)
+
+    def test_a_following_step_measures_from_the_angles_of_the_previous_step(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        self.pass_of(controller, Pose(30.05, 22, 4))
+
+        self.pass_of(controller, Pose(30.12, 22, 4), 0.02)
+
+        expected = (robot.sent_angles[-1] - robot.sent_angles[-2]) / 0.02
+        expected[0] = 0
+        np.testing.assert_allclose(expected, robot.sent_velocities[-1], atol=1e-12)
+
+    def test_the_step_time_that_really_passed_is_used_when_it_is_longer_than_max_step_time(self):
+        longer = FakeRobot()
+        clipped = FakeRobot()
+        # a step that is not slowed down: the same angles are sent whatever the time
+        self.pass_of(self.controller_at(Pose(30, 22, 4), longer), Pose(31, 22, 4), 0.5)
+        self.pass_of(self.controller_at(Pose(30, 22, 4), clipped), Pose(31, 22, 4), MAX_STEP_TIME)
+
+        np.testing.assert_allclose(clipped.sent_angles[-1], longer.sent_angles[-1], atol=1e-12)
+        self.assertGreater(np.abs(clipped.sent_velocities[-1]).max(), 0.1)
+        np.testing.assert_allclose(clipped.sent_velocities[-1] * MAX_STEP_TIME / 0.5, longer.sent_velocities[-1],
+                                   atol=1e-12)
+
+    def test_a_slowed_down_step_after_a_long_pass_has_the_average_speed_over_the_time_that_passed(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        before = controller._step_angles().copy()
+
+        # 4cm is more than the arm may turn in the (clipped) time of a step at this speed limit: the step is limited
+        with mock.patch.object(global_constants, 'recommended_max_servo_speed', 1.0):
+            self.pass_of(controller, Pose(34, 22, 4), 0.5)
+
+        change = np.abs(robot.sent_angles[-1] - before).max()
+        self.assertAlmostEqual(xbox_robot_controller.SLOW_DOWN_MARGIN * 1.0 * MAX_STEP_TIME, change, places=9)
+        self.assertAlmostEqual(change / 0.5, np.abs(robot.sent_velocities[-1]).max(), places=9)
+
+    def test_a_step_time_of_zero_or_less_sends_zero_velocities(self):
+        for step_time in (0.0, -0.01):
+            with self.subTest(step_time=step_time):
+                robot = FakeRobot()
+                controller = self.controller_at(Pose(30, 22, 4), robot)
+
+                self.pass_of(controller, Pose(30.05, 22, 4), step_time)
+
+                self.assertEqual(1, len(robot.sent_angles))
+                self.assert_zero_velocities(robot.sent_velocities[-1])
+
+    def test_a_refused_step_sends_the_held_angles_again_with_zero_velocities(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        self.pass_of(controller, Pose(30.05, 22, 4))
+        self.assertGreater(np.abs(robot.sent_velocities[-1]).max(), 0.01)
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            self.pass_of(controller, Pose(100, 22, 4))
+        self.pass_of(controller, Pose(100, 22, 4))
+
+        self.assertTrue(controller._step_skipped)
+        self.assertEqual(3, len(robot.sent_angles))
+        np.testing.assert_array_equal(robot.sent_angles[0], robot.sent_angles[1])
+        np.testing.assert_array_equal(robot.sent_angles[0], robot.sent_angles[2])
+        self.assert_zero_velocities(robot.sent_velocities[1])
+        self.assert_zero_velocities(robot.sent_velocities[2])
+
+    def test_taking_steps_again_after_a_refused_step_sends_velocities_again(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        self.pass_of(controller, Pose(30.05, 22, 4))
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            self.pass_of(controller, Pose(100, 22, 4))
+
+        self.pass_of(controller, Pose(30.1, 22, 4))
+
+        self.assertGreater(np.abs(robot.sent_velocities[-1]).max(), 0.01)
+
+    def test_the_sticks_at_rest_send_zero_velocities(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+
+        for _ in range(2):
+            self.pass_of(controller, copy(controller.current_pose))
+
+        self.assertEqual(2, len(robot.sent_angles))
+        for velocities in robot.sent_velocities:
+            self.assert_zero_velocities(velocities)
+
+    def test_the_a_button_sends_zero_velocities_with_the_angles_that_were_sent(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 15), robot)
+        self.pass_of(controller, Pose(30.05, 22, 15))
+        self.assertGreater(np.abs(robot.sent_velocities[-1]).max(), 0.01)
+
+        controller._toggle_flip()
+        controller._send_current_pose()
+
+        self.assertEqual(2, len(robot.sent_angles))
+        np.testing.assert_array_equal(robot.sent_angles[0], robot.sent_angles[1])
+        self.assert_zero_velocities(robot.sent_velocities[-1])
+
+        # the turn of the wrist that follows has velocities again
+        self.pass_of(controller, copy(controller.current_pose))
+        self.assertGreater(np.abs(robot.sent_velocities[-1]).max(), 0.01)
+
+    def test_a_pose_some_other_part_set_is_sent_with_move_to_pose_without_velocities(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        self.pass_of(controller, Pose(30.05, 22, 4))
+        controller.current_pose = Pose(25, 25, 10)
+
+        with mock.patch.object(robot, 'move_servos', wraps=robot.move_servos) as move_servos:
+            controller._send_current_pose()
+
+        move_servos.assert_not_called()
+        self.assertEqual(1, len(robot.sent_angles))
+        self.assertEqual([Pose(25, 25, 10)], robot.poses)
+
+    def test_the_first_step_after_another_part_set_the_pose_starts_from_the_angles_of_that_pose(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        for x in (30.05, 30.1, 30.15):
+            self.pass_of(controller, Pose(x, 22, 4))
+        # like the end of a planned move or a reset: the pose is somewhere else, the old step is not its angles
+        controller.current_pose = Pose(25, 25, 10)
+
+        self.pass_of(controller, Pose(25.05, 25, 10))
+
+        expected = (robot.sent_angles[-1] - inverse_kinematics(Pose(25, 25, 10), test_config)) / 0.01
+        expected[0] = 0
+        np.testing.assert_allclose(expected, robot.sent_velocities[-1], atol=1e-9)
+        self.assertLess(np.abs(robot.sent_velocities[-1]).max(), 1, 'a step of 0.05cm is slow, not a long move')
+        self.assertGreater(np.abs(robot.sent_velocities[-1]).max(), 0.01)
+
+    def test_a_refused_first_step_after_another_part_set_the_pose_is_sent_with_move_to_pose(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        self.pass_of(controller, Pose(30.05, 22, 4))
+        controller.current_pose = Pose(25, 25, 10)
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            self.pass_of(controller, Pose(100, 22, 4))
+
+        self.assertEqual(1, len(robot.sent_angles))
+        self.assertEqual([Pose(25, 25, 10)], robot.poses)
+
+    def test_without_send_velocities_every_call_has_the_angles_only(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 15), robot)
+
+        with mock.patch.object(xbox_robot_controller, 'SEND_VELOCITIES', False), \
+                mock.patch.object(robot, 'move_servos', wraps=robot.move_servos) as move_servos:
+            self.pass_of(controller, Pose(30.05, 22, 15))
+            with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+                self.pass_of(controller, Pose(100, 22, 15))
+            controller._toggle_flip()
+            controller._send_current_pose()
+
+        self.assertEqual(3, move_servos.call_count)
+        for call in move_servos.call_args_list:
+            self.assertEqual(1, len(call.args))
+            self.assertEqual({}, call.kwargs)
+        self.assertEqual([None, None, None], robot.sent_velocities)
+
+    def test_with_send_velocities_every_call_has_the_velocities_as_second_argument(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+
+        with mock.patch.object(robot, 'move_servos', wraps=robot.move_servos) as move_servos:
+            self.pass_of(controller, Pose(30.05, 22, 4))
+
+        self.assertTrue(xbox_robot_controller.SEND_VELOCITIES)
+        self.assertEqual(2, len(move_servos.call_args.args))
+        self.assertEqual({}, move_servos.call_args.kwargs)
+
+    def test_the_control_loop_sends_the_velocities_of_every_step(self):
+        robot = FakeRobot()
+        controller = make_controller(robot)
+        calls = []
+
+        def stick(pose, find_center_mode, center, dt=None):
+            calls.append(pose)
+            return Pose(pose.x + 0.01, pose.y, pose.z, flip=pose.flip)
+
+        controller.pose_updater.get_updated_pose_from_controller.side_effect = stick
+        with mock.patch.object(movement, 'sleep'):
+            self.assertTrue(controller.start())
+            wait_for(lambda: len(calls) > 20)
+            controller.stop()
+
+        # the sticks pass starts at the start pose, after it every send has velocities that match its angles
+        positions = [tip_of(angles) for angles in robot.sent_angles]
+        start = next(i for i, position in enumerate(positions) if np.allclose(position, [30, 22, 4], atol=1e-3))
+        stick_velocities = [velocities for velocities in robot.sent_velocities[start:] if velocities is not None]
+        self.assertGreater(len(stick_velocities), 20)
+        for velocities in stick_velocities:
+            self.assertEqual(7, len(velocities))
+            self.assertEqual(0, velocities[0])
+            self.assertTrue(np.all(np.isfinite(velocities)))
+        self.assertGreater(max(np.abs(velocities).max() for velocities in stick_velocities), 0.01)
+
+    def test_the_velocity_lead_of_a_servo_follows_the_sticks_by_its_rate_limit(self):
+        robot = FakeRobot()
+        controller = self.controller_at(Pose(30, 22, 4), robot)
+        # joint 1 turns about 18 degrees/s at 20cm/s, so with this coefficient the lead is far above the rate limit
+        servo = Servo(0, 4095, -pi, pi, 3, p=2000, velocity_feedforward=VelocityFeedforward(20.0, 100))
+
+        def feed_the_servo():
+            servo.set_target_position_from_angle(robot.sent_angles[-1][1], velocity=robot.sent_velocities[-1][1])
+            return servo._lead
+
+        leads = [0.0]
+        # the sticks hold 20cm/s for 20 passes of 10ms, then they are released
+        for _ in range(20):
+            self.pass_of(controller, Pose(controller.current_pose.x + 0.2, 22, 4))
+            self.assertFalse(controller._step_skipped)
+            leads.append(feed_the_servo())
+        held = len(leads)
+        wanted = servo.velocity_feedforward.positions(
+            robot.sent_velocities[-1][1] * np.sign(servo.max_position - servo.min_position), servo.p)
+        for _ in range(20):
+            self.pass_of(controller, copy(controller.current_pose))
+            leads.append(feed_the_servo())
+
+        steps = np.diff(leads)
+        self.assertLessEqual(np.abs(steps).max(), MAX_LEAD_STEP + 1e-9)
+        # it rises at the rate limit to its value, with the sign of the velocity
+        self.assertGreater(abs(wanted), 3 * MAX_LEAD_STEP)
+        self.assertAlmostEqual(MAX_LEAD_STEP, abs(steps[0]), places=9)
+        self.assertAlmostEqual(wanted, leads[held - 1], delta=MAX_LEAD_STEP)
+        np.testing.assert_allclose(np.sign(wanted) * MAX_LEAD_STEP, steps[:3], atol=1e-9)
+        # and comes down the same way, to zero
+        self.assertAlmostEqual(MAX_LEAD_STEP, abs(steps[held - 1]), places=9)
+        self.assertEqual(0.0, leads[-1])
+        self.assertTrue(np.all(np.abs(np.diff(np.abs(leads[held - 1:]))) <= MAX_LEAD_STEP + 1e-9))
+        self.assertTrue(np.all(np.diff(np.abs(leads[held - 1:])) <= 0))
 
 
 class ScenarioTests(unittest.TestCase):

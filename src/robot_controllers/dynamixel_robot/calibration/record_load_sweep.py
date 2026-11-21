@@ -11,6 +11,14 @@ the mean of the two errors is the gravity sag, and half the difference is the fr
 which also flips sign with the direction and so cancels in the mean. Only the joint under test moves, so its error
 says nothing about the others; their angles are logged so the fit knows the pose.
 
+The sweeps run with the velocity lead of servo_config.yaml (a `velocity_feedforward` block of the servo), as every
+planned move of the arm does, so what is recorded is the arm as it moves. The lead is added to the goal and makes the
+joint trail its trajectory by less, so the error of a bin is measured against the goal of the angle itself, without
+the compensation and without the lead (Servo.trajectory_position): the lead is not load, and the lag of the speed it
+takes out would otherwise be taken for it. The mean lead of the bin and direction is logged in the lead column. With a
+lead the half difference of the two directions shrinks by the lag the lead takes out: it is the friction, plus what the lead
+does not cover. Without a velocity_feedforward block the lead is 0 and nothing changes.
+
 For every pose (--pose: a pose name of tune_servo_gains or 6 comma separated degrees of joints 1 to 6, which gives the
 angles of the OTHER joints; by default the default sweeps of the joint, DEFAULT_SWEEPS) and every speed (--speeds,
 degrees per second, 5 and 10 by default) the script moves to the middle of the span (--span LOW:HIGH degrees, by
@@ -41,12 +49,13 @@ csv, which is flushed after every sweep.
 
 Output: a csv with the columns of record_static_load.FIELDS (mode is 'sweep', speed the degrees per second), written
 per bin: a new pose number per bin and for each of the two directions (up: the angle was rising) a row per arm servo.
-The row of the swept servo has the mean error (present position minus the UNCOMPENSATED goal, in positions, as in
-record_static_load.py: the whole load is error minus compensation), the compensation, the mean present position,
-the measured pwm, the current, the number of samples, the gains, the highest temperature and the lowest voltage of
-the bin. The rows of the other servos only have the angle of their joint and the gains: those joints stood still, their
-error says nothing. The angle of the swept joint in every row of a bin is the centre of the bin. fit_static_load.py
-reads this csv together with the ones of record_static_load.py (every file is its own set of poses); record the static
+The row of the swept servo has the mean error (present position minus the goal of the angle itself, without the
+compensation and without the velocity lead, in positions, as in record_static_load.py: the whole load is error minus
+compensation), the compensation, the lead (both means of the samples of the bin and direction, signed like the
+position), the mean present position, the measured pwm, the current, the number of samples, the gains, the highest
+temperature and the lowest voltage of the bin. The rows of the other servos only have the angle of their joint and
+the gains: those joints stood still, their error says nothing. The angle of the swept joint in every row of a bin is
+the centre of the bin. fit_static_load.py reads this csv together with the ones of record_static_load.py (every file is its own set of poses); record the static
 load at rest as well, as the check. fit_static_load.py converts every row with the P gain of its p column to the holding
 drive in pwm units, and the compensation converts that drive back to positions with the P gain the servo runs with, so a
 recording stays valid when a P gain is retuned; it has to be repeated after a mechanical change of the arm (another
@@ -155,6 +164,7 @@ class Options(NamedTuple):
 class BinDetails(NamedTuple):
     """what the csv row of a direction in a bin has besides the error and the pwm of the SweepBin"""
     compensation: float  # mean, positions
+    lead: float  # mean positions the velocity lead added to the goal, signed like the position
     position: float  # mean present position
     current: float  # mean of the current register
     temperature: int  # highest
@@ -300,8 +310,10 @@ def bin_cruise_samples(servo: Servo, streamed: Sequence[StreamedSample], bin_deg
     the bins of the cruise samples of a sweep with what the csv rows of their two directions have: for every bin that
     was passed in both directions the SweepBin and the BinDetails going up and going down
     The angle of a sample is the one the servo measures (not the commanded one, which is where the joint would be
-    without the load), the direction the one of the ANGLE of its step, and the error is the position minus the
-    uncompensated goal: the position of the trajectory less the compensation that was added to it.
+    without the load), the direction the one of the ANGLE of its step, and the error is the position minus the goal
+    of the angle itself: the position of the trajectory less the compensation and less the velocity lead that were
+    added to it. With a lead the joint trails the goal that was sent by less, and the error of the two directions
+    keeps its gravity part and loses the lag of the speed the lead took away.
     """
     cruise = [s for s in streamed if s.step.cruise]
     if not cruise:
@@ -310,7 +322,8 @@ def bin_cruise_samples(servo: Servo, streamed: Sequence[StreamedSample], bin_deg
     directions = np.array([s.step.direction for s in cruise])
     positions = np.array([s.sample.position for s in cruise], dtype=float)
     compensations = np.array([s.compensation for s in cruise], dtype=float)
-    errors = positions - (np.array([s.sample.position_trajectory for s in cruise], dtype=float) - compensations)
+    leads = np.array([s.lead for s in cruise], dtype=float)
+    errors = positions - (np.array([s.sample.position_trajectory for s in cruise], dtype=float) - compensations - leads)
     pwms = np.array([s.sample.pwm for s in cruise], dtype=float)
     currents = np.array([s.sample.current for s in cruise], dtype=float)
     temperatures = np.array([s.sample.temperature for s in cruise])
@@ -322,9 +335,9 @@ def bin_cruise_samples(servo: Servo, streamed: Sequence[StreamedSample], bin_deg
         details = []
         for direction in (1, -1):
             mask = (index == k) & (directions == direction)
-            details.append(BinDetails(float(compensations[mask].mean()), float(positions[mask].mean()),
-                                      float(currents[mask].mean()), int(temperatures[mask].max()),
-                                      float(voltages[mask].min())))
+            details.append(BinDetails(float(compensations[mask].mean()), float(leads[mask].mean()),
+                                      float(positions[mask].mean()), float(currents[mask].mean()),
+                                      int(temperatures[mask].max()), float(voltages[mask].min())))
         result.append((found, details[0], details[1]))
     return result
 
@@ -352,6 +365,7 @@ def bin_rows(pose: np.ndarray, joint: int, speed: float, bins: Sequence[tuple[Sw
                     current, unit = record_static_load.current_in_units(details.current, models.get(servo_id))
                     row.update({'goal_position': '{:.2f}'.format(details.position - side.error),
                                 'compensation': '{:.2f}'.format(details.compensation),
+                                'lead': '{:.2f}'.format(details.lead),
                                 'present_position': '{:.2f}'.format(details.position),
                                 'error': '{:.2f}'.format(side.error), 'current_raw': '{:.1f}'.format(details.current),
                                 'current': '' if current is None else '{:.2f}'.format(current), 'current_unit': unit,
@@ -364,19 +378,25 @@ def bin_rows(pose: np.ndarray, joint: int, speed: float, bins: Sequence[tuple[Sw
 # reporting
 
 
-def describe_sweep(speed: float, bins: Sequence[SweepBin]) -> str:
+def describe_sweep(speed: float, bins: Sequence[SweepBin], lead: float = 0.0) -> str:
     """the line after a sweep: the bins, the range of the gravity sag and of the measured gravity pwm over the bins
     (the means of the two directions) and the mean absolute half difference of the two directions, which is the
-    friction plus the lag of the speed (it grows with the speed)"""
+    friction plus the lag of the speed (it grows with the speed)
+    :param lead: the mean absolute velocity lead of the bins in positions; above 0 the line says that the errors are
+        against the goal without it and that the half difference is smaller by the lag the lead took out"""
     if not bins:
         return 'speed {:g} degrees/s: no bin has {} samples in both directions, use a lower speed, a wider span or ' \
                'check the reads'.format(speed, MIN_BIN_SAMPLES)
     sags = [b.sag for b in bins]
     pwms = [(b.up.pwm + b.down.pwm) / 2.0 for b in bins]
     half = float(np.mean([abs(b.half_difference) for b in bins]))
-    return 'speed {:g} degrees/s: {} bins, gravity sag {:.1f} to {:.1f} positions, measured gravity pwm {:.0f} to ' \
+    line = 'speed {:g} degrees/s: {} bins, gravity sag {:.1f} to {:.1f} positions, measured gravity pwm {:.0f} to ' \
            '{:.0f}, half the up/down difference {:.1f} positions (friction plus the lag of the speed)'.format(
                speed, len(bins), min(sags), max(sags), min(pwms), max(pwms), half)
+    if lead > 0:
+        line += '; the velocity lead of {:.1f} positions is not in the errors (they are against the goal without it) ' \
+                'and took part of the lag of the speed out of the half difference'.format(lead)
+    return line
 
 
 def speed_disagreement(results: Sequence[SweepResult]) -> Disagreement | None:
@@ -495,7 +515,9 @@ def record_sweeps(robot: DynamixelRobotController | CombinedRobot, joint: int, p
                 recording.sweeps += 1
                 recording.bins += len(bins)
                 results.append(SweepResult(plan.speed, [found for found, _, _ in bins]))
-                print('  ' + describe_sweep(plan.speed, results[-1].bins))
+                lead = float(np.mean([abs(details.lead) for _, up, down in bins for details in (up, down)])) \
+                    if bins else 0.0
+                print('  ' + describe_sweep(plan.speed, results[-1].bins, lead))
                 sleep(options.rest)
             warning = disagreement_warning(speed_disagreement(results), [plan.speed for plan in pose.sweeps])
             if warning is not None:

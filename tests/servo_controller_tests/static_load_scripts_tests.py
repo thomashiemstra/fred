@@ -23,7 +23,8 @@ from src.utils import workspace
 from src.utils.movement import MAX_POSITION_ERROR, plan_move_to_angles
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config, parse_servo_config
 from src.robot_controllers.dynamixel_robot.calibration.load_directions import DOWN, UP
-from src.robot_controllers.dynamixel_robot.static_compensation import regressor_row, term_names
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
+from src.robot_controllers.dynamixel_robot.static_compensation import StaticCompensation, regressor_row, term_names
 
 TEST_SERVO_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_servo_config.yaml')
 test_config = RobotConfig(d1=15.7, a2=20, d4=22, d6=12)
@@ -75,11 +76,12 @@ class FakeRobot:
     def check_workspace(self, angles):
         workspace.check_workspace(angles, self.robot_config, self.workspace_limits)
 
-    def move_servos(self, angles):
+    def move_servos(self, angles, velocities=None):
         self.angles = np.array(angles, dtype=np.float64)
         self.moves.append(self.angles.copy())
         for servo_id in range(1, 7):
-            self.servo_handler.get_servo(servo_id).set_target_position_from_angle(angles[servo_id], angles)
+            velocity = None if velocities is None else float(velocities[servo_id])
+            self.servo_handler.get_servo(servo_id).set_target_position_from_angle(angles[servo_id], angles, velocity)
 
     def get_current_positions(self):
         jitter = self.position_jitter[self.position_reads % len(self.position_jitter)]
@@ -270,6 +272,51 @@ class RecordTests(unittest.TestCase):
             self.assertAlmostEqual(-gravity_sag(servo_id, pose) * servo.p / 128, float(row['pwm']), delta=0.5)
         self.assertGreater(len({row['p'] for row in rows}), 1, 'every servo has its own gains')
 
+    def test_the_lead_column_follows_the_compensation(self):
+        fields = list(record_static_load.FIELDS)
+        self.assertEqual(fields.index('compensation') + 1, fields.index('lead'))
+        self.assertEqual(('goal_position', 'compensation', 'lead', 'present_position', 'error'),
+                         record_static_load.FIELDS[5:10])
+
+    def test_the_row_has_the_lead_and_measures_against_the_goal_of_the_angle_itself(self):
+        angles = np.array([0, pi / 2, 0.4, 0.8, 0, 0, 0])
+        robot = FakeRobot(angles, gravity_sag)
+        servo = robot.servo_handler.get_servo(3)
+        servo.compensation = StaticCompensation(3, {'constant': 150.0}, 60)
+        servo.velocity_feedforward = VelocityFeedforward(10.0, 30)
+        velocities = np.zeros(7)
+        velocities[3] = np.radians(10.0)
+        for _ in range(40):  # the lead follows the velocity by at most a few positions per write
+            robot.move_servos(angles, velocities)
+        self.assertGreater(abs(servo.lead_positions), 3, 'a lead is in the goal')
+        self.assertNotEqual(0, servo.compensation_positions)
+        rows = record_static_load.readings(robot, {}, 0, UP, angles, 1.0, 1, 0.0, lambda seconds: None)
+        row = next(row for row in rows if row['servo'] == 3)
+        goal_of_the_angle = servo.target_position - servo.compensation_positions - servo.lead_positions
+        self.assertEqual(goal_of_the_angle, servo.trajectory_position)
+        self.assertEqual(goal_of_the_angle, row['goal_position'], 'neither the compensation nor the lead is in it')
+        self.assertEqual(servo.compensation_positions, row['compensation'])
+        self.assertEqual(servo.lead_positions, row['lead'])
+        # the fake lands on goal + compensation + lead + sag, so against the goal of the angle itself that is the error
+        self.assertAlmostEqual(servo.compensation_positions + servo.lead_positions + gravity_sag(3, angles),
+                               float(row['error']), places=2)
+        self.assertAlmostEqual(float(row['present_position']) - goal_of_the_angle, float(row['error']), places=2)
+        for other in rows:
+            if other['servo'] != 3:
+                self.assertEqual(0, other['lead'], 'a servo without a velocity_feedforward block has no lead')
+
+    def test_a_row_without_a_velocity_feedforward_has_a_lead_of_0_and_the_goal_without_the_compensation(self):
+        angles = np.array([0, pi / 2, 0.4, 0.8, 0, 0, 0])
+        robot = FakeRobot(angles, gravity_sag)
+        robot.servo_handler.get_servo(3).compensation = StaticCompensation(3, {'constant': 150.0}, 60)
+        robot.move_servos(angles)
+        rows = record_static_load.readings(robot, {}, 0, UP, angles, 1.0, 1, 0.0, lambda seconds: None)
+        self.assertEqual({0}, {row['lead'] for row in rows})
+        row = next(row for row in rows if row['servo'] == 3)
+        servo = robot.servo_handler.get_servo(3)
+        self.assertEqual(servo.target_position - servo.compensation_positions, row['goal_position'])
+        self.assertNotEqual(0, row['compensation'])
+
     def test_a_row_is_the_mean_of_the_readings(self):
         robot = FakeRobot([0, pi / 2, 0.4, 0.8, 0, 0, 0], gravity_sag)
         robot.position_jitter = [0, 1, 1, 1]  # a mean of 0.75
@@ -408,8 +455,8 @@ class RestRobot(FakeRobot):
         self.workspace_limits = WorkSpaceLimits
         self.events = []
 
-    def move_servos(self, angles):
-        super().move_servos(angles)
+    def move_servos(self, angles, velocities=None):
+        super().move_servos(angles, velocities)
         self.events.append('move')
 
     def disable_servos(self):
@@ -514,10 +561,10 @@ class LowerToRestTests(unittest.TestCase):
         robot = RestRobot(parse_pose('elbow_out'))
         original = robot.move_servos
 
-        def interrupted(angles):
+        def interrupted(angles, velocities=None):
             if len(robot.moves) == 20:
                 raise KeyboardInterrupt
-            original(angles)
+            original(angles, velocities)
         robot.move_servos = interrupted
         result, prompts = self.lower(robot)
         self.assertPrompted(result, prompts)
@@ -647,10 +694,10 @@ class LowerToRestWithoutPromptTests(unittest.TestCase):
         robot = RestRobot(parse_pose('elbow_out'))
         original = robot.move_servos
 
-        def interrupted(angles):
+        def interrupted(angles, velocities=None):
             if len(robot.moves) == 20:
                 raise KeyboardInterrupt
-            original(angles)
+            original(angles, velocities)
         robot.move_servos = interrupted
         reason, prompt = self.lower(robot)
         self.assertNotLowered(robot, reason, prompt, 'interrupted')
