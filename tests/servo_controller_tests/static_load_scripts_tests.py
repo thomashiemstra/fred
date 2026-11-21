@@ -549,27 +549,171 @@ class LowerToRestTests(unittest.TestCase):
             record_static_load.disable_torque_on_request(robot)
         self.assertFalse(robot.disabled)
 
+    def test_the_torque_is_switched_off_when_enter_is_pressed(self):
+        robot = RestRobot()
+        with mock.patch('builtins.input', return_value=''), mock.patch('builtins.print'):
+            record_static_load.disable_torque_on_request(robot)
+        self.assertTrue(robot.disabled)
+
+    def test_without_input_the_torque_stays_on_and_the_lower_arm_script_is_named(self):
+        robot = RestRobot()
+        printed = io.StringIO()
+        with mock.patch('builtins.input', side_effect=EOFError), contextlib.redirect_stdout(printed):
+            record_static_load.disable_torque_on_request(robot)  # does not raise
+        self.assertFalse(robot.disabled)
+        self.assertIn('no input to answer the question', printed.getvalue())
+        self.assertIn('keep holding their position', printed.getvalue())
+        self.assertIn('python -m src.robot_controllers.dynamixel_robot.calibration.lower_arm', printed.getvalue())
+
+    def test_a_lowering_without_input_ends_with_the_servos_holding(self):
+        robot = RestRobot()
+        robot.hardware_errors = {3: ['overload']}
+        with mock.patch('builtins.input', side_effect=EOFError), mock.patch('builtins.print'):
+            result = record_static_load.lower_and_disable_torque(robot)
+        self.assertFalse(result)
+        self.assertFalse(robot.disabled)
+        self.assertEqual([], robot.moves)
+
+
+class LowerToRestWithoutPromptTests(unittest.TestCase):
+    """lower_to_rest: the lowering of lower_and_disable_torque, which never asks anything"""
+
+    def setUp(self):
+        patcher = mock.patch('src.utils.movement.sleep')  # the planned moves run at their real speed otherwise
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.rest_angles = inverse_kinematics(record_static_load.REST_POSE, dynamixel_robot_config)
+
+    def lower(self, robot, sleep=None):
+        """lower_to_rest with input that fails the test when it is called; returns (reason, the input mock)"""
+        with mock.patch('builtins.input', side_effect=AssertionError('input was called')) as prompt, \
+                mock.patch('builtins.print'):
+            reason = record_static_load.lower_to_rest(
+                robot, sleep=sleep or (lambda seconds: robot.events.append('settle')))
+        return reason, prompt
+
+    def assertNotLowered(self, robot, reason, prompt, expected):
+        self.assertIsInstance(reason, str)
+        self.assertIn(expected, reason)
+        prompt.assert_not_called()
+        self.assertFalse(robot.disabled, 'the torque is left on')
+
+    def test_a_completed_move_gives_none_and_switches_the_torque_off(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        reason, prompt = self.lower(robot)
+        self.assertIsNone(reason)
+        prompt.assert_not_called()
+        self.assertTrue(robot.disabled)
+        self.assertEqual(['settle', 'disable'], robot.events[-2:])
+        self.assertEqual({'move'}, set(robot.events[:-2]))
+        np.testing.assert_allclose(self.rest_angles, robot.moves[-1], atol=1e-6)
+
+    def test_a_servo_with_a_hardware_error_is_a_reason(self):
+        robot = RestRobot()
+        robot.hardware_errors = {3: ['overload']}
+        reason, prompt = self.lower(robot)
+        self.assertNotLowered(robot, reason, prompt, 'servos [3] have a hardware error')
+        self.assertEqual([], robot.moves)
+
+    def test_hardware_errors_that_can_not_be_read_are_a_reason(self):
+        robot = RestRobot()
+        robot.get_hardware_errors = lambda: None
+        reason, prompt = self.lower(robot)
+        self.assertNotLowered(robot, reason, prompt, 'the hardware errors could not be read')
+        self.assertEqual([], robot.moves)
+
+    def test_a_move_the_planner_refuses_is_a_reason(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        robot.workspace_limits = record_static_load.limits_with_floor(10)  # the rest pose is below 10 cm
+        reason, prompt = self.lower(robot)
+        self.assertNotLowered(robot, reason, prompt, 'the planner refuses the move to the rest pose')
+        self.assertEqual([], robot.moves)
+
+    def test_a_pose_the_arm_can_not_reach_is_a_reason(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        robot.robot_config = RobotConfig(d1=15.7, a2=5, d4=5, d6=14)
+        reason, prompt = self.lower(robot)
+        self.assertNotLowered(robot, reason, prompt, 'can not be reached')
+        self.assertEqual([], robot.moves)
+
+    def test_angles_that_can_not_be_read_are_a_reason(self):
+        robot = RestRobot()
+        robot.get_current_angles = lambda: None
+        reason, prompt = self.lower(robot)
+        self.assertNotLowered(robot, reason, prompt, 'failed to read the current angles')
+        self.assertEqual([], robot.moves)
+
+    def test_ctrl_c_during_the_move_is_a_reason_with_the_servos_holding(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+        original = robot.move_servos
+
+        def interrupted(angles):
+            if len(robot.moves) == 20:
+                raise KeyboardInterrupt
+            original(angles)
+        robot.move_servos = interrupted
+        reason, prompt = self.lower(robot)
+        self.assertNotLowered(robot, reason, prompt, 'interrupted')
+        self.assertEqual(20, len(robot.moves))
+
+    def test_ctrl_c_during_the_settle_is_a_reason_and_the_torque_stays_on(self):
+        robot = RestRobot(parse_pose('elbow_out'))
+
+        def interrupted(seconds):
+            raise KeyboardInterrupt
+        reason, prompt = self.lower(robot, sleep=interrupted)
+        self.assertNotLowered(robot, reason, prompt, 'interrupted')
+
+    def test_lower_and_disable_torque_prints_the_reason_and_asks_once(self):
+        robot = RestRobot()
+        printed = io.StringIO()
+        with mock.patch.object(record_static_load, 'lower_to_rest', return_value='a servo is limp') as lowering, \
+                mock.patch.object(record_static_load, 'disable_torque_on_request') as ask, \
+                contextlib.redirect_stdout(printed):
+            result = record_static_load.lower_and_disable_torque(robot, speed=0.2, settle=0.1, sleep=print)
+        self.assertFalse(result)
+        lowering.assert_called_once_with(robot, 0.2, 0.1, print)
+        ask.assert_called_once_with(robot)
+        self.assertIn('the arm is not lowered: a servo is limp', printed.getvalue())
+
+    def test_lower_and_disable_torque_does_not_ask_after_a_lowering(self):
+        robot = RestRobot()
+        with mock.patch.object(record_static_load, 'lower_to_rest', return_value=None), \
+                mock.patch.object(record_static_load, 'disable_torque_on_request') as ask:
+            self.assertTrue(record_static_load.lower_and_disable_torque(robot))
+        ask.assert_not_called()
+
 
 class MainTests(unittest.TestCase):
     """the end of record_static_load.main, with the robot, the poses and the recording replaced"""
 
     def run_main(self, argv=(), record=None, answer='yes'):
-        """returns (result, mocks), the mocks by the name of the function of record_static_load they replace"""
+        """
+        returns (result, mocks), the mocks by the name of the function of record_static_load they replace, and
+        'input', 'printed' (the lines) and 'robot'
+        :param answer: what input() returns, or an exception to raise from it
+        """
         robot = mock.MagicMock(spec=CombinedRobot)
         robot.workspace_limits = TestLimits
         robot.servo_config = mock.MagicMock()
         robot.get_angle_limits = lambda: angle_limits
-        robot.enable_servos = lambda: True
+        robot.enable_servos = mock.Mock(return_value=True)
         names = {'get_robot': mock.Mock(return_value=robot),
                  'sample_poses': mock.Mock(return_value=[np.array([0, pi / 2, 0.8, 0.0, 0, 0, 0])]),
                  'record': record if record is not None else mock.Mock(return_value=1),
                  'lower_and_disable_torque': mock.Mock(return_value=True),
                  'disable_torque_on_request': mock.Mock()}
-        with tempfile.TemporaryDirectory() as directory, mock.patch('builtins.print'), \
-                mock.patch('builtins.input', return_value=answer), \
+        input_mock = mock.Mock(side_effect=answer) if isinstance(answer, BaseException) \
+            else mock.Mock(return_value=answer)
+        printed: list[str] = []
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch('builtins.print', lambda *args, **kwargs: printed.append(' '.join(str(a) for a in args))), \
+                mock.patch('builtins.input', input_mock), \
                 mock.patch.multiple(record_static_load, **names):
             result = record_static_load.main(['--output', os.path.join(directory, 'static_load.csv'), *argv])
         names['robot'] = robot
+        names['input'] = input_mock
+        names['printed'] = printed
         return result, names
 
     def test_the_arm_is_lowered_at_the_end(self):
@@ -600,6 +744,50 @@ class MainTests(unittest.TestCase):
         self.assertEqual(3, mocks['record'].call_args.kwargs['reading_count'])
         with self.assertRaises(SystemExit), mock.patch('sys.stderr'):
             self.run_main(['--readings', '0'])
+
+    def test_the_question_is_asked_without_yes(self):
+        result, mocks = self.run_main()
+        self.assertEqual(0, result)
+        mocks['input'].assert_called_once()
+        self.assertIn('type yes', mocks['input'].call_args.args[0])
+        mocks['record'].assert_called_once()
+
+    def test_yes_skips_the_question_and_records(self):
+        result, mocks = self.run_main(['--yes'], answer=AssertionError('the question was asked'))
+        self.assertEqual(0, result)
+        mocks['input'].assert_not_called()
+        mocks['record'].assert_called_once()
+        mocks['lower_and_disable_torque'].assert_called_once_with(mocks['robot'])
+
+    def test_without_yes_and_without_input_nothing_is_enabled_or_recorded(self):
+        result, mocks = self.run_main(answer=EOFError())
+        self.assertEqual(1, result, 'the return code of record_load_sweep for this case')
+        mocks['robot'].enable_servos.assert_not_called()
+        mocks['record'].assert_not_called()
+        mocks['lower_and_disable_torque'].assert_not_called()
+        mocks['disable_torque_on_request'].assert_not_called()
+        self.assertTrue(any('no input to answer the question' in line and '--yes' in line
+                            for line in mocks['printed']), mocks['printed'])
+
+    def test_the_servos_are_enabled_only_after_the_answer_yes(self):
+        for answer in ('no', ''):
+            with self.subTest(answer=answer):
+                result, mocks = self.run_main(answer=answer)
+                self.assertEqual(0, result)
+                mocks['robot'].enable_servos.assert_not_called()
+        _, mocks = self.run_main(answer='yes')
+        mocks['robot'].enable_servos.assert_called_once()
+        _, mocks = self.run_main(['--yes'])
+        mocks['robot'].enable_servos.assert_called_once()
+
+    def test_the_default_speed_is_the_rest_speed_and_reaches_the_recording(self):
+        self.assertEqual(0.3, record_static_load.REST_SPEED)
+        signature = inspect.signature(record_static_load.record)
+        for argv, expected in (([], record_static_load.REST_SPEED), (['--speed', '0.1'], 0.1)):
+            with self.subTest(argv=argv):
+                _, mocks = self.run_main(argv)
+                call = mocks['record'].call_args
+                self.assertEqual(expected, signature.bind(*call.args, **call.kwargs).arguments['angular_speed'])
 
 
 class FitTests(unittest.TestCase):

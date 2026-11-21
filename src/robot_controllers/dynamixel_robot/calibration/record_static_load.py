@@ -3,6 +3,10 @@ Records the static load of the arm servos: the steady state position error at ra
 directions, as the data for calibration/fit_static_load.py. Run it from the project root with the arm powered, its
 torque off and nothing in its way:
     python -m src.robot_controllers.dynamixel_robot.calibration.record_static_load --poses 40 --output static_load.csv
+    [--yes]
+It asks to type yes before it enables the servos; --yes skips the question, for an unattended run (without --yes and
+without any input, stdin from /dev/null, it prints that and stops with the servos off). The moves between the poses
+run at --speed, by default REST_SPEED (0.3 rad/s): joint 2 of this arm must not be moved fast.
 
 It enables the servos, moves to every pose plus an overshoot of --delta degrees on the varied joints, then to the
 pose (approached from above, direction down), waits --settle seconds and logs every arm servo; then the same from
@@ -16,7 +20,8 @@ every approach when a servo is warmer than the warning temperature or has a hard
 lowered to the rest pose just above the table and the torque goes off there. Ctrl+C stops the movement and lowers
 the arm the same way; Ctrl+C during the lowering stops it with the servos holding and asks you to confirm the arm is
 supported before the torque goes off (the same prompt comes when the arm can't be lowered, for instance after a
-hardware error).
+hardware error). Without any input to answer that prompt the servos keep holding their position, and
+calibration/lower_arm.py lowers the arm later.
 
 Logged per servo and pose direction: the commanded angle, the goal position of the angle without any compensation,
 the compensation that was added to it (0 unless the yaml has one), the present position and the error (present
@@ -42,6 +47,7 @@ import numpy as np
 
 from src.global_constants import WorkSpaceLimits
 from src.global_objects import get_robot
+from src.robot_controllers.abstract_robot_controller import AbstractRobotController
 from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
@@ -118,11 +124,18 @@ def sampling_ranges(angle_limits: dict[int, tuple[float, float]], joints: Iterab
     return ranges
 
 
-def pose_is_accepted(pose: np.ndarray, robot: DynamixelRobotController | CombinedRobot, delta: float,
-                     joints: Iterable[int]) -> bool:
+def angle_limits_of(robot: AbstractRobotController) -> dict[int, tuple[float, float]]:
+    """the joint ranges of the robot in radians, the recording needs them"""
+    limits = robot.get_angle_limits()
+    if limits is None:
+        raise ValueError('this robot does not know the ranges of its joints')
+    return limits
+
+
+def pose_is_accepted(pose: np.ndarray, robot: AbstractRobotController, delta: float, joints: Iterable[int]) -> bool:
     """whether the planner accepts the pose and the two overshoot poses it is approached from: every move is
     checked against the workspace limits of the robot (the wrist and the gripper tip) and its joint ranges"""
-    for overshoot, target, _ in approach_sequence(pose, delta, joints, robot.get_angle_limits()):
+    for overshoot, target, _ in approach_sequence(pose, delta, joints, angle_limits_of(robot)):
         for angles in (overshoot, target):
             try:
                 check_move(PlannedMove('pose', angles[np.newaxis], 0.0), robot)
@@ -308,25 +321,34 @@ def record(robot: DynamixelRobotController | CombinedRobot, poses: Sequence[np.n
 
 
 def disable_torque_on_request(robot: DynamixelRobotController | CombinedRobot) -> None:
+    """
+    ask to switch the torque off with the arm supported, and do it on enter; Ctrl+C, or no input at all (stdin is
+    closed in an unattended run), leaves the servos holding their position
+    """
     try:
         input('\npress enter to disable the torque, SUPPORT THE ARM, it will drop. '
               'Ctrl+C to exit and keep the torque enabled\n')
     except KeyboardInterrupt:
         print('\nexiting, the servos keep holding their position')
         return
+    except EOFError:
+        # nobody can support the arm, so the torque stays on
+        print('there is no input to answer the question, the servos keep holding their position; '
+              'python -m src.robot_controllers.dynamixel_robot.calibration.lower_arm lowers the arm')
+        return
     robot.disable_servos()
 
 
-def lower_and_disable_torque(robot: DynamixelRobotController | CombinedRobot, speed: float = REST_SPEED,
-                             settle: float = 0.5, sleep: Callable[[float], None] = time.sleep) -> bool:
+def lower_to_rest(robot: DynamixelRobotController | CombinedRobot, speed: float = REST_SPEED, settle: float = 0.5,
+                  sleep: Callable[[float], None] = time.sleep) -> str | None:
     """
     lower the arm to REST_POSE just above the table and switch the torque off there, so it doesn't drop from height;
-    falls back to disable_torque_on_request (the arm is not moved, or stays where it is) and returns False when a
-    servo has shut down or can't be read, the planner refuses the pose, the angles can't be read, or Ctrl+C comes
-    during the move: the torque is only switched off directly after a completed move
+    never asks anything: the torque is only switched off directly after a completed move, and when the arm can't be
+    lowered the servos are left as they are (see lower_and_disable_torque for the fallback to a prompt)
     :param speed: speed of the joint that turns the most, in rad/s
     :param settle: seconds to wait at the pose before the torque goes off
-    :return: True if the arm was lowered and the torque is off
+    :return: None if the arm was lowered and the torque is off, else why not: a servo has shut down or can't be read,
+        the planner refuses the pose, the angles can't be read, or Ctrl+C came during the move
     """
     why: str | None = None
     try:
@@ -347,7 +369,7 @@ def lower_and_disable_torque(robot: DynamixelRobotController | CombinedRobot, sp
                     sleep(settle)
                     robot.disable_servos()
                     print('the torque is off')
-                    return True
+                    return None
                 why = 'the planner refuses the move to the rest pose'
     except MovementException as e:
         why = 'the move to the rest pose is refused: {}'.format(e)
@@ -355,6 +377,23 @@ def lower_and_disable_torque(robot: DynamixelRobotController | CombinedRobot, sp
         why = str(e)
     except KeyboardInterrupt:
         why = 'interrupted, the servos hold where they are'
+    return why
+
+
+def lower_and_disable_torque(robot: DynamixelRobotController | CombinedRobot, speed: float = REST_SPEED,
+                             settle: float = 0.5, sleep: Callable[[float], None] = time.sleep) -> bool:
+    """
+    lower the arm to REST_POSE just above the table and switch the torque off there, so it doesn't drop from height;
+    falls back to disable_torque_on_request (the arm is not moved, or stays where it is) and returns False when a
+    servo has shut down or can't be read, the planner refuses the pose, the angles can't be read, or Ctrl+C comes
+    during the move: the torque is only switched off directly after a completed move
+    :param speed: speed of the joint that turns the most, in rad/s
+    :param settle: seconds to wait at the pose before the torque goes off
+    :return: True if the arm was lowered and the torque is off
+    """
+    why = lower_to_rest(robot, speed, settle, sleep)
+    if why is None:
+        return True
     print('the arm is not lowered: {}'.format(why))
     disable_torque_on_request(robot)
     return False
@@ -384,7 +423,9 @@ def positive_int(value: str) -> int:
     return number
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """the options of the recorder; offline/preview_static_load_poses.py takes the same ones, so a command line of
+    the recorder can be pasted there as it is"""
     parser = argparse.ArgumentParser(description='record the static load of the arm servos at random poses')
     parser.add_argument('--poses', type=int, default=40, help='number of poses')
     parser.add_argument('--joints', type=int, nargs='+', default=list(DEFAULT_JOINTS), help='the joints to vary')
@@ -398,16 +439,57 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--readings', type=positive_int, default=DEFAULT_READINGS,
                         help='readings of the servos per row, the row has their mean ({} s apart)'
                         .format(READING_PAUSE))
-    parser.add_argument('--speed', type=float, default=0.5, help='joint speed in rad/s')
+    # the speed of the sweep recorder between its poses: joint 2 of this arm must not be moved fast
+    parser.add_argument('--speed', type=float, default=REST_SPEED,
+                        help='joint speed in rad/s (default {}, joint 2 must not be moved fast)'.format(REST_SPEED))
     parser.add_argument('--seed', type=int, default=None, help='seed of the random poses')
     parser.add_argument('--output', default='static_load_{}.csv'.format(datetime.now().strftime('%Y%m%d_%H%M')))
-    args = parser.parse_args(argv)
+    parser.add_argument('--yes', action='store_true', help="don't ask before enabling the servos")
+    return parser
+
+
+def invalid_joint_message(joints: Iterable[int]) -> str | None:
+    """why a joint of --joints can not be varied, or None when all of them can"""
+    for joint in joints:
+        if joint not in (2, 3, 4, 5, 6):
+            return 'only joints 2-6 can be varied, not {}'.format(joint)
+    return None
+
+
+def select_poses(args: argparse.Namespace, robot: AbstractRobotController,
+                 overrides: dict[int, tuple[float, float]] | None = None
+                 ) -> tuple[list[np.ndarray], dict[int, tuple[float, float]]]:
+    """
+    the poses a recording with these options visits, in this order: the steps from the options to the poses, shared
+    with offline/preview_static_load_poses.py so that the preview lists exactly what the recorder will do. With
+    --floor the workspace limits of the robot are replaced (the robot object is changed).
+    :param args: the parsed options of build_parser
+    :param robot: where the angle limits, the link lengths and the workspace limits come from
+    :param overrides: the parsed --range entries, by default parse_ranges(args.range)
+    :return: (the accepted poses, which can be fewer than asked or none, and the sampling range of every varied joint)
+    :raises ValueError: when a varied joint has no range left to sample
+    :raises argparse.ArgumentTypeError: when a --range entry is malformed
+    """
+    if overrides is None:
+        overrides = parse_ranges(args.range)
+    delta = np.radians(args.delta)
+    if args.floor is not None:
+        robot.workspace_limits = limits_with_floor(args.floor, robot.workspace_limits)
+    ranges = sampling_ranges(angle_limits_of(robot), args.joints, delta, overrides)
+    rng = np.random.default_rng(args.seed)
+    poses = sample_poses(args.poses, ranges, np.radians(args.base), rng,
+                         accept=lambda pose: pose_is_accepted(pose, robot, delta, tuple(args.joints)))
+    return poses, ranges
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
-    for joint in args.joints:
-        if joint not in (2, 3, 4, 5, 6):
-            print('only joints 2-6 can be varied, not {}'.format(joint))
-            return 1
+    problem = invalid_joint_message(args.joints)
+    if problem is not None:
+        print(problem)
+        return 1
     overrides = parse_ranges(args.range)
     delta = np.radians(args.delta)
 
@@ -419,13 +501,8 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(robot, CombinedRobot):
         print('the static load can only be recorded on the real robot, use_simulation is set')
         return 1
-    if args.floor is not None:
-        robot.workspace_limits = limits_with_floor(args.floor, robot.workspace_limits)
     config = robot.servo_config
-    ranges = sampling_ranges(robot.get_angle_limits(), args.joints, delta, overrides)
-    rng = np.random.default_rng(args.seed)
-    poses = sample_poses(args.poses, ranges, np.radians(args.base), rng,
-                         accept=lambda pose: pose_is_accepted(pose, robot, delta, tuple(args.joints)))
+    poses, ranges = select_poses(args, robot, overrides)
     if not poses:
         print('no pose the planner accepts, widen the ranges or lower the floor')
         return 1
@@ -436,8 +513,14 @@ def main(argv: list[str] | None = None) -> int:
     for joint, (low, high) in ranges.items():
         print('  joint {}: {:.0f} to {:.0f} degrees'.format(joint, np.degrees(low), np.degrees(high)))
     print('the arm will move through these ranges, nothing may be in its way')
-    if input('type yes to enable the servos and start: ').strip().lower() != 'yes':
-        return 0
+    if not args.yes:
+        try:
+            answer = input('type yes to enable the servos and start: ')
+        except EOFError:
+            print('there is no input to answer the question, use --yes for an unattended run')
+            return 1
+        if answer.strip().lower() != 'yes':
+            return 0
     if not robot.enable_servos():
         print('failed to enable the servos')
         return 1

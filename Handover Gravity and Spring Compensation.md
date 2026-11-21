@@ -79,7 +79,9 @@ The procedure for a joint, joint 3 first (its load depends on `phi` only):
    the block under servo 3 in `servo_config.yaml`.
 3. Record the same sweeps again. The `error` column is now the sag that remains; the summary should print about 0
    where it printed about 3 positions. A wrong sign shows as twice the sag.
-4. The check at rest: `record_static_load.py --joints 3` with a dozen poses, before and after.
+4. The check at rest: `record_static_load.py --yes --poses 30 --seed 1` with `--range` for the joints, then
+   `check_static_load.py <the csv>`: the sag that is left and what it was without the compensation, from the one
+   recording. Done for joints 2 and 3 on 21 November, see below.
 
 Joint 3, 19 November 2026 (`calibration/tuning/load_sweep_joint3_20261119_before.csv` and `_after.csv`, 8 sweeps
 and 148 bins each, P 4710):
@@ -169,7 +171,35 @@ directly to the servo, so a zero error of 3 degrees is not expected there and th
 sitting below the axis (cables, housings). A level on the upper arm commanded horizontal would confirm it; not
 done.
 
-Still open: the check at rest with `record_static_load.py`; joint 4; the wrist model is the simplified
+The check at rest, 21 November 2026 (`calibration/tuning/static_load_20261121_check.csv`): 30 random poses with
+joints 2 to 5 inside the ranges of the sweeps (`--range 2=45:115 3=-60:60 4=-60:60 5=-60:60 --seed 1`), each
+approached from 5 degrees above and below, 3 s of settling, the compensation of joints 2 and 3 active. The report
+is `check_static_load.py` (new, it also reads the sweep recordings):
+
+| Joint | Sag without the compensation (rms) | Sag left (rms) | Range of the sag left | Friction band at rest |
+|---|---|---|---|---|
+| 2 | 1.87 | 0.39 | -0.7 to +1.0 | 1.9 (2.5 at most) |
+| 3 | 2.65 | 0.38 | -0.5 to +0.9 | 0.8 (1.6 at most) |
+
+All in positions; the sag is the mean of the two directions of a pose, the friction band half their difference.
+
+- The compensation holds at rest as it did in the sweeps: no pose of either joint is over 1 position. What is left
+  is the size of the rounding: the compensation is a whole number of positions and so is every reading.
+- Joint 2 has a small trend left along its own angle: about +0.4 below 60 degrees, about -0.3 above 100. Not
+  worth a new fit while it stays inside the rounding.
+- Friction is now the error at rest: joint 2 stops 2 positions short of its goal from either side at nearly every
+  pose (0.18 degrees, up to 1.8 mm at the tip at full reach), joint 3 about 1 short. The largest error of a single
+  approach is 3.0 positions on joint 2 and 2.2 on joint 3.
+- The joints without a compensation, for the record: joint 4 sags -4 to +5.5 positions with a friction band of 2.5
+  (errors up to 10, P 780); joint 5 rests up to 9 positions short when it arrives with its angle rising and on its
+  goal when it arrives the other way, at any pose and whichever way the gripper tilts (sag +3 on average). That is
+  one-sided: it looks more like a constant force on the joint (the cable to the gripper?) plus friction than like
+  gravity. Not looked into. Joint 1 is within 0.8 and joint 6 sits a constant 1 position off.
+- Before a recording, `calibration/offline/preview_static_load_poses.py` lists the poses it will visit and how low
+  the wrist and the gripper tip come, without the robot: the planner's floor lets the tip down to where the
+  fingertips touch the table.
+
+Still open: joint 4; joint 5 (see above); the wrist model is the simplified
 one; what the encoder does not see (flex) needs an outside reference, see Step 6. A webcam with aruco markers on
 the arm (`aruco_markers_a4.pdf`) records the runs since 19 November, as a check of what happened, not as a
 measurement.
