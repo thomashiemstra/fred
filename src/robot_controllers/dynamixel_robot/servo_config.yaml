@@ -56,7 +56,10 @@ servos:
     # folded, ringing from 2800 at the other two poses, and 2150 passed at all three (1.9 positions of overshoot at
     # full reach, the limit is 2). The friction went up: the drive the joint rests at without moving rose from 10 to
     # 20-27 pwm units, so at P 980 it stopped 3 to 7 positions short. P 2000 depends on the belt tension: with a slack
-    # belt it is above the 1270 at which full reach overshot, so check the belt first when the base rings
+    # belt it is above the 1270 at which full reach overshot, so check the belt first when the base rings.
+    # 20 November 2026, the swing stage (run tune_joint1_20261120_2214): sweeping at 10 degrees/s the lag swings by
+    # 0.33 to 0.46 positions at P 2000, 1600 and 1200 alike, the same both ways and at no frequency of its own. The
+    # base does not swing while it turns as the shoulder did, P 2000 stays
     pid: {p: 2000, i: 0, d: 0}
   2:
     name: shoulder

@@ -18,15 +18,17 @@ from src.robot_controllers.dynamixel_robot.calibration import gain_tuning, tune_
 import math
 
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    FF_CRUISE_HOLD, FF_RAMP, MIN_BIN_SAMPLES, AbortLimits, BinSide, Criteria, CruiseStatistics, LineFit, RestMetrics,
-    Sample, StepMetrics, SweepBin, SweepSample, SweepStep, abort_reason, bin_sweep, choose_d, choose_p, clip_gain,
-    cruise_statistics, d_ladder, environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth,
-    p_values, p_values_down, pwm_clamp, pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size,
-    tracking_metrics)
+    FF_CRUISE_HOLD, FF_RAMP, MIN_BIN_SAMPLES, SWING_MIN_LEG, AbortLimits, BinSide, Criteria, CruiseStatistics, LineFit,
+    RestMetrics, Sample, StepMetrics, SweepBin, SweepSample, SweepStep, SwingPair, SwingSample, SwingSide,
+    SwingStatistics, abort_reason, bin_sweep, choose_d, choose_p, clip_gain, cruise_statistics, d_ladder,
+    environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth, p_values, p_values_down,
+    pwm_clamp, pwm_per_position, recommended_swing_p, rest_metrics, rougher_speeds, step_metrics, step_size,
+    swing_change, swing_changed, swing_legs, swing_spread, swing_statistics, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains import (
-    FF_SAMPLE_FIELDS, SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep, TuningSession, compared_d,
-    d_candidates, d_grid, d_progress, feedforward_refusal, grid_is_done, joint_knee_at, joint_p_at, knee_trial,
-    parse_pose, position_sign, recommend, stream_sweep, swept_d_values)
+    FF_SAMPLE_FIELDS, SAMPLE_FIELDS, SWING_SAMPLE_FIELDS, TRIAL_FIELDS, PoseResult, Settings, StopFlag, Sweep,
+    SwingResult, SwingRun, TuningSession, compared_d, d_candidates, d_grid, d_progress, feedforward_refusal,
+    grid_is_done, joint_knee_at, joint_p_at, knee_trial, parse_pose, position_sign, recommend, stream_sweep,
+    swept_d_values, swing_gains, swing_refusal)
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_handler import ServoState
 from tests.servo_controller_tests.static_load_scripts_tests import FakeRobot
@@ -2187,11 +2189,14 @@ class FeedforwardOptionTests(unittest.TestCase):
         sim = SimulatedServo(2048)
         robot = FakeTuningRobot(parse_pose('elbow_out'), 4, sim, move_time=move_time)
         calls = []
+        swing_writers, settings_seen = [], []
 
         class RecordingSession:
             def __init__(self, robot, joint, settings, sample_writer=None, trial_writer=None, stop=None,
-                         ff_writer=None):
+                         ff_writer=None, swing_writer=None):
                 calls.append(('session', sample_writer is not None, trial_writer is not None, ff_writer is not None))
+                swing_writers.append(swing_writer is not None)
+                settings_seen.append(settings)
                 self.settings = settings
                 self.results = []
                 self.read_failures = 0
@@ -2204,6 +2209,9 @@ class FeedforwardOptionTests(unittest.TestCase):
 
             def run_feedforward(self, pose):
                 calls.append(('ff', np.degrees(pose[1:]).round().tolist()))
+
+            def run_swing(self, pose):
+                calls.append(('swing', np.degrees(pose[1:]).round().tolist()))
 
             def restore(self):
                 calls.append('restore')
@@ -2219,6 +2227,8 @@ class FeedforwardOptionTests(unittest.TestCase):
                                           directory] + argv)
             files = sorted(os.listdir(directory))
         self.recorded = (calls, finish, [name.split('_', 4)[-1] for name in files], robot)
+        self.swing_writers = swing_writers
+        self.settings = settings_seen
         return code, out.getvalue()
 
     def test_the_defaults(self):
@@ -2290,3 +2300,747 @@ class FeedforwardOptionTests(unittest.TestCase):
             self.assertIn('--ff-', out.getvalue())
         code, output = self.run_main(['--ff-only', '--ff-speeds', '5', '10', '15', '20'])
         self.assertEqual(0, code, 'four speeds are fine')
+
+
+def swing_leg_rows(direction, leg, start, duration, sines=((0.0, 6.6),), rate=750.0, trend=0.0, offset=0.0,
+                   cruise=True, pwm=0, seed=0):
+    """
+    the samples of one leg of a sweep, read at irregular intervals of about 1 / rate seconds: the position trails its
+    trajectory (2048) by the lag offset + trend * t + the sum of amplitude * sin(2 pi f t) of the sines, in positions,
+    t in seconds since the start of the leg. The direction is that of the angle. The positions are not rounded to
+    integers: a swing of a position or two that is read in whole positions loses up to 20 % of its amplitude to the
+    quantization (1.5 positions read as 0, 1 and -1 give 1.2), unless something else moves the lag through several
+    positions, see test_a_swing_read_in_whole_positions.
+    """
+    rng = np.random.default_rng(seed + 100 * leg + (direction > 0))
+    times = start + np.cumsum(rng.uniform(0.2, 1.8, int(duration * rate * 1.2))) / rate
+    times = times[times <= start + duration]
+    seconds = times - start
+    lag = offset + trend * seconds
+    for amplitude, frequency in sines:
+        lag = lag + amplitude * np.sin(2 * np.pi * frequency * seconds)
+    return [SwingSample(Sample(time=float(t), tick=0, goal=2048, position=float(2048 - value),
+                               position_trajectory=2048, velocity=0, velocity_trajectory=0, pwm=pwm, current=0,
+                               moving_status=0, voltage=11.8, temperature=30), direction, cruise, leg)
+            for t, value in zip(times, lag)]
+
+
+# the legs of ff_sweep(10, 10, 0.01) with two round trips: (direction of the angle, start of the cruise, its length)
+SWING_LEGS = ((1, 0.35, 0.65), (-1, 1.55, 1.65), (1, 3.75, 1.65), (-1, 5.95, 1.65), (1, 8.15, 0.65))
+
+
+def swing_sweep_rows(falling=((1.5, 6.6),), rising=((0.5, 7.2),), **kwargs):
+    """a sweep with a swing of the given sines in every cruise leg going each way, and a violent ramp before every leg
+    that is not cruise"""
+    rows = []
+    for leg, (direction, start, duration) in enumerate(SWING_LEGS):
+        rows += swing_leg_rows(direction, leg, start, duration, rising if direction > 0 else falling, **kwargs)
+        rows += swing_leg_rows(direction, leg, start - 0.3, 0.25, ((20.0, 5.0),), cruise=False, **kwargs)
+    return rows
+
+
+class SwingStatisticsTests(unittest.TestCase):
+
+    def test_the_swing_and_its_frequency_are_recovered_per_direction_of_the_angle(self):
+        stats = swing_statistics(swing_sweep_rows())
+        self.assertEqual((3, 2), (stats.rising.legs, stats.falling.legs))
+        # 1.5 positions at 6.6 Hz with the angle falling, 0.5 at 7.2 Hz rising, within 10 %
+        self.assertAlmostEqual(1.5, stats.falling.swing, delta=0.15)
+        self.assertAlmostEqual(0.5, stats.rising.swing, delta=0.05)
+        # and the frequency within the resolution of the leg, 1 / its length
+        self.assertAlmostEqual(6.6, stats.falling.frequency, delta=1 / 1.65)
+        self.assertAlmostEqual(7.2, stats.rising.frequency, delta=1 / 0.65)
+        self.assertAlmostEqual(1.5 / math.sqrt(2), stats.falling.lag_std, delta=0.15, msg='the std of a sine')
+        self.assertAlmostEqual(0.5 / math.sqrt(2), stats.rising.lag_std, delta=0.05)
+
+    def test_a_swing_between_two_bins_is_not_read_low(self):
+        # a sine whose frequency falls between two bins of the spectrum of a leg is not scaled down by the window
+        for frequency in (6.0, 6.3, 6.6, 6.9, 7.2):
+            stats = swing_statistics(swing_sweep_rows(falling=((1.0, frequency),), rising=((1.0, frequency),)))
+            self.assertAlmostEqual(1.0, stats.falling.swing, delta=0.05, msg=frequency)
+
+    def test_the_legs_are_not_joined(self):
+        rows = (swing_leg_rows(1, 0, 0.0, 1.0, ((1.0, 6.6),)) + swing_leg_rows(1, 2, 3.0, 1.0, ((2.0, 6.6),)) +
+                swing_leg_rows(-1, 1, 1.5, 1.0, ((1.0, 6.6),)))
+        stats = swing_statistics(rows)
+        self.assertEqual(2, stats.rising.legs)
+        self.assertAlmostEqual(1.5, stats.rising.swing, delta=0.15, msg='the mean of the legs of 1 and 2 positions')
+        self.assertEqual(1, stats.falling.legs)
+
+    def test_a_trend_and_a_constant_lag_are_not_swing(self):
+        # the lag of the speed (a constant), the lag growing through the leg, no oscillation: 5 positions + 3 per second
+        stats = swing_statistics(swing_sweep_rows(falling=(), rising=(), offset=5.0, trend=3.0))
+        self.assertLess(stats.rising.swing, 0.1)
+        self.assertLess(stats.falling.swing, 0.1)
+        self.assertLess(stats.falling.lag_std, 0.3)
+        self.assertAlmostEqual(5.0 + 3.0 * 0.825, abs(stats.falling.lag), delta=0.2, msg='the mean lag is reported')
+        # the trend does not hide a swing either
+        stats = swing_statistics(swing_sweep_rows(offset=5.0, trend=3.0))
+        self.assertAlmostEqual(1.5, stats.falling.swing, delta=0.15)
+        self.assertAlmostEqual(0.5, stats.rising.swing, delta=0.05)
+
+    def test_a_component_outside_the_band_is_not_picked(self):
+        # 2 positions at 0.5 Hz and 2 at 25 Hz, 0.4 at 8 Hz in the band (a component close to the edge leaks into it,
+        # most in the legs of 0.65 s, whose spectrum has a resolution of 1.5 Hz)
+        slow_and_fast = ((2.0, 0.5), (2.0, 25.0), (0.4, 8.0))
+        stats = swing_statistics(swing_sweep_rows(falling=slow_and_fast, rising=slow_and_fast))
+        for side in (stats.rising, stats.falling):
+            self.assertAlmostEqual(0.4, side.swing, delta=0.06)
+            self.assertAlmostEqual(8.0, side.frequency, delta=1.0)
+        # the strongest component in the band wins, not the first
+        both = ((0.5, 5.0), (1.2, 11.0))
+        stats = swing_statistics(swing_sweep_rows(falling=both, rising=both))
+        self.assertAlmostEqual(1.2, stats.falling.swing, delta=0.15)
+        self.assertAlmostEqual(11.0, stats.falling.frequency, delta=0.7)
+        # another band takes the component the default leaves out
+        stats = swing_statistics(swing_sweep_rows(falling=slow_and_fast, rising=slow_and_fast), band=(20.0, 40.0))
+        self.assertAlmostEqual(2.0, stats.falling.swing, delta=0.2)
+        self.assertAlmostEqual(25.0, stats.falling.frequency, delta=1.0)
+
+    def test_legs_that_are_too_short_or_sampled_too_sparsely_are_left_out(self):
+        sweep = swing_sweep_rows()
+        # a 0.5 s leg with a huge swing going down, and a 1.65 s leg sampled at 20 Hz going up
+        short = swing_leg_rows(-1, 7, 20.0, 0.5, ((9.0, 6.6),))
+        sparse = swing_leg_rows(1, 8, 30.0, 1.65, ((9.0, 6.6),), rate=20.0)
+        self.assertGreater(len(sparse), 10)
+        stats = swing_statistics(sweep + short + sparse)
+        self.assertEqual((3, 2), (stats.rising.legs, stats.falling.legs))
+        self.assertAlmostEqual(1.5, stats.falling.swing, delta=0.15)
+        self.assertAlmostEqual(0.5, stats.rising.swing, delta=0.05)
+        # the minimum is a parameter: with 0.4 s the short leg counts
+        stats = swing_statistics(sweep + short, minimum_leg=0.4)
+        self.assertEqual(3, stats.falling.legs)
+        self.assertGreater(stats.falling.swing, 3.0)
+        # a leg of just the minimum counts
+        exact = swing_leg_rows(1, 9, 40.0, SWING_MIN_LEG + 0.01, ((1.0, 6.6),))
+        self.assertEqual(1, swing_statistics(exact + swing_leg_rows(-1, 10, 50.0, 1.0)).rising.legs)
+
+    def test_a_direction_without_a_usable_leg_raises(self):
+        rising_only = [row for row in swing_sweep_rows() if row.direction > 0]
+        with self.assertRaisesRegex(ValueError, 'falling'):
+            swing_statistics(rising_only)
+        falling_only = [row for row in swing_sweep_rows() if row.direction < 0]
+        with self.assertRaisesRegex(ValueError, 'rising'):
+            swing_statistics(falling_only)
+        with self.assertRaises(ValueError):
+            swing_statistics([])
+        too_short = swing_leg_rows(1, 0, 0.0, 0.5) + swing_leg_rows(-1, 1, 1.0, 0.5)
+        with self.assertRaisesRegex(ValueError, '0.6 s'):
+            swing_statistics(too_short)
+        # samples that are not cruise don't make a leg
+        ramps = swing_leg_rows(1, 0, 0.0, 1.0, cruise=False) + swing_leg_rows(-1, 1, 2.0, 1.0, cruise=False)
+        with self.assertRaises(ValueError):
+            swing_statistics(ramps)
+
+    def test_the_direction_is_that_of_the_angle_whatever_the_position_does(self):
+        rows = swing_sweep_rows()
+        normal = swing_statistics(rows, position_sign=1)
+        reversed_ = swing_statistics(rows, position_sign=-1)
+        # the swing is the same: the angle falling swings more, in a servo whose positions fall with the angle too
+        self.assertEqual(normal.rising.swing, reversed_.rising.swing)
+        self.assertEqual(normal.falling.swing, reversed_.falling.swing)
+        self.assertGreater(reversed_.falling.swing, 2 * reversed_.rising.swing)
+        # the lag and the pwm are signed with the direction of the move in positions: trailing is positive
+        trailing = swing_sweep_rows(falling=(), rising=(), offset=4.0, pwm=100)
+        up_and_down = swing_statistics(trailing, position_sign=1)
+        self.assertAlmostEqual(4.0, up_and_down.rising.lag, delta=0.1, msg='positions rise with the angle: trailing')
+        self.assertAlmostEqual(-4.0, up_and_down.falling.lag, delta=0.1, msg='a falling angle, falling positions')
+        self.assertEqual(100, up_and_down.rising.pwm)
+        self.assertEqual(-100, up_and_down.falling.pwm)
+        self.assertEqual(0.0, up_and_down.rising.pwm_std)
+        flipped = swing_statistics(trailing, position_sign=-1)
+        self.assertAlmostEqual(-4.0, flipped.rising.lag, delta=0.1)
+        self.assertAlmostEqual(4.0, flipped.falling.lag, delta=0.1)
+        self.assertEqual(-100, flipped.rising.pwm)
+
+    def test_a_swing_read_in_whole_positions(self):
+        # the servo reports whole positions: a swing of 0.5 positions on a lag that doesn't move at all would be read as
+        # 0, but the lag of a real sweep drifts through several positions in a leg, which dithers it
+        rows = [row._replace(sample=row.sample._replace(position=int(round(row.sample.position))))
+                for row in swing_sweep_rows(offset=5.0, trend=3.0)]
+        stats = swing_statistics(rows)
+        self.assertAlmostEqual(1.5, stats.falling.swing, delta=0.15)
+        self.assertAlmostEqual(0.5, stats.rising.swing, delta=0.05)
+
+    def test_the_samples_may_come_in_any_order_and_the_band_is_checked(self):
+        rows = swing_sweep_rows()
+        shuffled = list(rows)
+        np.random.default_rng(3).shuffle(shuffled)
+        self.assertEqual(swing_statistics(rows), swing_statistics(shuffled))
+        for band in ((15.0, 3.0), (0.0, 15.0), (3.0, 300.0)):
+            with self.assertRaises(ValueError):
+                swing_statistics(rows, band=band)
+
+
+def swing_statistics_of(rising, falling, legs=3, frequency=6.6):
+    """SwingStatistics with the given swings"""
+    return SwingStatistics(SwingSide(legs, frequency, rising, 0.5, 2.0, 100.0, 5.0),
+                           SwingSide(legs, frequency, falling, 0.5, -2.0, -100.0, 5.0))
+
+
+class SwingArithmeticTests(unittest.TestCase):
+
+    def test_the_recommendation_is_the_largest_p_within_the_limit_in_both_directions(self):
+        tried = [(2000, 0, 2.4, 1.0), (1600, 0, 1.2, 0.8), (1200, 0, 0.9, 0.4), (2000, 0, 0.5, 2.0)]
+        self.assertEqual(1200, recommended_swing_p(tried, 0, 1.0))
+        self.assertEqual(1600, recommended_swing_p(tried, 0, 1.2), 'at the limit counts')
+        self.assertIsNone(recommended_swing_p(tried, 0, 0.3))
+        self.assertIsNone(recommended_swing_p([], 0, 1.0))
+
+    def test_a_p_that_is_within_the_limit_in_one_direction_only_is_not_recommended(self):
+        tried = [(1500, 0, 0.1, 1.5), (1000, 0, 0.9, 0.9), (1200, 0, 1.5, 0.1)]
+        self.assertEqual(1000, recommended_swing_p(tried, 0, 1.0))
+
+    def test_only_the_yaml_d_counts(self):
+        tried = [(2000, 0, 2.0, 2.0), (2000, 250, 0.1, 0.1), (1500, 0, 0.5, 0.5), (3000, 400, 0.1, 0.1)]
+        self.assertEqual(1500, recommended_swing_p(tried, 0, 1.0))
+        self.assertEqual(3000, recommended_swing_p(tried, 400, 1.0))
+        self.assertIsNone(recommended_swing_p(tried, 100, 1.0))
+
+    def test_a_p_that_was_run_twice_has_to_be_within_the_limit_both_times(self):
+        tried = [(2000, 0, 0.9, 0.9), (1500, 0, 0.5, 0.5), (2000, 0, 1.1, 0.9)]
+        self.assertEqual(1500, recommended_swing_p(tried, 0, 1.0), 'the repeat of the yaml P swings too much')
+        tried = [(2000, 0, 0.9, 0.9), (1500, 0, 0.5, 0.5), (2000, 0, 0.8, 0.7)]
+        self.assertEqual(2000, recommended_swing_p(tried, 0, 1.0))
+
+    def test_the_spread_is_how_much_two_runs_differ(self):
+        spread = swing_spread(swing_statistics_of(0.6, 1.9), swing_statistics_of(0.9, 2.4))
+        self.assertAlmostEqual(0.3, spread.rising)
+        self.assertAlmostEqual(0.5, spread.falling)
+        self.assertEqual(swing_spread(swing_statistics_of(0.9, 2.4), swing_statistics_of(0.6, 1.9)), spread)
+        same = swing_statistics_of(1.0, 1.0)
+        self.assertEqual(SwingPair(0.0, 0.0), swing_spread(same, same))
+
+    def test_the_change_is_against_the_mean_of_the_reference_runs(self):
+        reference = [swing_statistics_of(0.6, 1.9), swing_statistics_of(0.9, 2.4)]
+        change = swing_change(reference, swing_statistics_of(0.5, 2.5))
+        self.assertAlmostEqual(-0.25, change.rising)
+        self.assertAlmostEqual(0.35, change.falling)
+
+    def test_a_change_counts_beyond_the_spread_and_the_resolution(self):
+        self.assertTrue(swing_changed(0.6, 0.5))
+        self.assertTrue(swing_changed(-0.6, 0.5), 'either way')
+        self.assertFalse(swing_changed(0.4, 0.5))
+        self.assertFalse(swing_changed(0.05, 0.0), 'two runs that happen to agree are no reason to count every change')
+        self.assertTrue(swing_changed(0.2, 0.0))
+
+    def test_the_cruise_legs_of_a_sweep_that_are_long_enough(self):
+        self.assertEqual({1: 3, -1: 2}, swing_legs(ff_sweep(10, 10, 0.01), 0.01))
+        self.assertEqual({1: 0, -1: 0}, swing_legs(ff_sweep(4, 10, 0.01), 0.01), 'cruise of 0.2 s')
+        self.assertEqual({1: 0, -1: 0}, swing_legs(ff_sweep(1, 10, 0.01), 0.01), 'no cruise at all')
+        # the legs to and from the pose cruise 0.65 s, those between the ends 1.65 s
+        self.assertEqual({1: 1, -1: 2}, swing_legs(ff_sweep(10, 10, 0.01), 0.01, minimum_leg=1.0))
+        self.assertEqual({1: 3, -1: 2}, swing_legs(ff_sweep(10, 10, 0.01), 0.01, minimum_leg=0.66))
+        self.assertEqual({1: 1, -1: 2}, swing_legs(ff_sweep(10, 10, 0.01), 0.01, minimum_leg=0.67))
+        self.assertEqual({1: 0, -1: 1}, swing_legs(ff_sweep(10, 10, 0.01, round_trips=1), 0.01, minimum_leg=1.0))
+
+
+class SwingSettingsTests(unittest.TestCase):
+
+    def test_the_default_settings_are_the_yaml_gains_two_lower_p_gains_and_the_yaml_gains_again(self):
+        self.assertEqual([(2000, 0), (1600, 0), (1200, 0), (2000, 0)], swing_gains(Settings(), 2000, 0))
+        self.assertEqual([(2500, 250), (2000, 250), (1500, 250), (2500, 250)], swing_gains(Settings(), 2500, 250))
+        self.assertEqual([(780, 1020), (620, 1020), (470, 1020), (780, 1020)], swing_gains(Settings(), 780, 1020),
+                         'rounded to tens')
+
+    def test_the_extra_d_gains_come_first_then_the_p_gains(self):
+        settings = Settings(swing_d=(250, 640))
+        self.assertEqual([(2000, 0), (2000, 250), (2000, 640), (1600, 0), (1200, 0), (2000, 0)],
+                         swing_gains(settings, 2000, 0))
+
+    def test_given_p_gains_replace_the_default_ones_in_the_order_given(self):
+        settings = Settings(swing_p=(2400, 900), swing_d=(100,))
+        self.assertEqual([(2000, 0), (2000, 100), (2400, 0), (900, 0), (2000, 0)], swing_gains(settings, 2000, 0))
+        self.assertEqual([(2000, 0), (2000, 0)], swing_gains(Settings(swing_p=()), 2000, 0), 'none: only the repeat')
+
+    def test_the_yaml_gains_and_repeated_values_are_run_once(self):
+        settings = Settings(swing_p=(2000, 1500, 1500), swing_d=(0, 250, 250))
+        self.assertEqual([(2000, 0), (2000, 250), (1500, 0), (2000, 0)], swing_gains(settings, 2000, 0))
+
+    def test_a_default_p_that_is_not_a_gain_is_left_out(self):
+        self.assertEqual([(1, 0), (1, 0)], swing_gains(Settings(), 1, 0), '0.8 and 0.6 times 1 round to 0 and 0')
+        self.assertEqual([(10, 0), (10, 0)], swing_gains(Settings(), 10, 0), 'and to 10 and 10: the yaml P, once')
+        self.assertEqual([(cfg.MAX_GAIN, 0), (cfg.MAX_GAIN, 0)], swing_gains(Settings(swing_p=(cfg.MAX_GAIN + 1,)),
+                                                                              cfg.MAX_GAIN, 0))
+
+
+class SwingStageTests(unittest.TestCase):
+    """the stage on the simulated servo: joint 4 at P 1000 and D 0 of the test yaml, a trajectory that follows the goal
+    in 10 ms, the settings (1000, 0), (800, 0), (600, 0) and (1000, 0) again by default"""
+    YAML = (1000, 0, 0)
+    MOVE_TIME = 20
+    DEFAULT_SETTINGS = [(1000, 0), (800, 0), (600, 0), (1000, 0)]
+    # above P 700 the damping of the simulation falls by 0.25 per unit of P, which leaves the loop at P 1000 with a
+    # damping ratio of 0.03: it rings at its own frequency of 6.5 Hz and, kicked by the legs of the sweep, doesn't stop
+    RESONANT = {'resonance_above': 700, 'resonance_slope': 0.25}
+
+    def stage(self, move_time=MOVE_TIME, load=20000.0, reverse=False, resonance_above=None, resonance_slope=0.1,
+              **overrides):
+        settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, tune_d=False,
+                            swing_degrees=10.0)._replace(**overrides)
+        session, robot, sim, _, _ = session_for(joint=4, load=load, settings=settings, move_time=move_time,
+                                                trajectory_time=0.01, resonance_above=resonance_above,
+                                                resonance_slope=resonance_slope)
+        if reverse:  # the positions fall as the angle rises; the pose is at the middle of the range, the same position
+            servo = robot.servo_handler.get_servo(4)
+            servo.min_position, servo.max_position = servo.max_position, servo.min_position
+        buffer = io.StringIO()
+        session.swing_writer = csv.DictWriter(buffer, fieldnames=SWING_SAMPLE_FIELDS)
+        session.swing_writer.writeheader()
+        for name, replacement in (('sleep', sim.advance), ('perf_counter', lambda: sim.now)):
+            patcher = mock.patch('src.utils.movement.' + name, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return session, robot, sim, buffer
+
+    @staticmethod
+    def run_stage(session):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = session.run_swing(parse_pose('elbow_out'))
+        return result, out.getvalue()
+
+    @staticmethod
+    def rows_of(buffer):
+        return list(csv.DictReader(io.StringIO(buffer.getvalue())))
+
+    @staticmethod
+    def note_settings(session, robot, sim):
+        """the (setting, p, d, gains read back from the servo, gains of the simulation) of every sweep, as it starts"""
+        seen = []
+        sweep = session.swing_sweep
+
+        def noted(pose, setting, p, d):
+            seen.append((setting, p, d, robot.servo_handler.gains[4], (sim.p, sim.i, sim.d)))
+            return sweep(pose, setting, p, d)
+        session.swing_sweep = noted
+        return seen
+
+    def test_the_settings_run_in_order_and_the_servo_has_its_yaml_gains_again(self):
+        session, robot, sim, buffer = self.stage()
+        handler = robot.servo_handler
+        seen = self.note_settings(session, robot, sim)
+        times, starts = [], []
+        move_servos = robot.move_servos
+
+        def timed(angles):
+            times.append(sim.now)
+            move_servos(angles)
+        robot.move_servos = timed
+        sweep = session.swing_sweep
+
+        def marked(pose, setting, p, d):
+            starts.append(len(times))
+            return sweep(pose, setting, p, d)
+        session.swing_sweep = marked
+
+        result, output = self.run_stage(session)
+
+        self.assertEqual(self.DEFAULT_SETTINGS, [(r.p, r.d) for r in result.runs])
+        self.assertEqual(1.0, result.limit)
+        # every sweep ran with the gains of its setting, read back from the servo as well as in the simulation
+        self.assertEqual([(i, p, d, (p, 0, d), (p, 0, d)) for i, (p, d) in enumerate(self.DEFAULT_SETTINGS)], seen)
+        # afterwards the servo has its yaml gains again, and everything else as it was
+        self.assertEqual(self.YAML, handler.gains[4])
+        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+        self.assertEqual(cfg.MAX_PWM, handler.goal_pwm[4])
+        self.assertEqual((0, 0), handler.feedforward[4])
+
+        # only the joint under test moves in the sweeps, within 10 degrees of the pose
+        pose = parse_pose('elbow_out')
+        moves = np.array(robot.moves)
+        others = [1, 2, 3, 5, 6]
+        np.testing.assert_allclose(moves[:, others], np.tile(pose[others], (len(moves), 1)))
+        self.assertAlmostEqual(np.radians(10), np.abs(moves[:, 4] - pose[4]).max(), places=6)
+
+        # the writes are on the clock without drift, the servo is read several times between two writes
+        steps = ff_sweep(10.0, 10.0, 0.01, round_trips=2)
+        for first, last in zip(starts, starts[1:] + [len(times)]):
+            written_at = np.array(times[first:last])
+            self.assertEqual(len(steps), len(written_at))
+            np.testing.assert_allclose(written_at - written_at[0], [s.time for s in steps], atol=0.003)
+
+        # the samples of every setting with its p and d
+        rows = self.rows_of(buffer)
+        self.assertEqual(list(SWING_SAMPLE_FIELDS), list(rows[0].keys()))
+        self.assertEqual({'4'}, {row['joint'] for row in rows})
+        self.assertEqual({'1'}, {row['pose'] for row in rows})
+        self.assertEqual({'10.0'}, {row['speed'] for row in rows})
+        self.assertEqual({'1', '-1'}, {row['direction'] for row in rows})
+        self.assertEqual({'0', '1'}, {row['cruise'] for row in rows})
+        self.assertEqual({'0', '1', '2', '3', '4'}, {row['leg'] for row in rows})
+        self.assertEqual({'0', '1', '2', '3'}, {row['setting'] for row in rows})
+        for setting, (p, d) in enumerate(self.DEFAULT_SETTINGS):
+            mine = [row for row in rows if row['setting'] == str(setting)]
+            self.assertEqual({(str(p), str(d))}, {(row['p'], row['d']) for row in mine})
+            self.assertGreater(len(mine), 3 * len(steps), 'sampled as often as it fits between two writes')
+            seconds = [float(row['time']) for row in mine]
+            self.assertEqual(sorted(seconds), seconds)
+
+        # the report: a line per setting, the table, the spread and the recommendation
+        for p, d in self.DEFAULT_SETTINGS:
+            self.assertIn('  p={} d={}: swing '.format(p, d), output)
+        self.assertEqual(4, output.count(' Hz with the angle rising, '))
+        self.assertIn('swing of joint 4 (yaml p=1000 d=0)', output)
+        self.assertIn('how much a repeat differs', output)
+        self.assertIn('the yaml P 1000 is fine', output)
+        self.assertNotIn('pid:', output, 'the script recommends, it does not write the yaml')
+
+    def test_the_direction_in_the_csv_is_that_of_the_angle_even_for_a_servo_mounted_reversed(self):
+        for reverse in (False, True):
+            session, robot, sim, buffer = self.stage(reverse=reverse)
+            servo = robot.servo_handler.get_servo(4)
+            self.assertEqual(-1 if reverse else 1, position_sign(servo))
+            self.run_stage(session)
+            rows = [row for row in self.rows_of(buffer) if row['cruise'] == '1' and row['setting'] == '0']
+            moved = 0
+            for before, after in zip(rows, rows[1:]):
+                if before['leg'] == after['leg'] and int(after['goal']) != int(before['goal']):
+                    moved += 1
+                    # the goal is in positions: it rises with the angle, or falls with it when mounted reversed
+                    self.assertEqual(int(before['direction']) * position_sign(servo),
+                                     int(np.sign(int(after['goal']) - int(before['goal']))))
+            self.assertGreater(moved, 300)
+
+    def test_the_lag_is_signed_with_the_direction_of_the_move_in_positions(self):
+        # the same simulation, mounted one way and the other: what trails when the position falls is the same
+        normal = self.run_stage(self.stage()[0])[0].runs[0].statistics
+        flipped = self.run_stage(self.stage(reverse=True)[0])[0].runs[0].statistics
+        # the sweep goes to the upper end first: three legs with the angle rising, two falling, whatever the mounting
+        for statistics in (normal, flipped):
+            self.assertEqual((3, 2), (statistics.rising.legs, statistics.falling.legs))
+        self.assertAlmostEqual(normal.rising.lag, flipped.falling.lag, delta=1.5)
+        self.assertAlmostEqual(normal.falling.lag, flipped.rising.lag, delta=1.5)
+        self.assertGreater(abs(normal.rising.lag - normal.falling.lag), 10, 'the load gives the two directions a lag')
+
+    def test_extra_d_gains_run_at_the_yaml_p_before_the_other_p_gains(self):
+        session, robot, sim, buffer = self.stage(swing_d=(250,))
+        seen = self.note_settings(session, robot, sim)
+        result, output = self.run_stage(session)
+        self.assertEqual([(1000, 0), (1000, 250), (800, 0), (600, 0), (1000, 0)], [(r.p, r.d) for r in result.runs])
+        self.assertEqual([(i, p, d, (p, 0, d), (p, 0, d)) for i, (p, d) in enumerate(
+            [(1000, 0), (1000, 250), (800, 0), (600, 0), (1000, 0)])], seen)
+        self.assertEqual({'0', '1', '2', '3', '4'}, {row['setting'] for row in self.rows_of(buffer)})
+        self.assertIn('d=250: the swing changes by', output)
+        self.assertIn('D made no difference beyond the spread', output)
+        self.assertEqual(self.YAML, robot.servo_handler.gains[4])
+
+    def test_given_p_gains_are_tried_with_the_yaml_d(self):
+        session, robot, sim, buffer = self.stage(swing_p=(1400, 500))
+        result, output = self.run_stage(session)
+        self.assertEqual([(1000, 0), (1400, 0), (500, 0), (1000, 0)], [(r.p, r.d) for r in result.runs])
+        self.assertNotIn('D made', output, 'no extra D was tried')
+        self.assertEqual(self.YAML, robot.servo_handler.gains[4])
+
+    def test_a_p_that_swings_more_is_found_and_the_largest_p_within_the_limit_is_recommended(self):
+        session, robot, sim, buffer = self.stage(**self.RESONANT)
+        result, output = self.run_stage(session)
+        first, lower, lowest, last = (run.statistics for run in result.runs)
+        for statistics in (first, last):
+            for side in (statistics.rising, statistics.falling):
+                self.assertGreater(side.swing, 1.5, 'the yaml P rings')
+                self.assertAlmostEqual(6.5, side.frequency, delta=0.7, msg='at the frequency of the loop')
+        for statistics in (lower, lowest):
+            for side in (statistics.rising, statistics.falling):
+                self.assertLess(side.swing, 0.6)
+        self.assertEqual(800, tune_servo_gains.recommended_swing_p(
+            [(r.p, r.d, r.statistics.rising.swing, r.statistics.falling.swing) for r in result.runs], 0, 1.0))
+        self.assertIn('recommended for servo_config.yaml', output)
+        self.assertIn('pid: {p: 800, i: 0, d: 0}', output)
+        self.assertNotIn('is fine', output)
+        self.assertEqual(self.YAML, robot.servo_handler.gains[4])
+
+    def test_without_a_p_within_the_limit_the_report_sends_you_to_the_mechanics(self):
+        session, robot, sim, buffer = self.stage(swing_limit=0.2)
+        result, output = self.run_stage(session)
+        self.assertIn('no P tried swings at most 0.2 positions in both directions at d=0: check the belt or the '
+                      'mechanics before lowering P further', output)
+        self.assertNotIn('pid:', output)
+        self.assertEqual(self.YAML, robot.servo_handler.gains[4])
+
+    def test_an_abort_during_a_sweep_restores_the_gains_and_keeps_the_samples(self):
+        session, robot, sim, buffer = self.stage()
+        handler = robot.servo_handler
+        warm = int(AbortLimits().max_temperature)
+        reads = []
+
+        def heat():
+            # the servo gets too warm 500 reads into the sweep at the second setting
+            if handler.gains[4] == (800, 0, 0):
+                reads.append(1)
+                sim.temperature = warm if len(reads) > 500 else 30
+        handler.before_read = heat
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(tune_servo_gains.Stop) as raised:
+            session.run_swing(parse_pose('elbow_out'))
+        self.assertEqual('the swing stage was aborted: temperature {}C'.format(warm), str(raised.exception))
+        self.assertIn('aborted: temperature', out.getvalue())
+        self.assertEqual(self.YAML, handler.gains[4], 'restored at the abort')
+        self.assertEqual(self.YAML, (sim.p, sim.i, sim.d))
+        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+        self.assertEqual(session.pose_goal, sim.goal, 'the goal is back at the pose')
+        self.assertNotIn('swing of joint 4', out.getvalue(), 'no report of a stage that was cut short')
+        rows = self.rows_of(buffer)
+        self.assertEqual({'0', '1'}, {row['setting'] for row in rows}, 'the samples of the aborted sweep are written')
+        aborted = [row for row in rows if row['setting'] == '1']
+        self.assertEqual({('800', '0')}, {(row['p'], row['d']) for row in aborted})
+        self.assertAlmostEqual(501, len(aborted), delta=5)
+
+    def test_a_stop_request_during_a_sweep_stops_the_stage_and_the_samples_are_written(self):
+        session, robot, sim, buffer = self.stage()
+        handler = robot.servo_handler
+        handler.before_read = lambda: setattr(session.stop, 'requested', handler.gains[4] == (800, 0, 0))
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop) as raised:
+            session.run_swing(parse_pose('elbow_out'))
+        self.assertEqual('interrupted', str(raised.exception))
+        self.assertEqual({'0', '1'}, {row['setting'] for row in self.rows_of(buffer)})
+        self.assertNotEqual(self.YAML, handler.gains[4], 'main restores in its finally')
+        self.assertTrue(session.restore())
+        self.assertEqual(self.YAML, handler.gains[4])
+
+    def test_reads_that_keep_failing_stop_the_stage_and_the_samples_are_written(self):
+        session, robot, sim, buffer = self.stage()
+        handler = robot.servo_handler
+        read_state = handler.read_state
+        reads = []
+
+        def failing(servo_ids):
+            if handler.gains[4] == (800, 0, 0):
+                reads.append(1)
+                if len(reads) > 300:
+                    return None
+            return read_state(servo_ids)
+        handler.read_state = failing
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop) as raised:
+            session.run_swing(parse_pose('elbow_out'))
+        self.assertEqual('failed to read servo 4 3 times in a row', str(raised.exception))
+        self.assertEqual(3, session.read_failures)
+        rows = self.rows_of(buffer)
+        self.assertEqual({'0', '1'}, {row['setting'] for row in rows})
+        self.assertEqual(300, len([row for row in rows if row['setting'] == '1']))
+        self.assertTrue(session.restore())
+        self.assertEqual(self.YAML, handler.gains[4])
+
+    def test_a_servo_without_move_time_is_skipped(self):
+        session, robot, sim, buffer = self.stage(move_time=None)
+        result, output = self.run_stage(session)
+        self.assertIsNone(result)
+        self.assertEqual('servo 4 has no move_time in servo_config.yaml, the swing stage needs the time-based '
+                         'profile\n', output)
+        self.assertEqual([], robot.moves, 'nothing moved')
+        self.assertEqual([], robot.servo_handler.gain_writes)
+        self.assertEqual([], self.rows_of(buffer))
+
+    def test_a_refused_sweep_skips_the_stage_before_anything_moves(self):
+        pose = parse_pose('elbow_out')
+        for overrides, expected in (({'swing_degrees': 200.0}, 'range'),  # beyond the +-180 degrees of joint 4
+                                    ({'swing_degrees': 1.0}, 'no cruise leg of at least 0.6 s going both ways'),
+                                    ({'swing_degrees': 4.0}, 'use a larger --swing-degrees or a lower --swing-speed'),
+                                    ({'swing_speed': 900.0}, 'joint 4 would move')):
+            session, robot, sim, buffer = self.stage(**overrides)
+            reason = swing_refusal(robot, 4, pose, session.settings)
+            self.assertIsNotNone(reason, overrides)
+            self.assertIn(expected, reason)
+            result, output = self.run_stage(session)
+            self.assertIsNone(result)
+            self.assertIn(expected, output)
+            self.assertEqual([], robot.moves, 'nothing moved')
+            self.assertEqual([], robot.servo_handler.gain_writes)
+        session, robot, sim, buffer = self.stage()
+        self.assertIsNone(swing_refusal(robot, 4, pose, session.settings))
+
+    def test_a_pose_the_planner_refuses_skips_the_stage(self):
+        session, robot, sim, buffer = self.stage()
+        with mock.patch.object(session, 'move_to_pose', return_value=False):
+            result, output = self.run_stage(session)
+        self.assertIsNone(result)
+        self.assertIn('no swing stage: the planner refuses the move to the pose', output)
+        self.assertEqual([], robot.servo_handler.gain_writes)
+        self.assertEqual([], self.rows_of(buffer))
+
+    def test_a_pose_the_workspace_refuses_skips_the_stage(self):
+        session, robot, sim, buffer = self.stage()
+        reason = swing_refusal(robot, 4, parse_pose('90,0,0,0,0,0'), session.settings)
+        self.assertIn('no swing stage at pose 90 0 0 0 0 0 degrees', reason)
+        self.assertIn('below the minimum height', reason)
+
+
+def swing_result(runs, limit=1.0):
+    """a SwingResult from (p, d, swing rising, swing falling)"""
+    return SwingResult(tuple(SwingRun(p, d, swing_statistics_of(rising, falling)) for p, d, rising, falling in runs),
+                       limit)
+
+
+class PrintSwingTests(unittest.TestCase):
+    SERVO = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, p=2500, i=0, d=250)
+
+    def report(self, runs, limit=1.0):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            tune_servo_gains.print_swing(2, self.SERVO, swing_result(runs, limit))
+        return out.getvalue()
+
+    def test_the_measurements_of_20_november_recommend_the_p_that_stays_within_the_limit(self):
+        # joint 2: the swing with the angle falling is 2 positions at P 2500, 1.2 at 2000 and 0.75 at 1500
+        output = self.report([(2500, 250, 0.6, 1.9), (2500, 0, 0.5, 2.2), (2500, 640, 0.6, 2.3), (2000, 250, 0.3, 1.2),
+                              (1500, 250, 0.3, 0.75), (2500, 250, 0.9, 2.4)])
+        self.assertIn('swing of joint 2 (yaml p=2500 d=250)', output)
+        self.assertIn('the two runs at the yaml gains differ by 0.30 positions with the angle rising and 0.50 '
+                      'falling: that is how much a repeat differs', output)
+        self.assertIn('at the yaml gains the joint swings more with the angle falling: 2.15 against 0.75 positions',
+                      output)
+        # D 0 and D 640: within the spread of a repeat
+        self.assertIn('d=0: the swing changes by -0.25 rising and +0.05 falling from the yaml D, within the spread',
+                      output)
+        self.assertIn('d=640: the swing changes by -0.15 rising and +0.15 falling from the yaml D, within the spread',
+                      output)
+        self.assertIn('D made no difference beyond the spread of a repeat (0.30 rising and 0.50 falling)', output)
+        self.assertIn('recommended for servo_config.yaml', output)
+        self.assertIn('pid: {p: 1500, i: 0, d: 250}', output)
+        self.assertNotIn('belt', output)
+        self.assertEqual(6, len([line for line in output.splitlines() if line[:5].strip().isdigit()]),
+                         'a row of the table per setting')
+
+    def test_a_d_that_changes_the_swing_beyond_the_spread_is_reported(self):
+        output = self.report([(2500, 250, 0.6, 1.0), (2500, 800, 0.5, 2.9), (2500, 250, 0.7, 1.1)])
+        self.assertIn('d=800: the swing changes by -0.15 rising and +1.85 falling from the yaml D, beyond the spread',
+                      output)
+        self.assertIn('D made a difference beyond the spread of a repeat', output)
+
+    def test_the_yaml_p_is_fine_when_it_is_within_the_limit(self):
+        output = self.report([(2500, 250, 0.4, 0.9), (2000, 250, 0.3, 0.4), (2500, 250, 0.5, 0.8)])
+        self.assertIn('the yaml P 2500 is fine: it swings at most 1 positions in both directions at d=250', output)
+        self.assertNotIn('pid:', output)
+        self.assertNotIn('D made', output, 'no extra D was tried')
+        self.assertIn('swings alike in both directions', self.report([(2500, 250, 0.5, 0.52), (2500, 250, 0.5, 0.5)]))
+
+    def test_without_a_p_within_the_limit_the_belt_and_the_mechanics_are_to_be_checked(self):
+        output = self.report([(2500, 250, 1.4, 2.9), (2000, 250, 1.1, 2.0), (1500, 250, 1.0, 1.5),
+                              (2500, 250, 1.5, 3.0)])
+        self.assertIn('no P tried swings at most 1 positions in both directions at d=250: check the belt or the '
+                      'mechanics before lowering P further (a slack belt lowers the resonance and raises the swing)',
+                      output)
+        self.assertNotIn('pid:', output)
+        self.assertNotIn('is fine', output)
+
+    def test_the_limit_is_used(self):
+        runs = [(2500, 250, 0.4, 2.9), (2000, 250, 0.3, 1.9), (1500, 250, 0.3, 1.5), (2500, 250, 0.5, 3.0)]
+        self.assertIn('pid: {p: 2000, i: 0, d: 250}', self.report(runs, limit=2.0))
+        self.assertIn('pid: {p: 1500, i: 0, d: 250}', self.report(runs, limit=1.5))
+        self.assertIn('belt', self.report(runs, limit=1.0))
+
+
+class SwingOptionTests(unittest.TestCase):
+    """main with the options of the stage, with a session that only records what it is asked to do"""
+    run_main = FeedforwardOptionTests.run_main
+
+    def test_the_defaults(self):
+        settings = Settings()
+        self.assertEqual((10.0, 10.0, None, (), 1.0), (settings.swing_degrees, settings.swing_speed, settings.swing_p,
+                                                       settings.swing_d, settings.swing_limit))
+
+    def test_without_the_options_the_stage_does_not_run(self):
+        code, output = self.run_main([])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, False), ('run', 1), 'restore'], calls)
+        self.assertEqual([False], self.swing_writers)
+        self.assertEqual(['samples.csv', 'trials.csv'], files)
+        self.assertNotIn('swing stage', output)
+
+    def test_swing_runs_the_stage_after_the_p_and_d_tuning(self):
+        code, output = self.run_main(['--swing'])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, False), ('run', 1), ('swing', [90, 90, 0, 0, 0, 0]), 'restore'],
+                         calls)
+        self.assertEqual([True], self.swing_writers)
+        self.assertEqual(['samples.csv', 'swing.csv', 'trials.csv'], files)
+        finish.assert_called_once()
+        self.assertIn('swing stage: joint 4 (yaml p=1000 d=0) at pose 90 90 0 0 0 0 degrees, sweeps of 10 degrees '
+                      'either way at 10 degrees/s with the gains (p, d) (1000, 0) (800, 0) (600, 0) (1000, 0), '
+                      'recommending the largest P that swings at most 1 positions, output', output)
+        self.assertIn('swing samples in', output)
+
+    def test_with_ff_and_swing_the_swing_stage_comes_last(self):
+        code, output = self.run_main(['--ff', '--swing'])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, True), ('run', 1), ('ff', [90, 90, 0, 0, 0, 0]),
+                          ('swing', [90, 90, 0, 0, 0, 0]), 'restore'], calls)
+        self.assertEqual(['ff.csv', 'samples.csv', 'swing.csv', 'trials.csv'], files)
+
+    def test_swing_only_skips_the_p_and_d_stages(self):
+        code, output = self.run_main(['--swing-only', '--swing-degrees', '12', '--swing-speed', '8', '--swing-p', '900',
+                                      '700', '--swing-d', '250', '--swing-limit', '0.5'])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', False, False, False), ('swing', [90, 90, 0, 0, 0, 0]), 'restore'], calls)
+        self.assertEqual(['swing.csv'], files)
+        self.assertTrue(robot.enabled)
+        settings = self.settings[0]
+        self.assertEqual((12.0, 8.0, (900, 700), (250,), 0.5), (settings.swing_degrees, settings.swing_speed,
+                                                                settings.swing_p, settings.swing_d,
+                                                                settings.swing_limit))
+        self.assertIn('sweeps of 12 degrees either way at 8 degrees/s with the gains (p, d) (1000, 0) (1000, 250) '
+                      '(900, 0) (700, 0) (1000, 0), recommending the largest P that swings at most 0.5 positions',
+                      output)
+        self.assertIn('joint 4 sweeps up to 12 degrees either way at 8 degrees/s once per setting', output)
+
+    def test_the_stage_does_not_start_after_a_p_and_d_run_that_stopped(self):
+        code, output = self.run_main(['--swing'], stop_in_run=True)
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, False), ('run', 1), 'restore'], calls)
+        self.assertIn('stopped: a trial aborted', output)
+
+    def test_a_servo_without_move_time_skips_the_stage_and_swing_only_ends_before_the_servos_are_enabled(self):
+        line = 'servo 4 has no move_time in servo_config.yaml, the swing stage needs the time-based profile'
+        code, output = self.run_main(['--swing-only'], move_time=None)
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(1, code)
+        self.assertEqual([], calls)
+        self.assertFalse(robot.enabled)
+        self.assertEqual([], files)
+        self.assertEqual(1, output.count(line))
+        # with --swing the P and D stages still run
+        code, output = self.run_main(['--swing'], move_time=None)
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(0, code)
+        self.assertEqual([('session', True, True, False), ('run', 1), 'restore'], calls)
+        self.assertEqual(1, output.count(line))
+        self.assertTrue(robot.enabled)
+        self.assertEqual(['samples.csv', 'trials.csv'], files)
+
+    def test_a_sweep_without_a_cruise_leg_is_refused_before_the_servos_are_enabled(self):
+        code, output = self.run_main(['--swing-only', '--swing-degrees', '3'])
+        calls, finish, files, robot = self.recorded
+        self.assertEqual(1, code)
+        self.assertEqual([], calls)
+        self.assertFalse(robot.enabled)
+        self.assertIn('use a larger --swing-degrees or a lower --swing-speed', output)
+
+    def test_the_stages_that_run_alone_do_not_run_together(self):
+        def no_robot():
+            raise AssertionError('the robot was touched')
+
+        for argv in (['--swing-only', '--ff-only'], ['--swing-only', '--ff'], ['--ff-only', '--swing']):
+            out = io.StringIO()
+            with mock.patch.object(tune_servo_gains, 'get_robot', no_robot), contextlib.redirect_stdout(out):
+                self.assertEqual(1, tune_servo_gains.main(['--joint', '4'] + argv), argv)
+            self.assertIn('--swing-only runs the swing stage alone' if argv[0] == '--swing-only'
+                          else '--ff-only runs the feedforward stage alone', out.getvalue())
+
+    def test_gains_out_of_the_range_of_the_servo_and_bad_values_are_refused(self):
+        def no_robot():
+            raise AssertionError('the robot was touched')
+
+        for argv in (['--swing-p', '0'], ['--swing-p', str(cfg.MAX_GAIN + 1)], ['--swing-p', '1000', '-5'],
+                     ['--swing-d', '-1'], ['--swing-d', str(cfg.MAX_GAIN + 1)], ['--swing-d', '250', '99999'],
+                     ['--swing-degrees', '0'], ['--swing-speed', '-1'], ['--swing-limit', '0']):
+            out = io.StringIO()
+            with mock.patch.object(tune_servo_gains, 'get_robot', no_robot), contextlib.redirect_stdout(out):
+                self.assertEqual(1, tune_servo_gains.main(['--joint', '4', '--swing-only'] + argv), argv)
+            self.assertIn('--swing-', out.getvalue(), argv)
+        code, output = self.run_main(['--swing-only', '--swing-p', '1', str(cfg.MAX_GAIN), '--swing-d', '0',
+                                      str(cfg.MAX_GAIN)])
+        self.assertEqual(0, code, 'the ends of the range are fine')

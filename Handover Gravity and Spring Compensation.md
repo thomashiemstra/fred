@@ -162,9 +162,12 @@ gamepad loop does since 18 November: the arm pauses for as long as the PC stalls
 later. Not checked on the robot yet. Open: what stalls (it happened with and without the camera recorder running).
 
 One position of error is about 0.5 mm at the gripper tip for joint 3 (34 cm) and up to 0.9 mm for joint 2 (57 cm).
-Also open: the cos_phi term of joint 3 is a shift of 3.3 degrees, which is
-either its centre of mass off the axis of the link or a zero error of the angle (servo 3 has no offset measured in
-the jig); a zero error of 3 degrees would be about 2 cm at the tip.
+The cos_phi term of joint 3 is a shift of 3.3 degrees: the load peaks with
+the upper arm commanded 3.3 degrees above horizontal. The fit can not tell a centre of mass that sits off the axis
+of the link from a zero error of the angle (servo 3 has no offset measured in the jig). The upper arm is bolted
+directly to the servo, so a zero error of 3 degrees is not expected there and the term is taken as the weight
+sitting below the axis (cables, housings). A level on the upper arm commanded horizontal would confirm it; not
+done.
 
 Still open: the check at rest with `record_static_load.py`; joint 4; the wrist model is the simplified
 one; what the encoder does not see (flex) needs an outside reference, see Step 6. A webcam with aruco markers on

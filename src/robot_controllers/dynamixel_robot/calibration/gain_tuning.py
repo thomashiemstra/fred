@@ -3,7 +3,9 @@ The arithmetic of calibration/tune_servo_gains.py: the size of a test step, the 
 rest period, the acceptance criteria that mark the knee of a gain sweep, the live abort rules, and the choice of the
 gains from the trials, and the feedforward stage: the sweep of the joint, the statistics of its cruise parts, the line
 fit of the lag against the speed and the gain it gives, and the binning of a slow sweep by the angle of the joint that
-calibration/record_load_sweep.py uses. Pure functions on lists of samples, nothing here talks to the robot.
+calibration/record_load_sweep.py uses, and the swing stage: the size and the frequency of the oscillation of the lag
+during the cruise of a sweep per direction of the angle, the spread between two runs and the choice of P from them.
+Pure functions on lists of samples, nothing here talks to the robot.
 
 A Sample is one read of the state block of the servo under test (ServoHandler.read_state) with the host time and the
 goal position the host last wrote. The quantities are in the units of the servo registers: positions (4096 per turn),
@@ -743,3 +745,174 @@ def bin_sweep(angles: Sequence[float] | np.ndarray, directions: Sequence[int] | 
         else:
             bins.append(SweepBin((float(k) + 0.5) * bin_degrees, sides[0], sides[1]))
     return bins
+
+
+# the swing stage: the arm oscillating at its own resonance while it moves
+
+SWING_BAND = (3.0, 15.0)  # Hz, where the resonance of the arm lies (6.6 Hz on joint 2 on 20 November 2026)
+SWING_RATE = 500.0  # Hz, the rate the lag of a leg is resampled to before its spectrum is taken
+SWING_MIN_LEG = 0.6  # seconds of cruise a leg needs to be used, a few periods of the resonance
+# the spectrum of a leg is taken over this many times its samples (zero padded): the peak of a sine that falls between
+# two bins of the spectrum of the window would read up to 15 % low, the padding reads it off the peak of the window
+SWING_PAD = 8
+SWING_RESOLUTION = 0.1  # positions, a swing that changes by less than this has not changed
+SWING_TOLERANCE = 1e-9  # for comparing a swing with the limit
+
+
+class SwingSample(NamedTuple):
+    """a sample of the servo during a sweep with what the commanded motion was doing at the time"""
+    sample: Sample
+    direction: int  # of the ANGLE of the joint: 1 when it rises, -1 when it falls (not the direction of the position)
+    cruise: bool
+    leg: int = 0
+
+
+class SwingSide(NamedTuple):
+    """the cruise legs of one direction of the angle"""
+    legs: int  # the legs that were used
+    frequency: float  # Hz, of the strongest component of the lag in the band, the mean over the legs
+    swing: float  # positions, the amplitude of that component (a sine of amplitude A gives A), the mean over the legs
+    lag_std: float  # positions, of the lag with the trend of the leg taken out, the mean over the legs
+    lag: float  # positions the servo trails its trajectory (negative: it leads), the mean over the legs
+    pwm: float  # pwm units in the direction of the move, the mean over the legs
+    pwm_std: float  # of the pwm within a leg, the mean over the legs
+
+
+class SwingStatistics(NamedTuple):
+    """the swing of a sweep per direction of the ANGLE of the joint"""
+    rising: SwingSide
+    falling: SwingSide
+
+
+class SwingPair(NamedTuple):
+    """one number per direction of the angle"""
+    rising: float
+    falling: float
+
+
+class _LegSwing(NamedTuple):
+    frequency: float
+    swing: float
+    lag_std: float
+    lag: float
+    pwm: float
+    pwm_std: float
+
+
+def _leg_swing(rows: Sequence[Sample], sign: int, band: tuple[float, float], rate: float) -> _LegSwing:
+    """the swing of the cruise samples of one leg: the lag and the pwm are resampled to a uniform rate (the servo is
+    read at irregular intervals), the linear trend of the lag is taken out (the lag of the speed, the ramp into the
+    leg), and the strongest component of the amplitude spectrum in the band is the swing"""
+    times = np.array([r.time for r in rows])
+    order = np.argsort(times, kind='stable')
+    times = times[order]
+    lag = np.array([r.position_trajectory - r.position for r in rows], dtype=float)[order]
+    pwm = np.array([r.pwm for r in rows], dtype=float)[order]
+    seconds = np.arange(0.0, times[-1] - times[0], 1.0 / rate)
+    lag = np.interp(times[0] + seconds, times, lag)
+    pwm = np.interp(times[0] + seconds, times, pwm)
+    mean_lag = float(lag.mean())
+    lag = lag - np.polyval(np.polyfit(seconds, lag, 1), seconds)
+    window = np.hanning(len(lag))
+    size = SWING_PAD * len(lag)
+    amplitude = np.abs(np.fft.rfft(lag * window, n=size)) * 2.0 / window.sum()
+    frequencies = np.fft.rfftfreq(size, 1.0 / rate)
+    in_band = (frequencies >= band[0]) & (frequencies <= band[1])
+    peak = int(np.argmax(amplitude[in_band]))
+    return _LegSwing(frequency=float(frequencies[in_band][peak]), swing=float(amplitude[in_band][peak]),
+                     lag_std=float(lag.std()), lag=sign * mean_lag, pwm=sign * float(pwm.mean()),
+                     pwm_std=float(pwm.std()))
+
+
+def swing_statistics(samples: Sequence[SwingSample], position_sign: int = 1, band: tuple[float, float] = SWING_BAND,
+                     rate: float = SWING_RATE, minimum_leg: float = SWING_MIN_LEG) -> SwingStatistics:
+    """
+    the swing of the cruise samples of a sweep, per direction of the ANGLE of the joint (rising: SwingSample.direction
+    1, falling: -1; the direction of the position is the other way round for a servo mounted reversed, which is what
+    position_sign is for): every cruise leg is analysed on its own (the cruise parts of the legs are never joined),
+    and the result of a direction is the mean over its legs
+    :param position_sign: 1 when the positions of the servo rise with its angle, -1 when they fall (the script's
+        position_sign): the lag and the pwm of a side are signed with the direction of the move, so that a servo that
+        trails its trajectory has a positive lag in both directions, as in cruise_statistics. The swing, its
+        frequency and the std don't depend on it.
+    :param band: Hz, the strongest component of the lag between these is the swing
+    :param rate: Hz, the samples of a leg are resampled to this rate
+    :param minimum_leg: seconds, a leg whose cruise samples span less is left out, and so is a leg sampled at less
+        than twice the top of the band, which would alias
+    :raises ValueError: when a direction has no leg that can be used
+    """
+    if not 0 < band[0] < band[1] <= rate / 2 or minimum_leg * band[0] < 1:
+        raise ValueError('the band {} Hz needs 0 < low < high <= half the rate {} Hz and a leg of at least a period '
+                         'of the low end, got a minimum leg of {} s'.format(band, rate, minimum_leg))
+    sides = []
+    for direction, name in ((1, 'rising'), (-1, 'falling')):
+        legs: dict[int, list[Sample]] = {}
+        for s in samples:
+            if s.cruise and s.direction == direction:
+                legs.setdefault(s.leg, []).append(s.sample)
+        used = []
+        for rows in legs.values():
+            duration = max(r.time for r in rows) - min(r.time for r in rows)
+            if duration >= minimum_leg - 1e-9 and len(rows) >= 2 * band[1] * duration:
+                used.append(_leg_swing(rows, direction * position_sign, band, rate))
+        if not used:
+            raise ValueError('no cruise leg with the angle {} that spans at least {:g} s sampled at {:g} Hz or more '
+                             '({} cruise legs were too short or too sparse)'.format(name, minimum_leg, 2 * band[1],
+                                                                                    len(legs)))
+        sides.append(SwingSide(legs=len(used), frequency=float(np.mean([leg.frequency for leg in used])),
+                               swing=float(np.mean([leg.swing for leg in used])),
+                               lag_std=float(np.mean([leg.lag_std for leg in used])),
+                               lag=float(np.mean([leg.lag for leg in used])),
+                               pwm=float(np.mean([leg.pwm for leg in used])),
+                               pwm_std=float(np.mean([leg.pwm_std for leg in used]))))
+    return SwingStatistics(rising=sides[0], falling=sides[1])
+
+
+def swing_legs(steps: Sequence[SweepStep], dt: float, minimum_leg: float = SWING_MIN_LEG) -> dict[int, int]:
+    """
+    the number of legs of a sweep that cruise long enough for swing_statistics, per direction of the angle (the
+    SweepStep.direction): the cruise steps of a leg span from the first to the last one plus the period dt they are
+    held for. Nothing moves: this is how the stage knows before it starts that it has something to measure.
+    """
+    legs: dict[int, list[SweepStep]] = {}
+    for step in steps:
+        if step.cruise:
+            legs.setdefault(step.leg, []).append(step)
+    counts = {1: 0, -1: 0}
+    for cruise in legs.values():
+        if cruise[-1].time + dt - cruise[0].time >= minimum_leg - 1e-9:
+            counts[cruise[0].direction] += 1
+    return counts
+
+
+def swing_spread(first: SwingStatistics, last: SwingStatistics) -> SwingPair:
+    """how much two runs at the same gains differ, per direction: the absolute difference of their swings in
+    positions"""
+    return SwingPair(abs(first.rising.swing - last.rising.swing), abs(first.falling.swing - last.falling.swing))
+
+
+def swing_change(reference: Sequence[SwingStatistics], other: SwingStatistics) -> SwingPair:
+    """the swing of a run minus the mean swing of the reference runs, per direction, positions"""
+    return SwingPair(other.rising.swing - float(np.mean([r.rising.swing for r in reference])),
+                     other.falling.swing - float(np.mean([r.falling.swing for r in reference])))
+
+
+def swing_changed(change: float, spread: float, resolution: float = SWING_RESOLUTION) -> bool:
+    """whether a change of the swing is beyond the spread of a repeat (and the resolution: a spread of 0 from two
+    runs that happen to agree is no reason to count every change)"""
+    return abs(change) > max(spread, resolution)
+
+
+def recommended_swing_p(tried: Sequence[tuple[int, int, float, float]], yaml_d: int, limit: float) -> int | None:
+    """
+    the largest P whose swing is at or below the limit in BOTH directions at the yaml D, None when there is none
+    :param tried: (p, d, swing with the angle rising, swing with the angle falling) of every setting tried; a P that
+        was tried more than once (the yaml gains are run twice) has to be within the limit every time
+    :param limit: positions
+    """
+    within: dict[int, bool] = {}
+    for p, d, rising, falling in tried:
+        if d == yaml_d:
+            within[p] = within.get(p, True) and max(rising, falling) <= limit + SWING_TOLERANCE
+    qualified = [p for p, ok in within.items() if ok]
+    return max(qualified) if qualified else None

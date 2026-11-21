@@ -45,7 +45,21 @@ while it moves, most going down, and how much depends on P and on the belt tensi
 tests put it at P 2500; sweeps with raw samples at several gains showed P 2000 halves the swing, and a tighter belt
 raises the resonance and lowers the swing further. The numbers are in the revision at the top of
 `Handover Gravity and Spring Compensation.md` and in the yaml comment of servo 2. For a belt joint: check the belt
-tension first, then judge P by a slow sweep down with raw samples as well as by the steps.
+tension first, then judge P by a slow sweep with raw samples as well as by the steps.
+
+The swing stage of the script does that sweep since 20 November: `--swing` after the step tests, `--swing-only` on
+its own, for example
+`python -m src.robot_controllers.dynamixel_robot.calibration.tune_servo_gains --joint 2 --swing-only`. At the
+first pose it sweeps the joint 10 degrees either side at 10 degrees/s (`--swing-degrees`, `--swing-speed`), twice
+there and back, once per gain setting: the yaml gains, 0.8 and 0.6 times the yaml P (`--swing-p` for others,
+`--swing-d` for other D gains at the yaml P), and the yaml gains again, whose difference from the first run is the
+spread of a repeat. Every sample goes to `<prefix>_swing.csv`. Per setting and direction of the angle it prints the
+strongest component of the lag between 3 and 15 Hz, its size in positions (the swing) and its frequency, and it
+names the largest P tried whose swing stays within `--swing-limit` (1 position) both ways; it does not write the
+yaml. The yaml gains are put back on every exit. Checked against the raw recording of joint 2 of that day, the
+stage's analysis gives the numbers of the experiment (a few percent higher, it reads the peak between the lines of
+the spectrum). Joint 1, 20 November (run `tune_joint1_20261120_2214`): 0.33 to 0.46 positions at P 2000, 1600 and
+1200 alike, the same both ways and without a frequency of its own, so the base does not swing and P 2000 stays.
 
 Two more reasons to settle P first: the hysteresis band (2021: about 20 positions on servo 3, 1.8 degrees) is the
 part no model removes, and only P shrinks it; and where a pose comes to rest inside that band depends on the

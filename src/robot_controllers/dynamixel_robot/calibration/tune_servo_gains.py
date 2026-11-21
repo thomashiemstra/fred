@@ -51,6 +51,28 @@ once when the lag still changes by more than a position over the speeds. The rep
 of the lag, the slope before and after and the yaml line; the samples go to tune_joint<N>_<time>_ff.csv. The servo
 has its yaml feedforward gain again afterwards.
 
+The swing stage (--swing after the other stages, --swing-only for the stage alone, not together with --ff-only; with
+--ff and --swing the order is the step tests, the feedforward stage, the swing stage) looks for what the step tests
+can't see: a joint that swings while it moves. On 20 November 2026 joint 2 (the shoulder, behind a 3:1 belt)
+oscillated in its lag at the resonance of the arm, 6 to 7 Hz whatever the speed, and more in the direction in which
+gravity does the work, while every step test passed; the swing depended strongly on P (about 2 positions at P 2500,
+0.75 at P 1500 in the falling direction) and not on D. The joint sweeps --swing-degrees (10) either side of the first
+pose at --swing-speed (10 degrees per second), two round trips, in legs that ramp up over 0.2 s, cruise and ramp
+down, once per setting of the gains, sampling the servo as often as it can be read (about 750 Hz): the yaml gains,
+the yaml P with every --swing-d, every --swing-p (default 0.8 and 0.6 times the yaml P) with the yaml D, and the
+yaml gains again, so that the difference between the two runs at the yaml gains shows how much a repeat differs.
+The lag behind the trajectory of every cruise leg of 0.6 s or more is resampled to 500 Hz, its trend is taken out and
+the strongest component between 3 and 15 Hz of its spectrum is the swing: its amplitude in positions and its
+frequency, the mean over the legs of a direction. The direction is that of the ANGLE of the joint, rising or falling.
+The report has a table of the settings (swing, frequency and mean lag per direction), the spread between the two runs
+at the yaml gains, which direction swings more, whether D made a difference beyond the spread (only with --swing-d),
+and the recommendation: the largest P tried that swings at most --swing-limit positions (1) in both directions at the
+yaml D (the worse of the runs when it was run twice), the yaml P is fine when that is the one, or, when none did,
+that the belt or the mechanics should be checked before P is lowered further (a slack belt lowers the resonance and
+raises the swing). The script recommends, it doesn't change servo_config.yaml. The samples of every setting go to
+tune_joint<N>_<time>_swing.csv, with the direction of the angle (the direction of the _ff.csv is that of the
+position). The servo has its yaml gains again afterwards.
+
 Safety: every sample is checked live (temperature, voltage drop, position jumps, divergence from the trajectory,
 oscillation at rest, pwm stuck at the clamp) and a violation restores the yaml gains, the feedforward gain, the
 profile and the goal pwm at once, after which the run waits 1.5 s for the arm to move back to the pose. Oscillation is the position going both
@@ -96,10 +118,12 @@ from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.calibration import record_static_load
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
-    FF_LAG_TOLERANCE, AbortLimits, Criteria, CruiseStatistics, LineFit, RestMetrics, Sample, StepMetrics,
-    SweepSample, SweepStep, TrackingMetrics, abort_reason, choose_d, choose_p, clip_gain, cruise_statistics, d_ladder,
-    environmental_abort, evaluate, feedforward_change, ff_sweep, fit_line, lag_growth, p_values, p_values_down,
-    pwm_clamp, pwm_per_position, rest_metrics, rougher_speeds, step_metrics, step_size, tracking_metrics)
+    FF_LAG_TOLERANCE, SWING_BAND, SWING_MIN_LEG, AbortLimits, Criteria, CruiseStatistics, LineFit, RestMetrics, Sample,
+    StepMetrics, SweepSample, SweepStep, SwingPair, SwingSample, SwingStatistics, TrackingMetrics, abort_reason,
+    choose_d, choose_p, clip_gain, cruise_statistics, d_ladder, environmental_abort, evaluate, feedforward_change,
+    ff_sweep, fit_line, lag_growth, p_values, p_values_down, pwm_clamp, pwm_per_position, recommended_swing_p,
+    rest_metrics, rougher_speeds, round_gain, step_metrics, step_size, swing_change, swing_changed, swing_legs,
+    swing_spread, swing_statistics, tracking_metrics)
 from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM_IDS, DynamixelRobotController
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
 from src.robot_controllers.dynamixel_robot.servo import Servo
@@ -139,6 +163,11 @@ TRIAL_FIELDS = ('joint', 'pose', 'pose_degrees', 'trial', 'phase', 'p', 'i', 'd'
 FF_SAMPLE_FIELDS = ('joint', 'pose', 'ff1', 'speed', 'time', 'direction', 'cruise', 'goal', 'position',
                     'position_trajectory', 'velocity', 'velocity_trajectory', 'pwm', 'current', 'voltage',
                     'temperature')
+# setting is the number of the setting of the stage in the order they ran, direction is that of the ANGLE of the joint
+# (1 rising, -1 falling; the direction of the _ff.csv is that of the position, which is the other way round for a servo
+# mounted reversed), speed the degrees per second of the cruise
+SWING_SAMPLE_FIELDS = ('joint', 'pose', 'setting', 'p', 'd', 'speed', 'time', 'direction', 'cruise', 'leg', 'goal',
+                       'position', 'position_trajectory', 'velocity', 'pwm', 'current', 'voltage', 'temperature')
 STEP_SEQUENCE = ((1, 1), (-1, 0), (-1, -1), (1, 0))  # (direction, offset in steps from the pose) of a repeat
 MOVE_HOLD = 1.0  # seconds of hold after a streamed move
 GAIN_SETTLE = 0.3  # seconds between a gain write and the first measurement
@@ -174,6 +203,12 @@ DEFAULT_FF_SPEEDS = (10.0, 20.0, 30.0)  # degrees per second of the cruise of th
 DEFAULT_FF_MAX = 4000  # the largest feedforward gain the stage sets
 MIN_FF_SPEEDS = 3  # the line of the lag against the speed needs more than two points to be a line
 FF_REST = 0.5  # seconds at rest after a sweep before the next one
+DEFAULT_SWING_DEGREES = 10.0  # the sweep of the swing stage goes this far either side of the pose
+DEFAULT_SWING_SPEED = 10.0  # degrees per second of its cruise
+DEFAULT_SWING_P_FACTORS = (0.8, 0.6)  # times the yaml P, the P gains the stage tries besides it
+DEFAULT_SWING_LIMIT = 1.0  # positions, the swing a P may have in either direction to be recommended
+SWING_REST = FF_REST  # seconds at rest after a sweep of the stage before the next one
+SWING_ROUND_TRIPS = 2  # how often a sweep goes to both ends of its range
 
 
 class Stop(Exception):
@@ -229,6 +264,11 @@ class Settings(NamedTuple):
     ff_degrees: float = DEFAULT_FF_DEGREES  # the feedforward sweep goes this far either side of the pose
     ff_speeds: tuple[float, ...] = DEFAULT_FF_SPEEDS  # degrees per second of its cruise
     ff_max: int = DEFAULT_FF_MAX  # the largest feedforward gain the stage sets
+    swing_degrees: float = DEFAULT_SWING_DEGREES  # the swing sweep goes this far either side of the pose
+    swing_speed: float = DEFAULT_SWING_SPEED  # degrees per second of its cruise
+    swing_p: tuple[int, ...] | None = None  # P gains besides the yaml one, None: DEFAULT_SWING_P_FACTORS times it
+    swing_d: tuple[int, ...] = ()  # D gains at the yaml P besides the yaml one
+    swing_limit: float = DEFAULT_SWING_LIMIT  # positions, the swing a P may have in either direction
     criteria: Criteria = Criteria()
     limits: AbortLimits = AbortLimits()
 
@@ -315,6 +355,32 @@ class FeedforwardResult(NamedTuple):
         return self.rounds[-1].ff1
 
 
+class SwingRun(NamedTuple):
+    """the sweep at one setting of the gains"""
+    p: int
+    d: int
+    statistics: SwingStatistics
+
+
+class SwingResult(NamedTuple):
+    """the runs of the swing stage in the order they ran: the yaml gains first and, repeated, last"""
+    runs: tuple[SwingRun, ...]
+    limit: float  # positions, the swing a recommended P may have in either direction
+
+
+def swing_gains(settings: Settings, yaml_p: int, yaml_d: int) -> list[tuple[int, int]]:
+    """
+    the (P, D) settings of the swing stage in the order they run: the yaml gains; the yaml P with every extra D; every
+    extra P (swing_p, by default DEFAULT_SWING_P_FACTORS times the yaml P) with the yaml D; the yaml gains again. A
+    value that is the yaml one or comes twice is run once.
+    """
+    extra_d = [d for d in dict.fromkeys(settings.swing_d) if d != yaml_d]
+    wanted = list(settings.swing_p) if settings.swing_p is not None \
+        else [round_gain(factor * yaml_p) for factor in DEFAULT_SWING_P_FACTORS]
+    extra_p = [p for p in dict.fromkeys(wanted) if p != yaml_p and 0 < p <= cfg.MAX_GAIN]
+    return [(yaml_p, yaml_d)] + [(yaml_p, d) for d in extra_d] + [(p, yaml_d) for p in extra_p] + [(yaml_p, yaml_d)]
+
+
 def parse_pose(value: str) -> np.ndarray:
     """a pose name or 6 comma separated degrees of joints 1 to 6 into the 7 element angle array in radians"""
     if value in POSES:
@@ -349,13 +415,27 @@ def pose_degrees(pose: np.ndarray) -> str:
     return ' '.join('{:.0f}'.format(value) for value in np.degrees(pose[1:]))
 
 
-def sweep_angles(pose: np.ndarray, joint: int, speed: float, settings: Settings) -> tuple[list[SweepStep], np.ndarray]:
-    """the steps of the sweep of the joint at the speed (degrees per second) and the angles of every step: only the
-    joint under test moves, the other joints keep the angles of the pose"""
-    steps = ff_sweep(settings.ff_degrees, speed, 1.0 / global_constants.steps_per_second)
+def angles_of_sweep(pose: np.ndarray, joint: int, steps: Sequence[SweepStep]) -> np.ndarray:
+    """the angles of the robot at every step of a sweep: only the joint under test moves, the other joints keep the
+    angles of the pose"""
     angles = np.tile(pose, (len(steps), 1))
     angles[:, joint] += np.radians([step.offset for step in steps])
-    return steps, angles
+    return angles
+
+
+def sweep_angles(pose: np.ndarray, joint: int, speed: float, settings: Settings) -> tuple[list[SweepStep], np.ndarray]:
+    """the steps of the sweep of the feedforward stage of the joint at the speed (degrees per second) and the angles
+    of every step"""
+    steps = ff_sweep(settings.ff_degrees, speed, 1.0 / global_constants.steps_per_second)
+    return steps, angles_of_sweep(pose, joint, steps)
+
+
+def swing_sweep_angles(pose: np.ndarray, joint: int, settings: Settings) -> tuple[list[SweepStep], np.ndarray]:
+    """the steps of the sweep of the swing stage and the angles of every step: two round trips of
+    settings.swing_degrees either side of the pose at settings.swing_speed degrees per second"""
+    steps = ff_sweep(settings.swing_degrees, settings.swing_speed, 1.0 / global_constants.steps_per_second,
+                     round_trips=SWING_ROUND_TRIPS)
+    return steps, angles_of_sweep(pose, joint, steps)
 
 
 class StreamedSample(NamedTuple):
@@ -450,6 +530,35 @@ def feedforward_refusal(robot: DynamixelRobotController | CombinedRobot, joint: 
         if {step.direction for step in steps if step.cruise} != {1, -1}:
             return 'no feedforward stage, a sweep of {} degrees either way at {} degrees/s has no cruise part going ' \
                    'both ways: use a larger --ff-degrees or lower --ff-speeds'.format(settings.ff_degrees, speed)
+    return None
+
+
+def swing_refusal(robot: DynamixelRobotController | CombinedRobot, joint: int, pose: np.ndarray,
+                  settings: Settings) -> str | None:
+    """
+    why the swing stage can't run at the pose, or None; nothing moves. The servo needs the time-based profile, the
+    pose with the joint moved by the sweep either way has to pass the pose check of the script, the sweep has to
+    pass the planner's check_move, and it has to have a cruise leg long enough for the analysis in both directions
+    of the angle or there is nothing to measure.
+    """
+    servo = robot.servo_handler.get_servo(joint)
+    if not servo.time_based:
+        return 'servo {} has no move_time in servo_config.yaml, the swing stage needs the time-based profile' \
+            .format(joint)
+    refused = pose_is_accepted(pose, robot, joint, np.radians(settings.swing_degrees))
+    if refused is not None:
+        return 'no swing stage at pose {} degrees: {}'.format(pose_degrees(pose), refused)
+    steps, angles = swing_sweep_angles(pose, joint, settings)
+    try:
+        check_move(PlannedMove('swing sweep at {:g} degrees/s'.format(settings.swing_speed), angles, steps[-1].time),
+                   robot)
+    except MovementException as e:
+        return 'no swing stage, the sweep at {:g} degrees/s is refused: {}'.format(settings.swing_speed, e)
+    legs = swing_legs(steps, 1.0 / global_constants.steps_per_second)
+    if min(legs.values()) < 1:
+        return 'no swing stage, a sweep of {:g} degrees either way at {:g} degrees/s has no cruise leg of at least ' \
+               '{:g} s going both ways: use a larger --swing-degrees or a lower --swing-speed'.format(
+                   settings.swing_degrees, settings.swing_speed, SWING_MIN_LEG)
     return None
 
 
@@ -585,7 +694,8 @@ class TuningSession:
     def __init__(self, robot: DynamixelRobotController | CombinedRobot, joint: int, settings: Settings,
                  sample_writer: csv.DictWriter[str] | None = None, trial_writer: csv.DictWriter[str] | None = None,
                  clock: Callable[[], float] = time.perf_counter, sleep: Callable[[float], None] = time.sleep,
-                 stop: StopFlag | None = None, ff_writer: csv.DictWriter[str] | None = None) -> None:
+                 stop: StopFlag | None = None, ff_writer: csv.DictWriter[str] | None = None,
+                 swing_writer: csv.DictWriter[str] | None = None) -> None:
         self.robot = robot
         self.handler = robot.servo_handler
         self.joint = joint
@@ -595,6 +705,7 @@ class TuningSession:
         self.sample_writer = sample_writer
         self.trial_writer = trial_writer
         self.ff_writer = ff_writer
+        self.swing_writer = swing_writer
         self.clock = clock
         self.sleep = sleep
         self.stop = stop if stop is not None else StopFlag()
@@ -1157,21 +1268,21 @@ class TuningSession:
                                      'velocity_trajectory': s.velocity_trajectory, 'pwm': s.pwm,
                                      'current': s.current, 'voltage': s.voltage, 'temperature': s.temperature})
 
-    def feedforward_sweep(self, pose: np.ndarray, speed: float, ff1: int) -> list[SweepSample]:
+    def stream_stage_sweep(self, steps: Sequence[SweepStep], angles: np.ndarray, stage: str,
+                           write: Callable[[list[StreamedSample]], None]) -> list[StreamedSample]:
         """
-        stream one sweep of the joint at the speed (degrees per second) against the clock, as move_test does, and
-        sample the servo as often as fits between two writes. An abort rule for a streamed move restores the servo
-        and stops the stage.
+        stream the steps of a sweep against the clock, as move_test does, and sample the servo as often as fits
+        between two writes. An abort rule for a streamed move restores the servo and stops the stage with a Stop.
+        :param stage: the name of the stage, for the reason of the Stop
+        :param write: writes what was sampled to the csv; it is called with the samples so far whatever ends the
+            sweep (an abort, a failed read, Ctrl+C, an error)
         """
-        self.check_servos()
-        steps, angles = sweep_angles(pose, self.joint, speed, self.settings)
         clamp = self.original_goal_pwm if self.original_goal_pwm is not None else cfg.MAX_PWM
         rows: list[Sample] = []
         streamed: list[StreamedSample] = []
         self.trial_start = self.clock()
         self.last_goal_time = 0.0
         self.sag = 0.0  # the divergence rule of a streamed move allows 120 positions
-        sign = position_sign(self.servo)
 
         def read(goal: int, written: float) -> Sample:
             self.last_goal_time = written - self.trial_start
@@ -1185,13 +1296,30 @@ class TuningSession:
             reason = stream_sweep(self.robot, self.servo, steps, angles, read, check, streamed, self.clock,
                                   self.sleep)
         finally:
-            recorded = [SweepSample(s.sample, s.step.direction * sign, s.step.cruise, s.step.leg) for s in streamed]
-            self.write_ff_samples(recorded, ff1, speed)
+            write(streamed)
         if reason is not None:
             if not self.abort(reason):
                 raise Stop('could not restore the settings of servo {} after the abort'.format(self.joint))
-            raise Stop('the feedforward stage was aborted: {}'.format(reason))
-        return recorded
+            raise Stop('the {} stage was aborted: {}'.format(stage, reason))
+        return streamed
+
+    def feedforward_samples(self, streamed: Sequence[StreamedSample]) -> list[SweepSample]:
+        """the samples of a feedforward sweep with the direction of the position, in which the lag is signed"""
+        sign = position_sign(self.servo)
+        return [SweepSample(s.sample, s.step.direction * sign, s.step.cruise, s.step.leg) for s in streamed]
+
+    def feedforward_sweep(self, pose: np.ndarray, speed: float, ff1: int) -> list[SweepSample]:
+        """
+        stream one sweep of the joint at the speed (degrees per second) against the clock, as move_test does, and
+        sample the servo as often as fits between two writes. An abort rule for a streamed move restores the servo
+        and stops the stage.
+        """
+        self.check_servos()
+        steps, angles = sweep_angles(pose, self.joint, speed, self.settings)
+        streamed = self.stream_stage_sweep(
+            steps, angles, 'feedforward',
+            lambda rows: self.write_ff_samples(self.feedforward_samples(rows), ff1, speed))
+        return self.feedforward_samples(streamed)
 
     def measure_feedforward(self, pose: np.ndarray, ff1: int) -> FeedforwardRound:
         """write the feedforward gain and sweep at every speed"""
@@ -1262,6 +1390,83 @@ class TuningSession:
             raise Stop('could not restore the settings of servo {} after the feedforward stage'.format(self.joint))
         result = FeedforwardResult(tuple(settings.ff_speeds), tuple(rounds))
         print_feedforward(self.joint, self.servo, result)
+        return result
+
+    # the swing stage
+
+    def write_swing_samples(self, rows: Sequence[SwingSample], setting: int, p: int, d: int) -> None:
+        if self.swing_writer is None:
+            return
+        for row in rows:
+            s = row.sample
+            self.swing_writer.writerow({'joint': self.joint, 'pose': self.pose_index, 'setting': setting, 'p': p,
+                                        'd': d, 'speed': self.settings.swing_speed, 'time': '{:.4f}'.format(s.time),
+                                        'direction': row.direction, 'cruise': int(row.cruise), 'leg': row.leg,
+                                        'goal': s.goal, 'position': s.position,
+                                        'position_trajectory': s.position_trajectory, 'velocity': s.velocity,
+                                        'pwm': s.pwm, 'current': s.current, 'voltage': s.voltage,
+                                        'temperature': s.temperature})
+
+    @staticmethod
+    def swing_samples(streamed: Sequence[StreamedSample]) -> list[SwingSample]:
+        """the samples of a swing sweep with the direction of the angle of the joint, as the sweep has it"""
+        return [SwingSample(s.sample, s.step.direction, s.step.cruise, s.step.leg) for s in streamed]
+
+    def swing_sweep(self, pose: np.ndarray, setting: int, p: int, d: int) -> list[SwingSample]:
+        """stream one sweep of the joint at the swing speed, sampling as feedforward_sweep does; the samples are
+        written to the csv whatever ends the sweep"""
+        steps, angles = swing_sweep_angles(pose, self.joint, self.settings)
+        streamed = self.stream_stage_sweep(
+            steps, angles, 'swing', lambda rows: self.write_swing_samples(self.swing_samples(rows), setting, p, d))
+        return self.swing_samples(streamed)
+
+    def measure_swing(self, pose: np.ndarray, setting: int, p: int, d: int) -> SwingRun:
+        """write the gains, sweep once and measure the swing"""
+        self.check_servos()
+        self.write_gains(p, d)
+        self.sleep(GAIN_SETTLE)
+        recorded = self.swing_sweep(pose, setting, p, d)
+        try:
+            statistics = swing_statistics(recorded, position_sign(self.servo))
+        except ValueError as e:
+            raise Stop('the sweep at p={} d={} has too few cruise samples to measure the swing: {}'.format(p, d, e))
+        up, down = statistics.rising, statistics.falling
+        print('  p={} d={}: swing {:.2f} positions at {:.1f} Hz with the angle rising, {:.2f} at {:.1f} Hz falling; '
+              'mean lag {:+.1f} and {:+.1f} positions'.format(p, d, up.swing, up.frequency, down.swing,
+                                                              down.frequency, up.lag, down.lag))
+        self.sleep(SWING_REST)
+        return SwingRun(p, d, statistics)
+
+    def run_swing(self, pose: np.ndarray) -> SwingResult | None:
+        """
+        the swing stage at the pose, see the module docstring; None when the stage can't run (the servo is not
+        time-based, the sweep is refused, the planner refuses the pose). The servo has its yaml gains again
+        afterwards.
+        """
+        settings = self.settings
+        refused = swing_refusal(self.robot, self.joint, pose, settings)
+        if refused is not None:
+            print(refused)
+            return None
+        if self.original_goal_pwm is None:  # without the P and D stages
+            self.snapshot()
+        self.pose_index = 1
+        self.check_servos()
+        gains = swing_gains(settings, self.servo.p, self.servo.d)
+        print('swing stage at pose {} degrees: sweeps of {:g} degrees either way at {:g} degrees/s, yaml p={} d={}, '
+              'settings (p, d) {}'.format(pose_degrees(pose), settings.swing_degrees, settings.swing_speed,
+                                          self.servo.p, self.servo.d,
+                                          ' '.join('({}, {})'.format(p, d) for p, d in gains)))
+        if not self.move_to_pose(pose):
+            print('no swing stage: the planner refuses the move to the pose')
+            return None
+        self.pose_goal = self.servo.target_position
+        self.sleep(settings.baseline_rest / 2)
+        runs = [self.measure_swing(pose, setting, p, d) for setting, (p, d) in enumerate(gains)]
+        if not self.restore():
+            raise Stop('could not restore the settings of servo {} after the swing stage'.format(self.joint))
+        result = SwingResult(tuple(runs), settings.swing_limit)
+        print_swing(self.joint, self.servo, result)
         return result
 
 
@@ -1367,6 +1572,60 @@ def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> No
     print('    pid: {{p: {}, i: {}, d: {}, ff1: {}}}'.format(servo.p, servo.i, servo.d, result.recommended))
 
 
+def print_swing(joint: int, servo: Servo, result: SwingResult) -> None:
+    """the table of the swing stage, the spread of a repeat, the direction that swings more, what D did and the P
+    that stays within the limit"""
+    runs = result.runs
+    print('\nswing of joint {} (yaml p={} d={}), the lag behind the trajectory between {:g} and {:g} Hz, the angle '
+          'rising and falling:'.format(joint, servo.p, servo.d, *SWING_BAND))
+    print('  {:>3s} {:>6s} {:>6s}  {:>8s} {:>6s} {:>6s} {:>5s}  {:>8s} {:>6s} {:>6s} {:>5s}'.format(
+        'run', 'p', 'd', 'swing', 'Hz', 'lag', 'legs', 'swing', 'Hz', 'lag', 'legs'))
+    for number, run in enumerate(runs):
+        up, down = run.statistics.rising, run.statistics.falling
+        print('  {:3d} {:6d} {:6d}  {:8.2f} {:6.1f} {:+6.1f} {:5d}  {:8.2f} {:6.1f} {:+6.1f} {:5d}'.format(
+            number, run.p, run.d, up.swing, up.frequency, up.lag, up.legs, down.swing, down.frequency, down.lag,
+            down.legs))
+    yaml_runs = [run for run in runs if (run.p, run.d) == (servo.p, servo.d)]
+    reference = [run.statistics for run in yaml_runs]
+    spread = swing_spread(reference[0], reference[-1])
+    if len(yaml_runs) > 1:
+        print('  the two runs at the yaml gains differ by {:.2f} positions with the angle rising and {:.2f} falling: '
+              'that is how much a repeat differs'.format(*spread))
+    else:
+        print('  the yaml gains were run once, the spread of a repeat is not known')
+    mean = SwingPair(float(np.mean([r.rising.swing for r in reference])),
+                     float(np.mean([r.falling.swing for r in reference])))
+    if swing_changed(mean.falling - mean.rising, max(spread)):
+        print('  at the yaml gains the joint swings more with the angle {}: {:.2f} against {:.2f} positions'.format(
+            'falling' if mean.falling > mean.rising else 'rising', max(mean), min(mean)))
+    else:
+        print('  at the yaml gains the joint swings alike in both directions, {:.2f} rising and {:.2f} falling, within '
+              'the spread'.format(*mean))
+    d_runs = [run for run in runs if run.p == servo.p and run.d != servo.d]
+    if d_runs:
+        beyond = []
+        for run in d_runs:
+            change = swing_change(reference, run.statistics)
+            beyond.append(swing_changed(change.rising, spread.rising) or swing_changed(change.falling, spread.falling))
+            print('  d={}: the swing changes by {:+.2f} rising and {:+.2f} falling from the yaml D, {} the spread'
+                  .format(run.d, change.rising, change.falling, 'beyond' if beyond[-1] else 'within'))
+        print('  D made {} difference beyond the spread of a repeat ({:.2f} rising and {:.2f} falling)'.format(
+            'a' if any(beyond) else 'no', *spread))
+    recommended = recommended_swing_p([(r.p, r.d, r.statistics.rising.swing, r.statistics.falling.swing)
+                                       for r in runs], servo.d, result.limit)
+    if recommended is None:
+        print('no P tried swings at most {:g} positions in both directions at d={}: check the belt or the mechanics '
+              'before lowering P further (a slack belt lowers the resonance and raises the swing)'.format(
+                  result.limit, servo.d))
+    elif recommended == servo.p:
+        print('the yaml P {} is fine: it swings at most {:g} positions in both directions at d={}'.format(
+            servo.p, result.limit, servo.d))
+    else:
+        print('recommended for servo_config.yaml, the largest P tried that swings at most {:g} positions in both '
+              'directions at d={} (record the static load again after changing P):'.format(result.limit, servo.d))
+        print('    pid: {{p: {}, i: {}, d: {}}}'.format(recommended, servo.i, servo.d))
+
+
 def plot_results(joint: int, results: Sequence[PoseResult], samples_path: str) -> None:
     """the first step up of every trial per pose, from the samples csv"""
     import matplotlib.pyplot as plt
@@ -1457,6 +1716,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--ff-max', type=int, default=DEFAULT_FF_MAX,
                         help='the largest feedforward gain the stage sets, at most {} (default %(default)s)'.format(
                             cfg.MAX_GAIN))
+    parser.add_argument('--swing', action='store_true',
+                        help='after the other stages, measure the swing of the joint while it moves at the yaml gains '
+                             'and at other P gains (a servo with a move_time)')
+    parser.add_argument('--swing-only', action='store_true',
+                        help='only the swing stage, the P and D stages are skipped; not with --ff or --ff-only')
+    parser.add_argument('--swing-degrees', type=float, default=DEFAULT_SWING_DEGREES,
+                        help='the swing sweep goes this many degrees either side of the pose (default %(default)s)')
+    parser.add_argument('--swing-speed', type=float, default=DEFAULT_SWING_SPEED,
+                        help='the cruise speed of the swing sweep in degrees per second (default %(default)s)')
+    parser.add_argument('--swing-p', type=int, nargs='+', default=None,
+                        help='P gains to try besides the yaml one, at the yaml D (default {} times the yaml P), '
+                             'between 1 and {}'.format(' and '.join('{:g}'.format(f) for f in DEFAULT_SWING_P_FACTORS),
+                                                       cfg.MAX_GAIN))
+    parser.add_argument('--swing-d', type=int, nargs='+', default=[],
+                        help='D gains to try at the yaml P besides the yaml one, between 0 and {} (default none)'
+                        .format(cfg.MAX_GAIN))
+    parser.add_argument('--swing-limit', type=float, default=DEFAULT_SWING_LIMIT,
+                        help='positions, the swing a P may have in either direction to be recommended (default '
+                             '%(default)s)')
     parser.add_argument('--output-dir', default='.', help='where the csv files go')
     parser.add_argument('--plot', action='store_true', help='plot the step responses at the end')
     parser.add_argument('--yes', action='store_true', help="don't ask before enabling the servos")
@@ -1482,6 +1760,20 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError('--ff-degrees has to be above 0')
         if not 0 <= args.ff_max <= cfg.MAX_GAIN:
             raise ValueError('--ff-max has to be between 0 and {}'.format(cfg.MAX_GAIN))
+        if args.swing_only and (args.ff_only or args.ff):
+            raise ValueError('--swing-only runs the swing stage alone, not together with --ff or --ff-only (use --ff '
+                             '--swing for both stages after the P and D tuning)')
+        if args.ff_only and args.swing:
+            raise ValueError('--ff-only runs the feedforward stage alone, not together with --swing (use --ff '
+                             '--swing for both stages after the P and D tuning)')
+        if args.swing_degrees <= 0 or args.swing_speed <= 0:
+            raise ValueError('--swing-degrees and --swing-speed have to be above 0')
+        if args.swing_limit <= 0:
+            raise ValueError('--swing-limit has to be above 0 positions')
+        if args.swing_p is not None and any(not 0 < p <= cfg.MAX_GAIN for p in args.swing_p):
+            raise ValueError('--swing-p has to be between 1 and {}'.format(cfg.MAX_GAIN))
+        if any(not 0 <= d <= cfg.MAX_GAIN for d in args.swing_d):
+            raise ValueError('--swing-d has to be between 0 and {}'.format(cfg.MAX_GAIN))
     except (argparse.ArgumentTypeError, ValueError) as e:
         print(e)
         return 1
@@ -1500,7 +1792,10 @@ def main(argv: list[str] | None = None) -> int:
                         d_patience=args.d_patience, repeats=args.repeats, hold=args.hold, rest=args.rest,
                         baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
                         clamp=args.pwm_clamp, max_step=args.max_step, ff_degrees=args.ff_degrees,
-                        ff_speeds=tuple(args.ff_speeds), ff_max=args.ff_max,
+                        ff_speeds=tuple(args.ff_speeds), ff_max=args.ff_max, swing_degrees=args.swing_degrees,
+                        swing_speed=args.swing_speed,
+                        swing_p=tuple(args.swing_p) if args.swing_p is not None else None,
+                        swing_d=tuple(args.swing_d), swing_limit=args.swing_limit,
                         limits=AbortLimits(max_temperature=max_temperature))
     if args.floor is not None:
         robot.workspace_limits = record_static_load.limits_with_floor(args.floor, robot.workspace_limits)
@@ -1516,8 +1811,9 @@ def main(argv: list[str] | None = None) -> int:
         print('no pose the planner accepts')
         return 1
     servo = robot.servo_handler.get_servo(args.joint)
-    run_pd = not args.ff_only
+    run_pd = not (args.ff_only or args.swing_only)
     run_ff = args.ff or args.ff_only
+    run_swing = args.swing or args.swing_only
     if run_ff:
         # nothing moves yet: a servo without the time-based profile or a refused sweep is known before the servos
         # are enabled
@@ -1527,6 +1823,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.ff_only:
                 return 1
             run_ff = False
+    if run_swing:
+        refused_swing = swing_refusal(robot, args.joint, accepted[0], settings)
+        if refused_swing is not None:
+            print(refused_swing)
+            if args.swing_only:
+                return 1
+            run_swing = False
 
     # before the servos are enabled, so a bad directory doesn't leave the arm under torque; relative to the working
     # directory, which a PyCharm run configuration may set to this file's folder
@@ -1540,6 +1843,7 @@ def main(argv: list[str] | None = None) -> int:
     samples_path = os.path.join(output_dir, 'tune_joint{}_{}_samples.csv'.format(args.joint, stamp))
     trials_path = os.path.join(output_dir, 'tune_joint{}_{}_trials.csv'.format(args.joint, stamp))
     ff_path = os.path.join(output_dir, 'tune_joint{}_{}_ff.csv'.format(args.joint, stamp))
+    swing_path = os.path.join(output_dir, 'tune_joint{}_{}_swing.csv'.format(args.joint, stamp))
     if run_pd:
         print("joint {} (yaml p={} d={}), poses {}, P up to {} in steps of {}, at D {} until {} D gains in a row "
               "don't raise the P of the joint, {} repeats, steps of at most {} positions, output {}".format(
@@ -1557,6 +1861,15 @@ def main(argv: list[str] | None = None) -> int:
                   ' '.join('{:g}'.format(s) for s in args.ff_speeds), args.ff_max, ff_path))
         print('joint {} sweeps up to {:g} degrees either way at the speeds above, nothing may be in its way; '
               'the other joints hold their position'.format(args.joint, args.ff_degrees))
+    if run_swing:
+        print('swing stage: joint {} (yaml p={} d={}) at pose {} degrees, sweeps of {:g} degrees either way at {:g} '
+              'degrees/s with the gains (p, d) {}, recommending the largest P that swings at most {:g} positions, '
+              'output {}'.format(args.joint, servo.p, servo.d, pose_degrees(accepted[0]), args.swing_degrees,
+                                 args.swing_speed,
+                                 ' '.join('({}, {})'.format(p, d) for p, d in swing_gains(settings, servo.p, servo.d)),
+                                 args.swing_limit, swing_path))
+        print('joint {} sweeps up to {:g} degrees either way at {:g} degrees/s once per setting, nothing may be in its '
+              'way; the other joints hold their position'.format(args.joint, args.swing_degrees, args.swing_speed))
     if not args.yes and input('type yes to enable the servos and start: ').strip().lower() != 'yes':
         return 0
     if not robot.enable_servos():
@@ -1571,7 +1884,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with ExitStack() as files:
             print('temperatures: {}'.format(robot.get_servo_temperatures()))
-            sample_writer = trial_writer = ff_writer = None
+            sample_writer = trial_writer = ff_writer = swing_writer = None
             if run_pd:
                 samples_file = files.enter_context(open(samples_path, 'w', newline=''))
                 trials_file = files.enter_context(open(trials_path, 'w', newline=''))
@@ -1583,14 +1896,20 @@ def main(argv: list[str] | None = None) -> int:
                 ff_writer = csv.DictWriter(files.enter_context(open(ff_path, 'w', newline='')),
                                            fieldnames=FF_SAMPLE_FIELDS)
                 ff_writer.writeheader()
+            if run_swing:
+                swing_writer = csv.DictWriter(files.enter_context(open(swing_path, 'w', newline='')),
+                                              fieldnames=SWING_SAMPLE_FIELDS)
+                swing_writer.writeheader()
             session = TuningSession(robot, args.joint, settings, sample_writer, trial_writer, stop=stop,
-                                    ff_writer=ff_writer)
+                                    ff_writer=ff_writer, swing_writer=swing_writer)
             if run_pd:
                 session.run(accepted)
             # a P and D run that stopped raised Stop and never gets here; a Ctrl+C that came after the last read
             # of it doesn't start the stage either
             if run_ff and not stop.requested:
                 session.run_feedforward(accepted[0])
+            if run_swing and not stop.requested:
+                session.run_swing(accepted[0])
             print('temperatures: {}'.format(robot.get_servo_temperatures()))
     except Stop as e:
         print('\nstopped: {}'.format(e))
@@ -1623,7 +1942,8 @@ def main(argv: list[str] | None = None) -> int:
                                                   for bus, count in handler.failed_reads_by_bus.items()),
                   handler.late_reads, handler.failed_reads - handler.late_reads))
     print('; '.join(([] if not run_pd else ['samples in {}, trials in {}'.format(samples_path, trials_path)]) +
-                     ([] if not run_ff else ['feedforward samples in {}'.format(ff_path)])))
+                     ([] if not run_ff else ['feedforward samples in {}'.format(ff_path)]) +
+                     ([] if not run_swing else ['swing samples in {}'.format(swing_path)])))
     finish(robot, restored)  # before the plot, which blocks until its windows are closed
     if args.plot and results:
         plot_results(args.joint, results, samples_path)
