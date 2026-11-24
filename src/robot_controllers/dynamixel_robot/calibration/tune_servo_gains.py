@@ -44,8 +44,9 @@ velocity lead of a joint with the time-based profile (a servo with a move_time i
 gains, at the first pose only. The servos run a P-only position loop, pwm = P / 128 * (goal - present), and a turning
 motor needs a drive in proportion to its speed (its back voltage), so a moving joint trails its trajectory by an
 error that grows with the speed. The PC sends every goal ahead of the planned path by exactly that error (the
-`velocity_feedforward` block of a servo in servo_config.yaml, VelocityFeedforward: lead in positions = coefficient *
-velocity * 128 / P, the coefficient in pwm units per degree/s of the joint).
+`velocity_feedforward` block of a servo in servo_config.yaml, VelocityFeedforward: lead in positions = drive * 128 / P
+with drive = coefficient * velocity + pwm_for_friction * sign(velocity), the coefficient in pwm units per degree/s of
+the joint and pwm_for_friction in pwm units, the drive that keeps the joint sliding whatever its speed).
 The joint sweeps +-15 degrees (--ff-degrees) at three speeds (--ff-speeds, degrees per second, 10 20 30), in
 legs that ramp up over 0.2 s, cruise and ramp down; joints 1 and 2 sit behind 3:1 belts and sweep +-10 degrees at 5 10
 15 by default and are refused above 15 degrees/s. The rounds:
@@ -58,17 +59,30 @@ legs that ramp up over 0.2 s, cruise and ramp down; joints 1 and 2 sit behind 3:
      the servo less the lead the PC added) should now be the same at every speed, only the friction part is left;
   3. when it still changes by more than a position over the speeds, the coefficient is corrected by the slope that is
      left (times P / 128) and measured once more (never a second correction). Not when the lead was at its clamp at a
-     speed: no coefficient flattens the lag then, the report says to raise the clamp and recommends nothing.
+     speed: no coefficient flattens the lag then, the report says to raise the clamp and recommends nothing;
+  4. with the lead of the last of those rounds AND the friction drive (pwm_for_friction): friction is what the lead
+     leaves, the part of the lag that does not depend on the speed. The drive is --ff-friction when given, else the
+     pwm_for_friction of the `velocity_feedforward` block of the servo in the yaml when it is above 0, else the one
+     fitted from the lag of round 1 (friction in positions at no speed times P / 128, to 1 decimal); the report says
+     which. With --ff-friction 0, or a fit that gives 0 or less and nothing asked for, there is no friction round.
+     The lag behind the intended trajectory should now be within a position of zero at every speed, which is the
+     friction part taken out;
+  5. when its mean over the speeds is further than half a position from zero, the drive is corrected by that mean
+     (times P / 128) and measured once more (never a second correction); not when the lead was at its clamp.
 The report has per round the table of fit_velocity_lead.py (per speed the cruise samples, pwm, the error behind the
 trajectory of the servo, the lead, the lag behind the intended trajectory and the std of the error and of the pwm), the
-two fits of round 1, the change of the intended lag over the speeds per round, whether a lead made the joint rougher
-(a std of the error more than a position, or of the pwm more than the drive of a position, above round 1), and the
-`velocity_feedforward` block for servo_config.yaml: the coefficient of the last round when its lag is flat, else it
-says that it is not and gives the corrected value. The numbers are those of fit_velocity_lead.py, which the stage
-runs on the very rows it writes to tune_joint<N>_<time>_ff.csv (joint, pose, speed, time, direction of the
-position, cruise, goal as written with the lead in it, position, position_trajectory, velocity, velocity_trajectory,
-pwm, current, voltage, temperature, and the P of the servo (p), the lead the PC added to the goal in positions (lead)
-and the coefficient in force (lead_gain, 0 without a lead)). Running that script on the csv gives the
+two fits of round 1, the change of the intended lag over the speeds per round, for the rounds with a friction drive the
+mean of the intended lag over the speeds and whether every speed is within a position of zero, whether a lead made the
+joint rougher (a std of the error more than a position, or of the pwm more than the drive of a position, above round
+1), and the `velocity_feedforward` block for servo_config.yaml: the coefficient of the last round with a lead and no
+friction drive when its lag is flat, else it says that it is not and gives the corrected value, and pwm_for_friction as
+the value of the last round with a friction drive when its lag is within a position of zero at every speed, else the
+corrected value with the remark that it was not measured (no pwm_for_friction line when no friction round ran). The
+numbers are those of fit_velocity_lead.py, which the stage runs on the very rows it writes to
+tune_joint<N>_<time>_ff.csv (joint, pose, speed, time, direction of the position, cruise, goal as written with the lead
+in it, position, position_trajectory, velocity, velocity_trajectory, pwm, current, voltage, temperature, and the P of
+the servo (p), the lead the PC added to the goal in positions (lead), the coefficient in force (lead_gain, 0 without a
+lead) and the friction drive in force (lead_friction, 0 without one)). Running that script on the csv gives the
 same numbers. The servo has its own `velocity_feedforward` again afterwards, whatever ends the stage.
 
 The swing stage (--swing after the other stages, --swing-only for the stage alone, not together with --ff-only; with
@@ -141,8 +155,8 @@ from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot import dynamixel_x_config as cfg
 from src.robot_controllers.dynamixel_robot.calibration import record_static_load
 from src.robot_controllers.dynamixel_robot.calibration.fit_velocity_lead import (
-    GroupKey, GroupResult, SpeedStatistics, analyse_group, fit_lines, intended_line, is_flat, lead_meaning,
-    speed_statistics, table, yaml_block)
+    INTENDED_TOLERANCE, GroupKey, GroupResult, SpeedStatistics, analyse_group, fit_lines, friction_line,
+    intended_line, is_flat, lead_meaning, speed_statistics, table, yaml_block)
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import (
     FF_LAG_TOLERANCE, FF_ROUGHNESS, SWING_BAND, SWING_MIN_LEG, AbortLimits, Criteria, RestMetrics, Sample, StepMetrics,
     SweepStep, SwingPair, SwingSample, SwingStatistics, TrackingMetrics, abort_reason, choose_d, choose_p, d_ladder,
@@ -187,11 +201,11 @@ TRIAL_FIELDS = ('joint', 'pose', 'pose_degrees', 'trial', 'phase', 'p', 'i', 'd'
                 'track_rms', 'track_final', 'following_error', 'flags', 'warnings', 'aborted', 'temperature_start',
                 'temperature_end', 'voltage_min', 'sample_period')
 # p is the P gain of the servo, lead the positions the velocity lead added to the goal (signed like the position, the
-# goal column has it in it), lead_gain the coefficient of the lead in force in pwm per degree/s, 0 for none: the
-# columns fit_velocity_lead.py reads
+# goal column has it in it), lead_gain the coefficient of the lead in force in pwm per degree/s, 0 for none,
+# lead_friction its pwm_for_friction in pwm units, 0 for none: the columns fit_velocity_lead.py reads
 FF_SAMPLE_FIELDS = ('joint', 'pose', 'speed', 'time', 'direction', 'cruise', 'goal', 'position',
                     'position_trajectory', 'velocity', 'velocity_trajectory', 'pwm', 'current', 'voltage',
-                    'temperature', 'p', 'lead', 'lead_gain')
+                    'temperature', 'p', 'lead', 'lead_gain', 'lead_friction')
 # setting is the number of the setting of the stage in the order they ran, direction is that of the ANGLE of the joint
 # (1 rising, -1 falling; the direction of the _ff.csv is that of the position, which is the other way round for a servo
 # mounted reversed), speed the degrees per second of the cruise, lead the positions the velocity lead added to the goal
@@ -238,6 +252,9 @@ BELT_JOINTS = (1, 2)
 FF_TOP_SPEEDS: dict[int, float] = {joint: max(BELT_FF_SPEEDS) for joint in BELT_JOINTS}
 DEFAULT_FF_MAX_POSITIONS = 30  # the clamp of the lead of a servo without a `velocity_feedforward` block, in positions
 LEAD_COEFFICIENT_STEP = 0.005  # pwm per degree/s: a correction smaller than this is not measured again
+# positions the mean lag behind the intended trajectory of a round with a friction drive may be from zero before the
+# drive is corrected and measured once more
+FRICTION_CORRECTION_THRESHOLD = 0.5
 MIN_FF_SPEEDS = 3  # the line of the lag against the speed needs more than two points to be a line
 FF_REST = 0.5  # seconds at rest after a sweep before the next one
 DEFAULT_SWING_DEGREES = 10.0  # the sweep of the swing stage goes this far either side of the pose
@@ -303,6 +320,8 @@ class Settings(NamedTuple):
     ff_lead: float | None = None  # coefficient of the lead of the second round in pwm per degree/s, None: see the stage
     # the clamp of the lead when the servo has no `velocity_feedforward` block
     ff_max_positions: int = DEFAULT_FF_MAX_POSITIONS
+    # pwm_for_friction of the round with the friction drive in pwm units, 0 for no such round, None: see the stage
+    ff_friction: float | None = None
     swing_degrees: float = DEFAULT_SWING_DEGREES  # the swing sweep goes this far either side of the pose
     swing_speed: float = DEFAULT_SWING_SPEED  # degrees per second of its cruise
     swing_p: tuple[int, ...] | None = None  # P gains besides the yaml one, None: DEFAULT_SWING_P_FACTORS times it
@@ -396,6 +415,8 @@ class FeedforwardRound(NamedTuple):
     max_positions: int  # the clamp of the lead in positions, 0 for a round without a lead
     origin: str  # where the coefficient came from, empty for the round without a lead
     analysis: GroupResult
+    lead_friction: float = 0.0  # pwm_for_friction in pwm units the lead had, 0 for a round without a friction drive
+    friction_origin: str = ''  # where the friction drive came from, empty for a round without one
 
     @property
     def clamped(self) -> bool:
@@ -406,15 +427,48 @@ class FeedforwardRound(NamedTuple):
 
 
 class FeedforwardResult(NamedTuple):
-    """the rounds of the feedforward stage in the order they ran: without a lead, with a lead, and with the corrected
-    coefficient when the lag behind the intended trajectory was not flat in the second. No lead round when the lag of
-    the first does not grow with the speed and no coefficient was given."""
+    """the rounds of the feedforward stage in the order they ran: without a lead, with a lead, with the corrected
+    coefficient when the lag behind the intended trajectory was not flat in the second, then with the lead of the last
+    of those and a friction drive, and with the corrected friction drive when the mean lag behind the intended
+    trajectory was not within FRICTION_CORRECTION_THRESHOLD of zero in that. No lead round when the lag of the first
+    does not grow with the speed and no coefficient was given, no friction round without a friction drive to measure."""
     speeds: tuple[float, ...]  # degrees per second
     rounds: tuple[FeedforwardRound, ...]
 
     @property
     def lead_rounds(self) -> tuple[FeedforwardRound, ...]:
-        return self.rounds[1:]
+        """the rounds with a lead and without a friction drive"""
+        return tuple(r for r in self.rounds[1:] if not r.lead_friction)
+
+    @property
+    def friction_rounds(self) -> tuple[FeedforwardRound, ...]:
+        """the rounds with the friction drive (and the lead)"""
+        return tuple(r for r in self.rounds[1:] if r.lead_friction)
+
+    @property
+    def friction_taken_out(self) -> bool:
+        """whether the lag behind the intended trajectory of the last round with a friction drive is within a
+        position of zero at every speed"""
+        fit = self.friction_rounds[-1].analysis.fit if self.friction_rounds else None
+        return fit is not None and fit.friction_taken_out
+
+    @property
+    def corrected_friction(self) -> float | None:
+        """the friction drive the mean lag behind the intended trajectory of the last round with a friction drive
+        says would have taken it out (to 1 decimal, not below 0), None without a round with a friction drive"""
+        return corrected_friction(self.friction_rounds[-1]) if self.friction_rounds else None
+
+    @property
+    def recommended_friction(self) -> float | None:
+        """the pwm_for_friction for the yaml: the one of the last round with a friction drive when its lag is within a
+        position of zero at every speed, else the corrected one; None without such a round, and when the lead was at
+        its clamp in the last without taking the friction out (the clamp has to be raised first)"""
+        if not self.friction_rounds:
+            return None
+        last = self.friction_rounds[-1]
+        if self.friction_taken_out:
+            return last.lead_friction
+        return None if last.clamped else self.corrected_friction
 
     @property
     def flat(self) -> bool:
@@ -665,12 +719,42 @@ def lead_choice(settings: Settings, feedforward: VelocityFeedforward | None, fit
     return round(fitted, 2), max_positions, 'the coefficient fitted from the lag in the round without a lead'
 
 
+def corrected_friction(feedforward_round: FeedforwardRound) -> float:
+    """
+    the friction drive that would have taken the lag behind the intended trajectory out of the round: the one in force
+    plus the mean of that lag over the speeds times P / 128 (pwm units the lead still lacks, negative when it was too
+    large), not below 0, to 1 decimal as it goes into the yaml. The one in force when the round has no fit or no P.
+    """
+    fit = feedforward_round.analysis.fit
+    if fit is None or fit.p is None:
+        return feedforward_round.lead_friction
+    return round(max(0.0, feedforward_round.lead_friction + fit.intended_mean * fit.p * cfg.PWM_PER_POSITION_PER_P), 1)
+
+
+def friction_choice(settings: Settings, feedforward: VelocityFeedforward | None, fitted: float) -> tuple[float, str]:
+    """
+    the friction drive in pwm units and where it came from for the first round with the friction drive, in the order:
+    the --ff-friction option, the pwm_for_friction of the `velocity_feedforward` block of the servo in the yaml when it
+    is above 0, the friction drive fitted from the lag in the round without a lead (to 1 decimal, the one decimal of
+    the yaml). A drive of 0 or less means there is no friction round.
+    :param feedforward: the `velocity_feedforward` of the servo in the yaml, None for a servo without one
+    :param fitted: the friction drive of the fit of the round without a lead, 0 when it has none
+    """
+    if settings.ff_friction is not None:
+        return settings.ff_friction, 'the --ff-friction option'
+    if feedforward is not None and feedforward.pwm_for_friction > 0:
+        return (feedforward.pwm_for_friction,
+                'the pwm_for_friction of the velocity_feedforward block of servo_config.yaml')
+    return round(fitted, 1), 'the friction drive fitted from the lag in the round without a lead'
+
+
 def ff_sample_row(joint: int, pose_index: int, speed: float, p: int, lead_gain: float, sign: int,
-                  streamed: StreamedSample) -> dict[str, str]:
+                  streamed: StreamedSample, lead_friction: float = 0.0) -> dict[str, str]:
     """
     the csv row (FF_SAMPLE_FIELDS, every value as text, as it is in the file) of a sample of a feedforward sweep; the
     stage writes it to the csv and gives the very same rows to fit_velocity_lead.py for its numbers
     :param sign: position_sign of the servo, the direction in the csv is the one of the position
+    :param lead_friction: the pwm_for_friction of the lead the servo has now
     """
     sample = streamed.sample
     values: dict[str, object] = {
@@ -679,7 +763,7 @@ def ff_sample_row(joint: int, pose_index: int, speed: float, p: int, lead_gain: 
         'position': sample.position, 'position_trajectory': sample.position_trajectory, 'velocity': sample.velocity,
         'velocity_trajectory': sample.velocity_trajectory, 'pwm': sample.pwm, 'current': sample.current,
         'voltage': sample.voltage, 'temperature': sample.temperature, 'p': p, 'lead': streamed.lead,
-        'lead_gain': '{:g}'.format(lead_gain)}
+        'lead_gain': '{:g}'.format(lead_gain), 'lead_friction': '{:g}'.format(lead_friction)}
     return {name: str(values[name]) for name in FF_SAMPLE_FIELDS}
 
 
@@ -1441,12 +1525,14 @@ class TuningSession:
             raise Stop('the {} stage was aborted: {}'.format(stage, reason))
         return streamed
 
-    def feedforward_sweep(self, pose: np.ndarray, speed: float, lead_gain: float) -> list[dict[str, str]]:
+    def feedforward_sweep(self, pose: np.ndarray, speed: float, lead_gain: float,
+                          lead_friction: float = 0.0) -> list[dict[str, str]]:
         """
         stream one sweep of the joint at the speed (degrees per second) against the clock, as move_test does, and
         sample the servo as often as fits between two writes. An abort rule for a streamed move restores the servo
         and stops the stage.
         :param lead_gain: the coefficient of the velocity lead the servo has now, only for the csv
+        :param lead_friction: the pwm_for_friction of the velocity lead the servo has now, only for the csv
         :return: the rows of ff_sample_row of every sample; they are written to the csv whatever ends the sweep
         """
         self.check_servos()
@@ -1455,28 +1541,31 @@ class TuningSession:
         rows: list[dict[str, str]] = []
 
         def write(streamed: list[StreamedSample]) -> None:
-            rows[:] = [ff_sample_row(self.joint, self.pose_index, speed, self.servo.p, lead_gain, sign, s)
-                       for s in streamed]
+            rows[:] = [ff_sample_row(self.joint, self.pose_index, speed, self.servo.p, lead_gain, sign, s,
+                                     lead_friction) for s in streamed]
             self.write_ff_samples(rows)
         self.stream_stage_sweep(steps, angles, 'feedforward', write)
         return rows
 
     def measure_feedforward(self, pose: np.ndarray, feedforward: VelocityFeedforward | None, label: str,
-                            origin: str = '') -> FeedforwardRound:
+                            origin: str = '', friction_origin: str = '') -> FeedforwardRound:
         """
         sweep at every speed with the velocity lead `feedforward` on the servo (None: without one, the servo's own
         velocity_feedforward is set aside; restore_velocity_feedforward puts it back) and analyse the rows with
         fit_velocity_lead
         :param label: what the round is called in the progress lines
         :param origin: where the coefficient came from, for the report
+        :param friction_origin: where the friction drive (the pwm_for_friction of `feedforward`) came from, for the
+            report
         :raises Stop: when a sweep has too few cruise samples or the rows can't be fitted
         """
         self.servo.velocity_feedforward = feedforward
         lead_gain = feedforward.pwm_per_degree_per_second if feedforward is not None else 0.0
+        lead_friction = feedforward.pwm_for_friction if feedforward is not None else 0.0
         print('  {}:'.format(label))
         rows: list[dict[str, str]] = []
         for speed in self.settings.ff_speeds_of(self.joint):
-            sweep = self.feedforward_sweep(pose, speed, lead_gain)
+            sweep = self.feedforward_sweep(pose, speed, lead_gain, lead_friction)
             rows.extend(sweep)
             statistics, notes = speed_statistics(sweep)
             if not statistics:
@@ -1485,11 +1574,11 @@ class TuningSession:
             print('    {:g} degrees/s: error {:.1f} positions, lead {:.1f}, lag behind the intended trajectory {:.1f}, '
                   'pwm {:.0f}, error std {:.1f}'.format(speed, s.error, s.lead, s.intended, s.pwm, s.error_std))
             self.sleep(FF_REST)
-        analysis = analyse_group(GroupKey('', self.joint, lead_gain), rows)
+        analysis = analyse_group(GroupKey('', self.joint, lead_gain, lead_friction), rows)
         if analysis.fit is None:
             raise Stop('the sweeps of {} can not be fitted: {}'.format(label, analysis.problem))
         max_positions = feedforward.max_positions if feedforward is not None else 0
-        return FeedforwardRound(lead_gain, max_positions, origin, analysis)
+        return FeedforwardRound(lead_gain, max_positions, origin, analysis, lead_friction, friction_origin)
 
     def run_feedforward(self, pose: np.ndarray) -> FeedforwardResult | None:
         """
@@ -1520,6 +1609,7 @@ class TuningSession:
         try:
             rounds.append(self.measure_feedforward(pose, None, 'round 1, without a lead'))
             self.run_lead_rounds(pose, rounds)
+            self.run_friction_rounds(pose, rounds)
         finally:
             self.restore_velocity_feedforward()
         if not self.restore():
@@ -1570,6 +1660,58 @@ class TuningSession:
             pose, VelocityFeedforward(corrected, max_positions),
             'round 3, with the corrected lead of {:g} pwm per degree/s'.format(corrected),
             'the correction of round 2'))
+
+    def run_friction_rounds(self, pose: np.ndarray, rounds: list[FeedforwardRound]) -> None:
+        """
+        the rounds with the lead of the last round with a lead (rounds[-1]) and a friction drive after the rounds with
+        a lead, appended to rounds: one with the drive of friction_choice and, when the mean lag behind the intended
+        trajectory is further than FRICTION_CORRECTION_THRESHOLD from zero, one with the drive corrected by that mean
+        (never a second correction, and none when the lead was at its clamp). No round without a round with a lead,
+        and none when the drive is 0 (--ff-friction 0) or the fit gives 0 or less and none was asked for.
+        """
+        settings = self.settings
+        if len(rounds) < 2:
+            print('no friction round: no round with a lead ran')
+            return
+        lead = rounds[-1]
+        first_fit = rounds[0].analysis.fit
+        fitted = first_fit.friction_drive if first_fit is not None and first_fit.friction_drive is not None else 0.0
+        friction, friction_origin = friction_choice(settings, self.original_velocity_feedforward, fitted)
+        if friction <= 0:
+            if settings.ff_friction is not None:
+                print('no friction round: --ff-friction is {:g}'.format(settings.ff_friction))
+            else:
+                print('no friction round: the lag at no speed gives a friction drive of {:.1f} pwm, nothing to '
+                      'measure (--ff-friction tries one)'.format(fitted))
+            return
+        origin = 'the coefficient of round {}'.format(len(rounds))
+        print('friction drive of {:g} pwm from {}, with the lead of {:g} pwm per degree/s of round {}'.format(
+            friction, friction_origin, lead.lead_gain, len(rounds)))
+        rounds.append(self.measure_feedforward(
+            pose, VelocityFeedforward(lead.lead_gain, lead.max_positions, friction),
+            'round {}, with the lead and a friction drive of {:g} pwm'.format(len(rounds) + 1, friction), origin,
+            friction_origin))
+        last = rounds[-1]
+        last_fit = last.analysis.fit
+        if last_fit is None or abs(last_fit.intended_mean) <= FRICTION_CORRECTION_THRESHOLD:
+            return
+        if last.clamped:
+            print('the lag behind the intended trajectory is {:+.2f} positions on average over the speeds (further '
+                  'than {:g} from zero) while the lead is at its clamp of {} positions: no correction is measured, '
+                  'raise --ff-max-positions (or max_positions of the velocity_feedforward block) and run '
+                  'again'.format(last_fit.intended_mean, FRICTION_CORRECTION_THRESHOLD, last.max_positions))
+            return
+        corrected = corrected_friction(last)
+        print('the lag behind the intended trajectory is {:+.2f} positions on average over the speeds (further than '
+              '{:g} from zero): the friction drive should be {:g} pwm instead of {:g}'.format(
+                  last_fit.intended_mean, FRICTION_CORRECTION_THRESHOLD, corrected, last.lead_friction))
+        if corrected <= 0 or corrected == last.lead_friction:
+            print('that is no change worth measuring again')
+            return
+        rounds.append(self.measure_feedforward(
+            pose, VelocityFeedforward(lead.lead_gain, lead.max_positions, corrected),
+            'round {}, with the lead and the corrected friction drive of {:g} pwm'.format(len(rounds) + 1, corrected),
+            origin, 'the correction of round {}'.format(len(rounds))))
 
     # the swing stage
 
@@ -1770,7 +1912,11 @@ def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> No
     first = result.rounds[0]
     for number, r in enumerate(result.rounds, start=1):
         fit = r.analysis.fit
-        if r.lead_gain:
+        if r.lead_friction:
+            print('round {}, with a lead of {:g} pwm per degree/s from {} and a friction drive of {:g} pwm from {}, '
+                  'at most {} positions:'.format(number, r.lead_gain, r.origin, r.lead_friction, r.friction_origin,
+                                                 r.max_positions))
+        elif r.lead_gain:
             print('round {}, with a lead of {:g} pwm per degree/s from {}, at most {} positions:'.format(
                 number, r.lead_gain, r.origin, r.max_positions))
         else:
@@ -1784,6 +1930,8 @@ def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> No
         if not r.lead_gain:
             print('\n'.join(fit_lines(fit)))
         print(intended_line(fit))
+        if r.lead_friction:
+            print(friction_line(fit))
         if r.clamped:
             print('  warning: the lead is at its clamp of {} positions at the fast speeds, the lag can not be flat '
                   'there: raise max_positions'.format(r.max_positions))
@@ -1795,7 +1943,7 @@ def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> No
         return
     last = result.lead_rounds[-1]
     last_fit = last.analysis.fit
-    number = len(result.rounds)
+    number = round_number(result, last)
     coefficient = result.recommended
     if last.clamped and not result.flat:
         print('no coefficient to recommend: the lead was at its clamp of {} positions in round {} and the lag behind '
@@ -1813,8 +1961,48 @@ def print_feedforward(joint: int, servo: Servo, result: FeedforwardResult) -> No
               'the speeds, more than {:g}. With the slope that is left taken out the coefficient would be {:g} (not '
               'measured), for servo_config.yaml to try:'.format(number, last_fit.intended_change, FF_LAG_TOLERANCE,
                                                                coefficient))
-    print(yaml_block(joint, coefficient, last.max_positions).rstrip('\n'))
+    friction_lines, friction = friction_conclusion(result)
+    for line in friction_lines:
+        print(line)
+    print(yaml_block(joint, coefficient, last.max_positions, friction).rstrip('\n'))
     print('  ' + lead_meaning(coefficient, servo.p))
+
+
+def round_number(result: FeedforwardResult, feedforward_round: FeedforwardRound) -> int:
+    """the number of the round in the report, counted from 1 in the order the rounds ran"""
+    return next(number for number, r in enumerate(result.rounds, start=1) if r is feedforward_round)
+
+
+def friction_conclusion(result: FeedforwardResult) -> tuple[list[str], float | None]:
+    """
+    what the report says about pwm_for_friction before the yaml block, and the value for the block: the drive of the
+    last round with a friction drive when its lag behind the intended trajectory is within INTENDED_TOLERANCE of zero at
+    every speed, else the corrected drive with the remark that it was not measured. Nothing to say, and no value, when
+    no friction round ran, the last could not be fitted, or the lead was at its clamp in it without taking the friction
+    out.
+    """
+    if not result.friction_rounds:
+        return [], None
+    last = result.friction_rounds[-1]
+    fit = last.analysis.fit
+    number = round_number(result, last)
+    if fit is None:
+        return ['no pwm_for_friction to recommend: round {} could not be fitted'.format(number)], None
+    if result.friction_taken_out:
+        return ['pwm_for_friction of round {} (from {}): the lag behind the intended trajectory is within {:g} '
+                'position of zero at every speed, {:+.2f} on average:'.format(
+                    number, last.friction_origin, INTENDED_TOLERANCE, fit.intended_mean)], last.lead_friction
+    if last.clamped:
+        return ['no pwm_for_friction to recommend: the lead was at its clamp of {} positions in round {} and the lag '
+                'behind the intended trajectory is not within {:g} position of zero at every speed, raise '
+                '--ff-max-positions (or max_positions of the velocity_feedforward block) and run again'.format(
+                    last.max_positions, number, INTENDED_TOLERANCE)], None
+    corrected = corrected_friction(last)
+    return ['the lag behind the intended trajectory is NOT within {:g} position of zero at every speed in round {}: '
+            '{:+.2f} on average and {:.2f} at the worst speed. With the mean taken out pwm_for_friction would be {:g} '
+            'instead of {:g} (not verified, not measured), for servo_config.yaml to try:'.format(
+                INTENDED_TOLERANCE, number, fit.intended_mean, fit.intended_largest, corrected,
+                last.lead_friction)], corrected
 
 
 def print_swing(joint: int, servo: Servo, result: SwingResult) -> None:
@@ -1967,6 +2155,10 @@ def main(argv: list[str] | None = None) -> int:
                         help='the coefficient of the lead of the second round in pwm per degree/s, default the '
                              '`velocity_feedforward` of the servo in servo_config.yaml, else the one fitted in the '
                              'first round')
+    parser.add_argument('--ff-friction', type=float, default=None,
+                        help='the friction drive (pwm_for_friction) of the round with the friction drive in pwm '
+                             'units, default the `velocity_feedforward` of the servo in servo_config.yaml when it has '
+                             'one above 0, else the one fitted in the first round; 0: no friction round')
     parser.add_argument('--ff-max-positions', type=int, default=DEFAULT_FF_MAX_POSITIONS,
                         help='the clamp of the lead in positions for a servo without a `velocity_feedforward` block '
                              '(default %(default)s)')
@@ -2021,6 +2213,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError('--ff-degrees has to be above 0')
         if args.ff_lead is not None and not 0 < args.ff_lead < math.inf:
             raise ValueError('--ff-lead has to be above 0 pwm per degree/s')
+        if args.ff_friction is not None and not 0 <= args.ff_friction < math.inf:
+            raise ValueError('--ff-friction has to be 0 or more pwm units (0: no friction round)')
         if args.ff_max_positions < 1:
             raise ValueError('--ff-max-positions has to be at least 1')
         if args.swing_only and (args.ff_only or args.ff):
@@ -2056,7 +2250,7 @@ def main(argv: list[str] | None = None) -> int:
                         baseline_rest=args.baseline_rest, move_degrees=args.move_degrees, speed=args.speed,
                         clamp=args.pwm_clamp, max_step=args.max_step, ff_degrees=args.ff_degrees,
                         ff_speeds=tuple(args.ff_speeds) if args.ff_speeds is not None else None,
-                        ff_lead=args.ff_lead, ff_max_positions=args.ff_max_positions,
+                        ff_lead=args.ff_lead, ff_max_positions=args.ff_max_positions, ff_friction=args.ff_friction,
                         swing_degrees=args.swing_degrees, swing_speed=args.swing_speed,
                         swing_p=tuple(args.swing_p) if args.swing_p is not None else None,
                         swing_d=tuple(args.swing_d), swing_limit=args.swing_limit,
@@ -2120,13 +2314,19 @@ def main(argv: list[str] | None = None) -> int:
               'the other joints hold their position'.format(args.joint))
     if run_ff:
         print('feedforward stage (velocity lead): joint {} (yaml p={} velocity_feedforward={}) at pose {} degrees, '
-              'sweeps of {:g} degrees either way at {} degrees/s, first without a lead, then with {}, output {}'.format(
+              'sweeps of {:g} degrees either way at {} degrees/s, first without a lead, then with {}, then with the '
+              'lead and {}, output {}'.format(
                   args.joint, servo.p, servo.velocity_feedforward, pose_degrees(accepted[0]),
                   settings.ff_degrees_of(args.joint),
                   ' '.join('{:g}'.format(s) for s in settings.ff_speeds_of(args.joint)),
                   'a coefficient of {:g} pwm per degree/s'.format(args.ff_lead) if args.ff_lead is not None
                   else 'the velocity_feedforward block of the yaml' if servo.velocity_feedforward is not None
-                  else 'the coefficient fitted in the first round', ff_path))
+                  else 'the coefficient fitted in the first round',
+                  'no friction drive (--ff-friction 0)' if args.ff_friction == 0
+                  else 'a friction drive of {:g} pwm'.format(args.ff_friction) if args.ff_friction is not None
+                  else 'the pwm_for_friction of the yaml' if servo.velocity_feedforward is not None
+                  and servo.velocity_feedforward.pwm_for_friction > 0
+                  else 'the friction drive fitted in the first round', ff_path))
         print('joint {} sweeps up to {:g} degrees either way at the speeds above, nothing may be in its way; '
               'the other joints hold their position'.format(args.joint, settings.ff_degrees_of(args.joint)))
     if run_swing:

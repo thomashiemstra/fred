@@ -1,5 +1,6 @@
 import copy
 import os
+import re
 import tempfile
 import unittest
 
@@ -8,7 +9,8 @@ from numpy import pi
 
 from src.global_constants import POSITION_CONTROL_MODE, CURRENT_BASED_POSITION_CONTROL_MODE
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config, parse_servo_config, \
-    ServoConfigError, DEFAULT_SERVO_CONFIG_PATH
+    ServoConfigError, DEFAULT_SERVO_CONFIG_PATH, BUSES
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
 
 VALID_CONFIG = {
     'temperature_warning': 45,
@@ -244,12 +246,34 @@ class ParseServoConfigTests(unittest.TestCase):
     def test_a_missing_bus_is_still_refused(self):
         self.assert_invalid(config_with(change=(1, 'bus', None)), 'servo 1: missing bus')
 
-    def test_any_non_empty_bus_label_is_accepted(self):
-        for label in ('ttl', 'usb adapter 2', 'x', 485):
+    def test_both_connectors_of_the_usb_adapter_are_accepted(self):
+        self.assertEqual(('rs485', 'ttl'), BUSES)
+        for label in BUSES:
             with self.subTest(label=label):
                 config = copy.deepcopy(VALID_CONFIG)
-                config['servos'][7]['bus'] = label
-                self.assertEqual(((1, 2), (7,)), parse_servo_config(config).buses)
+                for servo in config['servos'].values():
+                    servo['bus'] = label
+                self.assertEqual(((1, 2, 7),), parse_servo_config(config).buses)
+
+    def test_an_unknown_bus_is_refused(self):
+        # a misspelling, another case, another text and a number
+        for label in ('rs458', 'RS485', 'Ttl', 'TTL', 'rs-485', 'usb adapter 2', 'x', 485):
+            with self.subTest(label=label):
+                config = copy.deepcopy(VALID_CONFIG)
+                config['servos'][2]['bus'] = label
+                self.assert_invalid(config, re.escape('servo configuration, servo 2: unknown bus {!r}, '
+                                                      'use one of rs485, ttl'.format(str(label))) + '$')
+
+    def test_the_message_of_an_unknown_bus_names_the_text_without_the_whitespace_around_it(self):
+        config = copy.deepcopy(VALID_CONFIG)
+        config['servos'][7]['bus'] = ' rs458 \n'
+        self.assert_invalid(config, "^servo configuration, servo 7: unknown bus 'rs458', use one of rs485, ttl$")
+
+    def test_an_unknown_bus_is_refused_in_yaml(self):
+        data = yaml.safe_load('temperature_warning: 45\ntemperature_limit: 50\nservos:\n  3:\n    name: wrist\n'
+                              '    bus: rs458\n    mode: position\n    positions: [1024, 3072]\n    angles: [0, 180]\n'
+                              '    profile: {velocity: 250, acceleration: 100}\n    pid: {p: 1500, i: 0, d: 0}\n')
+        self.assert_invalid(data, "servo configuration, servo 3: unknown bus 'rs458', use one of rs485, ttl")
 
     def test_an_empty_name_is_refused(self):
         for value in (None, '', '   '):
@@ -435,7 +459,46 @@ class VelocityFeedforwardConfigTests(unittest.TestCase):
 
     def test_velocity_feedforward_is_shown_in_the_servo(self):
         config = self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 14.2}))
-        self.assertIn('VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30)', str(config.servos[2]))
+        self.assertIn('VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30, pwm_for_friction=0.0)',
+                      str(config.servos[2]))
+
+    def test_pwm_for_friction_is_parsed(self):
+        config = self.parse(m=(2, 'velocity_feedforward',
+                               {'max_positions': 30, 'pwm_per_degree_per_second': 1.45, 'pwm_for_friction': 27}))
+        velocity_feedforward = config.servos[2].velocity_feedforward
+        self.assertEqual(27.0, velocity_feedforward.pwm_for_friction)
+        self.assertIsInstance(velocity_feedforward.pwm_for_friction, float)
+        self.assertEqual(VelocityFeedforward(1.45, 30, 27.0), velocity_feedforward)
+        self.assertIn('pwm_for_friction=27.0', str(config.servos[2]))
+
+    def test_a_fractional_and_a_zero_pwm_for_friction_are_valid(self):
+        for friction in (27.5, 0, 0.0):
+            config = self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 1.45,
+                                                               'pwm_for_friction': friction}))
+            self.assertEqual(float(friction), config.servos[2].velocity_feedforward.pwm_for_friction)
+
+    def test_pwm_for_friction_left_out_is_0(self):
+        config = self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 1.45}))
+        self.assertEqual(0.0, config.servos[2].velocity_feedforward.pwm_for_friction)
+        self.assertEqual(VelocityFeedforward(1.45, 30), config.servos[2].velocity_feedforward)
+
+    def test_a_negative_nan_or_non_numeric_pwm_for_friction_is_refused_naming_the_servo(self):
+        source = 'servo 2, velocity_feedforward: '
+        for friction in (-1.0, -0.001, float('nan'), float('-inf')):
+            with self.subTest(friction=friction):
+                with self.assertRaisesRegex(ServoConfigError, source + 'pwm_for_friction .* should be 0 or more, not '):
+                    self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 1.45,
+                                                              'pwm_for_friction': friction}))
+        for friction in ('strong', True, None, [27], {'a': 1}):
+            with self.subTest(friction=friction):
+                with self.assertRaisesRegex(ServoConfigError, source + 'pwm_for_friction should be a number'):
+                    self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'pwm_per_degree_per_second': 1.45,
+                                                              'pwm_for_friction': friction}))
+
+    def test_pwm_for_friction_alone_does_not_make_a_block(self):
+        with self.assertRaisesRegex(ServoConfigError, 'servo 2, velocity_feedforward: missing '
+                                                      'max_positions, pwm_per_degree_per_second'):
+            self.parse(m=(2, 'velocity_feedforward', {'pwm_for_friction': 27}))
 
     def test_invalid_velocity_feedforwards(self):
         invalid = [
@@ -479,8 +542,17 @@ class VelocityFeedforwardConfigTests(unittest.TestCase):
     def test_the_old_key_velocity_is_refused_and_the_error_names_the_keys_to_write(self):
         with self.assertRaisesRegex(ServoConfigError,
                                     'servo 2, velocity_feedforward: unknown velocity, the keys of a '
-                                    'velocity_feedforward block are max_positions and pwm_per_degree_per_second'):
+                                    'velocity_feedforward block are max_positions, pwm_per_degree_per_second .* and, '
+                                    'optional, pwm_for_friction'):
             self.parse(m=(2, 'velocity_feedforward', {'max_positions': 30, 'velocity': 14.2}))
+
+    def test_the_unknown_key_message_names_all_three_keys(self):
+        with self.assertRaises(ServoConfigError) as raised:
+            self.parse(m=(2, 'velocity_feedforward',
+                          {'max_positions': 30, 'pwm_per_degree_per_second': 14.2, 'friction': 1}))
+        for key in ('max_positions', 'pwm_per_degree_per_second', 'pwm_for_friction'):
+            self.assertIn(key, str(raised.exception))
+        self.assertIn('unknown friction', str(raised.exception))
 
     def test_a_motion_key_on_the_servo_is_refused_like_any_unknown_field(self):
         with self.assertRaisesRegex(ServoConfigError, 'servo 2.*unknown.*motion'):
@@ -507,6 +579,7 @@ class VelocityFeedforwardConfigTests(unittest.TestCase):
         for servo in config.servos.values():  # a servo with one has a VelocityFeedforward, the others have none
             if servo.velocity_feedforward is not None:
                 self.assertGreater(servo.velocity_feedforward.max_positions, 0)
+                self.assertGreaterEqual(servo.velocity_feedforward.pwm_for_friction, 0.0)
 
 
 if __name__ == '__main__':

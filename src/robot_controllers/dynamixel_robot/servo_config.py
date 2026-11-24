@@ -20,11 +20,15 @@ OPERATING_MODES = {
     'current_based_position': CURRENT_BASED_POSITION_CONTROL_MODE,
 }
 
+# the two connectors of the usb adapter (U2D2): the RS-485 one and the TTL one, the only values `bus` may have
+BUSES = ('rs485', 'ttl')
+
 _REQUIRED_SERVO_FIELDS = {'name', 'bus', 'mode', 'positions', 'profile', 'pid'}
 _OPTIONAL_SERVO_FIELDS = {'model', 'angles', 'states', 'offset', 'goal_current', 'compensation', 'velocity_feedforward'}
 _REQUIRED_FIELDS = {'temperature_warning', 'temperature_limit', 'servos'}
 _REQUIRED_COMPENSATION_FIELDS = {'max_positions', 'terms'}
 _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS = {'max_positions', 'pwm_per_degree_per_second'}
+_OPTIONAL_VELOCITY_FEEDFORWARD_FIELDS = {'pwm_for_friction'}
 # the per-direction coefficient sets of an older version, refused with an explanation instead of as unknown fields
 _REMOVED_COMPENSATION_FIELDS = ('up', 'down')
 
@@ -97,6 +101,8 @@ def parse_servo_config(data: Any, source: str = 'servo configuration') -> ServoC
                                       'give the dynamixel model or leave the line out')
         bus = _label(servo_data['bus'], 'bus', servo_source,
                      'give the connector the servo is on (servos with the same bus are read together)')
+        if bus not in BUSES:
+            raise ServoConfigError('{}: unknown bus {!r}, use one of {}'.format(servo_source, bus, ', '.join(BUSES)))
         buses.setdefault(bus, []).append(servo_id)
 
     return ServoConfig(servos, names, tuple(tuple(bus) for bus in buses.values()),
@@ -207,12 +213,13 @@ def _parse_compensation(data: Any, source: str, servo_id: int) -> StaticCompensa
 
 def _parse_velocity_feedforward(data: Any, source: str) -> VelocityFeedforward:
     if isinstance(data, dict):  # before the missing fields, so a file with the old key `velocity` is told the new one
-        unknown = set(data) - _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS
+        unknown = set(data) - _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS - _OPTIONAL_VELOCITY_FEEDFORWARD_FIELDS
         if unknown:
-            raise ServoConfigError('{}: unknown {}, the keys of a velocity_feedforward block are max_positions and '
-                                   'pwm_per_degree_per_second (in pwm units per degree/s of the joint)'.format(
+            raise ServoConfigError('{}: unknown {}, the keys of a velocity_feedforward block are max_positions, '
+                                   'pwm_per_degree_per_second (in pwm units per degree/s of the joint) and, optional, '
+                                   'pwm_for_friction (in pwm units)'.format(
                                        source, ', '.join(sorted(str(key) for key in unknown))))
-    _check_fields(data, _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS, set(), source)
+    _check_fields(data, _REQUIRED_VELOCITY_FEEDFORWARD_FIELDS, _OPTIONAL_VELOCITY_FEEDFORWARD_FIELDS, source)
     max_positions = _integer(data['max_positions'], 'max_positions', source)
     if max_positions <= 0:
         raise ServoConfigError('{}: max_positions should be positive, not {}'.format(source, max_positions))
@@ -220,7 +227,11 @@ def _parse_velocity_feedforward(data: Any, source: str) -> VelocityFeedforward:
     if not coefficient >= 0:  # also refuses nan
         raise ServoConfigError('{}: pwm_per_degree_per_second (pwm per degree/s of the joint) should be 0 or more, '
                                'not {}'.format(source, coefficient))
-    return VelocityFeedforward(coefficient, max_positions)
+    friction = _number(data['pwm_for_friction'], 'pwm_for_friction', source) if 'pwm_for_friction' in data else 0.0
+    if not friction >= 0:  # also refuses nan
+        raise ServoConfigError('{}: pwm_for_friction (pwm units that keep the joint moving against friction) should '
+                               'be 0 or more, not {}'.format(source, friction))
+    return VelocityFeedforward(coefficient, max_positions, friction)
 
 
 def _terms(data: Any, source: str, names: Sequence[str]) -> dict[str, float]:

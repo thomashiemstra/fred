@@ -2,9 +2,14 @@ import unittest
 
 import numpy as np
 
-from src.robot_controllers.dynamixel_robot.velocity_feedforward import VelocityFeedforward
+from src.robot_controllers.dynamixel_robot.velocity_feedforward import FRICTION_FULL_SPEED, VelocityFeedforward
 
 TEN_DEGREES_PER_SECOND = float(np.radians(10.0))
+
+
+def degrees_per_second(degrees):
+    """the commanded velocity of a joint in rad/s"""
+    return float(np.radians(degrees))
 
 
 class DriveTests(unittest.TestCase):
@@ -29,6 +34,83 @@ class DriveTests(unittest.TestCase):
 
     def test_a_coefficient_of_0_gives_no_drive(self):
         self.assertEqual(0.0, VelocityFeedforward(0.0, 30).drive(3.0))
+
+
+class FrictionDriveTests(unittest.TestCase):
+    """the drive that keeps the joint sliding: whole from FRICTION_FULL_SPEED, in proportion to the speed below it"""
+
+    def test_the_full_speed_is_1_degree_per_second(self):
+        self.assertEqual(1.0, FRICTION_FULL_SPEED)
+
+    def test_above_the_full_speed_the_drive_is_the_coefficient_term_plus_the_whole_friction(self):
+        # 1.45 * 10 + 27 = 41.5 pwm
+        feedforward = VelocityFeedforward(1.45, 30, 27.0)
+        self.assertAlmostEqual(41.5, feedforward.drive(degrees_per_second(10.0)))
+        self.assertAlmostEqual(-41.5, feedforward.drive(degrees_per_second(-10.0)))
+
+    def test_at_the_full_speed_the_friction_is_whole(self):
+        feedforward = VelocityFeedforward(1.45, 30, 27.0)
+        self.assertAlmostEqual(1.45 + 27.0, feedforward.drive(degrees_per_second(FRICTION_FULL_SPEED)))
+        self.assertAlmostEqual(-(1.45 + 27.0), feedforward.drive(degrees_per_second(-FRICTION_FULL_SPEED)))
+
+    def test_below_the_full_speed_the_friction_is_in_proportion_to_the_speed(self):
+        feedforward = VelocityFeedforward(1.45, 30, 27.0)
+        # 0.5 degrees/s: 1.45 * 0.5 + 27 * 0.5 = 0.725 + 13.5
+        self.assertAlmostEqual(0.725 + 13.5, feedforward.drive(degrees_per_second(0.5)))
+        self.assertAlmostEqual(-(0.725 + 13.5), feedforward.drive(degrees_per_second(-0.5)))
+        # 0.1 degrees/s: 0.145 + 2.7
+        self.assertAlmostEqual(0.145 + 2.7, feedforward.drive(degrees_per_second(0.1)))
+
+    def test_the_friction_has_no_jump_through_zero_speed(self):
+        feedforward = VelocityFeedforward(0.0, 30, 27.0)
+        self.assertEqual(0.0, feedforward.drive(0.0))
+        step = 1e-6
+        self.assertAlmostEqual(0.0, feedforward.drive(degrees_per_second(step)), delta=1e-3)
+        self.assertAlmostEqual(0.0, feedforward.drive(degrees_per_second(-step)), delta=1e-3)
+        # a speed that wobbles around zero moves the drive by a fraction of the friction, not by twice the whole
+        self.assertLess(abs(feedforward.drive(degrees_per_second(0.05)) - feedforward.drive(degrees_per_second(-0.05))),
+                        0.1 * 27.0 * 2)
+
+    def test_the_friction_is_the_same_at_every_speed_above_the_full_speed(self):
+        with_friction, without = VelocityFeedforward(1.45, 30, 27.0), VelocityFeedforward(1.45, 30)
+        for degrees in (1.0, 2.0, 10.0, 30.0, 100.0):
+            for sign in (1, -1):
+                velocity = degrees_per_second(sign * degrees)
+                self.assertAlmostEqual(sign * 27.0, with_friction.drive(velocity) - without.drive(velocity),
+                                       msg=degrees)
+
+    def test_the_friction_alone_gives_a_drive_without_a_coefficient(self):
+        feedforward = VelocityFeedforward(0.0, 30, 27.0)
+        self.assertAlmostEqual(27.0, feedforward.drive(degrees_per_second(5.0)))
+        self.assertAlmostEqual(-27.0, feedforward.drive(degrees_per_second(-5.0)))
+
+    def test_without_friction_every_number_is_what_it_was(self):
+        plain = VelocityFeedforward(14.2, 30)
+        explicit = VelocityFeedforward(14.2, 30, 0.0)
+        for degrees in (-30.0, -10.0, -0.5, 0.0, 0.3, 1.0, 10.0, 200.0):
+            velocity = degrees_per_second(degrees)
+            self.assertEqual(14.2 * float(np.degrees(velocity)), plain.drive(velocity), msg=degrees)
+            self.assertEqual(plain.drive(velocity), explicit.drive(velocity))
+            self.assertEqual(plain.positions(velocity, 2000), explicit.positions(velocity, 2000))
+
+    def test_the_positions_for_the_drive_with_friction(self):
+        # 41.5 pwm at P 780 (6.09375 pwm per position): 6.81 positions
+        feedforward = VelocityFeedforward(1.45, 30, 27.0)
+        self.assertAlmostEqual(41.5 / (780 / 128), feedforward.positions(degrees_per_second(10.0), 780))
+        self.assertAlmostEqual(6.81, feedforward.positions(degrees_per_second(10.0), 780), places=2)
+        self.assertAlmostEqual(-6.81, feedforward.positions(degrees_per_second(-10.0), 780), places=2)
+        self.assertAlmostEqual((0.725 + 13.5) / (780 / 128), feedforward.positions(degrees_per_second(0.5), 780))
+
+    def test_the_positions_with_friction_are_clipped_and_zero_without_a_p(self):
+        feedforward = VelocityFeedforward(1.45, 5, 27.0)
+        self.assertEqual(5.0, feedforward.positions(degrees_per_second(10.0), 780))
+        self.assertEqual(-5.0, feedforward.positions(degrees_per_second(-10.0), 780))
+        self.assertEqual(0.0, feedforward.positions(degrees_per_second(10.0), 0))
+        # the friction alone can be clipped as well
+        self.assertEqual(2.0, VelocityFeedforward(0.0, 2, 27.0).positions(degrees_per_second(2.0), 780))
+
+    def test_a_joint_at_rest_gets_no_positions_whatever_the_friction(self):
+        self.assertEqual(0.0, VelocityFeedforward(1.45, 30, 500.0).positions(0.0, 780))
 
 
 class PositionsTests(unittest.TestCase):
@@ -92,15 +174,36 @@ class ConstructionTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=str(max_positions)):
                 VelocityFeedforward(14.2, max_positions)  # type: ignore[arg-type]
 
+    def test_the_friction_is_kept_and_defaults_to_0(self):
+        self.assertEqual(27.0, VelocityFeedforward(14, 30, 27).pwm_for_friction)
+        self.assertIsInstance(VelocityFeedforward(14, 30, 27).pwm_for_friction, float)
+        self.assertEqual(0.0, VelocityFeedforward(14, 30).pwm_for_friction)
+        self.assertEqual(0.0, VelocityFeedforward(14, 30, 0).pwm_for_friction)
+
+    def test_a_negative_or_nan_friction_is_refused(self):
+        for friction in (-0.1, -27.0, float('-inf'), float('nan')):
+            with self.assertRaises(ValueError, msg=str(friction)):
+                VelocityFeedforward(14.2, 30, friction)
+
     def test_equal_and_printable(self):
         self.assertEqual(VelocityFeedforward(14.2, 30), VelocityFeedforward(14.2, 30))
         self.assertNotEqual(VelocityFeedforward(14.2, 30), VelocityFeedforward(14.3, 30))
         self.assertNotEqual(VelocityFeedforward(14.2, 30), VelocityFeedforward(14.2, 31))
         self.assertNotEqual(VelocityFeedforward(14.2, 30), 'something else')
-        self.assertEqual('VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30)',
+        self.assertEqual('VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30, pwm_for_friction=0.0)',
                          repr(VelocityFeedforward(14.2, 30)))
         self.assertEqual(VelocityFeedforward(14.2, 30),
                          VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30))
+
+    def test_the_friction_is_in_the_equality_and_the_representation(self):
+        self.assertEqual(VelocityFeedforward(14.2, 30, 27.0), VelocityFeedforward(14.2, 30, 27))
+        self.assertNotEqual(VelocityFeedforward(14.2, 30, 27.0), VelocityFeedforward(14.2, 30, 26.0))
+        self.assertNotEqual(VelocityFeedforward(14.2, 30, 27.0), VelocityFeedforward(14.2, 30))
+        self.assertEqual(VelocityFeedforward(14.2, 30), VelocityFeedforward(14.2, 30, 0.0))
+        self.assertEqual('VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30, pwm_for_friction=27.0)',
+                         repr(VelocityFeedforward(14.2, 30, 27.0)))
+        self.assertEqual(VelocityFeedforward(14.2, 30, 27.0),
+                         VelocityFeedforward(pwm_per_degree_per_second=14.2, max_positions=30, pwm_for_friction=27.0))
 
 
 if __name__ == '__main__':

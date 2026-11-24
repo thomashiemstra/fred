@@ -1808,12 +1808,16 @@ class FeedforwardStageTests(unittest.TestCase):
     MOVE_TIME = 20
     # pwm per degree/s the simulated servo needs: the damping force per position/s over the force per pwm unit
     TRUE_K = SIM_DAMPING * 4096 / 360 / SimulatedServo.FORCE_PER_PWM
+    # pwm the simulated servo needs to keep sliding: its coulomb friction (D 0) over the force per pwm unit, constant in
+    # the direction of the motion whatever the speed
+    TRUE_FRICTION = SimulatedServo.FRICTION / SimulatedServo.FORCE_PER_PWM
 
     def stage(self, velocity_feedforward=None, load=20000.0, reverse=False, move_time=MOVE_TIME, **overrides):
         """the session, robot and simulation of the stage; `velocity_feedforward` is the velocity lead of the servo in
-        the yaml"""
+        the yaml. The stage is run without the round with the friction drive (ff_friction 0) unless a test asks for
+        it with ff_friction=None or a value, so that the tests of the rounds with a lead keep to those"""
         settings = Settings(repeats=1, hold=0.5, rest=1.0, baseline_rest=1.0, move_degrees=0.0, tune_d=False,
-                            ff_degrees=10.0)._replace(**overrides)
+                            ff_degrees=10.0, ff_friction=0.0)._replace(**overrides)
         session, robot, sim, _, _ = session_for(joint=4, load=load, settings=settings, move_time=move_time,
                                                 trajectory_time=0.01)
         robot.servo_handler.get_servo(4).velocity_feedforward = velocity_feedforward
@@ -1842,9 +1846,9 @@ class FeedforwardStageTests(unittest.TestCase):
         move_servos = robot.move_servos
         sweep = session.feedforward_sweep
 
-        def marked(pose, speed, lead_gain):
-            seen.append({'speed': speed, 'lead_gain': lead_gain, 'writes': []})
-            return sweep(pose, speed, lead_gain)
+        def marked(pose, speed, lead_gain, lead_friction=0.0):
+            seen.append({'speed': speed, 'lead_gain': lead_gain, 'lead_friction': lead_friction, 'writes': []})
+            return sweep(pose, speed, lead_gain, lead_friction)
 
         def noted(angles, velocities=None):
             move_servos(angles, velocities)
@@ -1936,7 +1940,7 @@ class FeedforwardStageTests(unittest.TestCase):
         self.assertNotIn('pid:', output, 'the stage does not set P or D')
 
     def test_the_stage_numbers_are_those_of_fit_velocity_lead_on_the_csv_it_wrote(self):
-        session, robot, sim = self.stage()
+        session, robot, sim = self.stage(ff_friction=None)
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'tune_joint4_ff.csv')
             with open(path, 'w', newline='') as csv_file:
@@ -1951,7 +1955,7 @@ class FeedforwardStageTests(unittest.TestCase):
 
         # the columns
         self.assertEqual(list(FF_SAMPLE_FIELDS), list(rows[0].keys()))
-        self.assertEqual(['p', 'lead', 'lead_gain'], list(FF_SAMPLE_FIELDS[-3:]))
+        self.assertEqual(['p', 'lead', 'lead_gain', 'lead_friction'], list(FF_SAMPLE_FIELDS[-4:]))
         self.assertEqual(['joint', 'pose', 'speed'], list(FF_SAMPLE_FIELDS[:3]), 'no column between the pose and speed')
         self.assertNotIn('ff1', FF_SAMPLE_FIELDS)
         self.assertEqual({'4'}, {row['joint'] for row in rows})
@@ -1959,11 +1963,12 @@ class FeedforwardStageTests(unittest.TestCase):
         self.assertEqual({'10.0', '20.0', '30.0'}, {row['speed'] for row in rows})
         self.assertEqual({'1', '-1'}, {row['direction'] for row in rows})
         self.assertEqual({'0', '1'}, {row['cruise'] for row in rows})
-        off, on = result.rounds
+        off, on, with_friction = result.rounds
         gains = {row['lead_gain'] for row in rows}
         self.assertEqual({'0', '{:g}'.format(on.lead_gain)}, gains)
+        self.assertEqual({'0', '{:g}'.format(with_friction.lead_friction)}, {row['lead_friction'] for row in rows})
         for gain in gains:
-            mine = [row for row in rows if row['lead_gain'] == gain]
+            mine = [row for row in rows if row['lead_gain'] == gain and row['lead_friction'] == '0']
             leads = [int(row['lead']) * int(row['direction']) for row in mine if row['cruise'] == '1']
             if gain == '0':
                 self.assertEqual({0}, set(int(row['lead']) for row in mine), 'no lead in round 1')
@@ -1978,15 +1983,23 @@ class FeedforwardStageTests(unittest.TestCase):
         self.assertEqual(sorted(seconds), seconds)
 
         # the numbers of the stage are the numbers of fit_velocity_lead on the csv
-        self.assertEqual(2, len(from_file))
+        self.assertEqual(3, len(from_file), 'without a lead, with a lead, with the lead and the friction drive')
         for stage_round, analysed in zip(result.rounds, from_file):
             self.assertEqual(stage_round.analysis.statistics, analysed.statistics)
             self.assertEqual(stage_round.analysis.fit, analysed.fit)
             self.assertEqual(stage_round.analysis.p, analysed.p)
             self.assertEqual(stage_round.lead_gain, analysed.key.lead_gain)
+            self.assertEqual(stage_round.lead_friction, analysed.key.lead_friction)
+            self.assertEqual(stage_round.analysis.key, analysed.key._replace(file=''))
         self.assertEqual(off.analysis.fit.coefficient, from_file[0].fit.coefficient)
         self.assertEqual(0, code)
-        self.assertEqual(2, script_output.count('pwm_per_degree_per_second: '))
+        self.assertEqual(3, script_output.count('pwm_per_degree_per_second: '))
+        self.assertEqual(3, script_output.count('pwm_for_friction: '))
+        for stage_round in result.rounds:  # the friction drive of the block of every group is that of its lag fit
+            self.assertIn('pwm_for_friction: {:.1f}'.format(stage_round.analysis.fit.friction_drive), script_output)
+        self.assertIn('friction drive {:g} pwm'.format(with_friction.lead_friction), script_output)
+        self.assertIn(fit_velocity_lead.friction_line(with_friction.analysis.fit), script_output)
+        self.assertIn(fit_velocity_lead.friction_line(with_friction.analysis.fit), output)
         for stage_round in result.rounds:
             fit = stage_round.analysis.fit
             self.assertIn('{:.2f} pwm per degree/s'.format(fit.k_pwm), script_output)
@@ -2050,6 +2063,280 @@ class FeedforwardStageTests(unittest.TestCase):
         self.assertIn('from the --ff-lead option', output)
         self.assertEqual(3.8, result.recommended)
         self.assertIs(own, robot.servo_handler.get_servo(4).velocity_feedforward)
+
+    # the round with the friction drive
+
+    def test_without_a_pwm_for_friction_in_the_yaml_the_friction_round_uses_the_value_fitted_in_round_1(self):
+        session, robot, sim = self.stage(ff_friction=None)
+        servo = robot.servo_handler.get_servo(4)
+        seen = self.watch_writes(session, robot)
+        result, output = self.run_stage(session)
+
+        self.assertEqual(3, len(result.rounds), 'without a lead, with a lead, with the lead and the friction drive')
+        off, on, friction = result.rounds
+        self.assertEqual(1, len(result.lead_rounds), 'the round with the friction drive is not one of the lead rounds')
+        self.assertIs(on, result.lead_rounds[0])
+        self.assertIs(friction, result.friction_rounds[0])
+        fitted = off.analysis.fit.friction_drive
+        self.assertAlmostEqual(self.TRUE_FRICTION, fitted, delta=0.08 * self.TRUE_FRICTION, msg='the lag at no speed')
+        self.assertEqual(round(fitted, 1), friction.lead_friction, 'to the one decimal of the yaml')
+        self.assertIn('fitted from the lag in the round without a lead', friction.friction_origin)
+        self.assertEqual((on.lead_gain, on.max_positions), (friction.lead_gain, friction.max_positions))
+        self.assertIn('round 2', friction.origin)
+        # the lag behind the intended trajectory is within a position of zero at every speed
+        for s in friction.analysis.statistics:
+            self.assertLessEqual(abs(s.intended), 1.0, s)
+        self.assertTrue(friction.analysis.fit.friction_taken_out)
+        self.assertLessEqual(abs(friction.analysis.fit.intended_mean), tune_servo_gains.FRICTION_CORRECTION_THRESHOLD)
+        self.assertGreater(on.analysis.fit.intended_mean, 3.0, 'what the lead alone leaves is the friction part')
+        self.assertTrue(result.friction_taken_out)
+        self.assertEqual(friction.lead_friction, result.recommended_friction)
+        self.assertEqual(on.lead_gain, result.recommended)
+        # the lead of the friction round is larger by the friction in positions (at P 1000 128 / 1000 positions/pwm)
+        for with_lead, with_friction in zip(on.analysis.statistics, friction.analysis.statistics):
+            self.assertAlmostEqual(friction.lead_friction * 128 / self.P, with_friction.lead - with_lead.lead,
+                                   delta=0.6)
+        # the servo had the lead and the friction drive in the sweeps of round 3 and nothing else
+        self.assertEqual([(0.0, 0.0)] * 3 + [(on.lead_gain, 0.0)] * 3 + [(on.lead_gain, friction.lead_friction)] * 3,
+                         [(s['lead_gain'], s['lead_friction']) for s in seen])
+        for sweep in seen[6:]:
+            self.assertTrue(sweep['writes'])
+            for velocity_feedforward, lead, target, angles in sweep['writes']:
+                self.assertEqual(VelocityFeedforward(on.lead_gain, 30, friction.lead_friction), velocity_feedforward)
+        self.assertIsNone(servo.velocity_feedforward, 'the servo has its own (no) velocity_feedforward again')
+        # the report
+        self.assertIn('friction drive of {:g} pwm from the friction drive fitted from the lag in the round without a '
+                      'lead, with the lead of {:g} pwm per degree/s of round 2'.format(friction.lead_friction,
+                                                                                       on.lead_gain), output)
+        self.assertIn('round 3, with a lead of {:g} pwm per degree/s from the coefficient of round 2 and a friction '
+                      'drive of {:g} pwm from the friction drive fitted'.format(on.lead_gain, friction.lead_friction),
+                      output)
+        self.assertIn('every speed is within 1 position of zero: the friction part is taken out', output)
+        self.assertIn('pwm_for_friction of round 3 (from the friction drive fitted', output)
+        self.assertIn('      pwm_per_degree_per_second: {:.2f}\n      pwm_for_friction: {:.1f}'.format(
+            on.lead_gain, friction.lead_friction), output)
+        self.assertNotIn('the friction drive should be', output, 'no correction')
+        self.assertIn('round 3: the std of the error is at most', output, 'the roughness check is for every round')
+        self.assertIn('round 3: the std of the pwm is at most', output)
+
+    def test_a_pwm_for_friction_in_the_yaml_is_used_when_it_is_above_0(self):
+        own = VelocityFeedforward(3.9, 25, 30.0)
+        session, robot, sim = self.stage(velocity_feedforward=own, ff_friction=None)
+        result, output = self.run_stage(session)
+        off, on, friction = result.rounds
+        self.assertEqual((3.9, 25, 0.0), (on.lead_gain, on.max_positions, on.lead_friction), 'round 2 has no friction')
+        self.assertEqual((3.9, 25, 30.0), (friction.lead_gain, friction.max_positions, friction.lead_friction))
+        self.assertIn('pwm_for_friction of the velocity_feedforward block of servo_config.yaml',
+                      friction.friction_origin)
+        self.assertNotAlmostEqual(30.0, round(off.analysis.fit.friction_drive, 1), places=1,
+                                  msg='it is not the one that was fitted')
+        self.assertIn('friction drive of 30 pwm from the pwm_for_friction of the velocity_feedforward block', output)
+        self.assertEqual(30.0, result.recommended_friction, 'within a position of zero at every speed')
+        self.assertIn('      pwm_for_friction: 30.0', output)
+        self.assertIs(own, robot.servo_handler.get_servo(4).velocity_feedforward)
+
+    def test_a_yaml_without_a_friction_drive_or_with_0_leaves_it_to_the_fit(self):
+        for own in (VelocityFeedforward(3.9, 25), VelocityFeedforward(3.9, 25, 0.0)):
+            session, robot, sim = self.stage(velocity_feedforward=own, ff_friction=None)
+            result, output = self.run_stage(session)
+            (friction,) = result.friction_rounds
+            self.assertIn('fitted from the lag', friction.friction_origin)
+            self.assertAlmostEqual(self.TRUE_FRICTION, friction.lead_friction, delta=0.08 * self.TRUE_FRICTION)
+
+    def test_the_ff_friction_option_wins_over_the_yaml_and_the_fit(self):
+        own = VelocityFeedforward(3.9, 25, 40.0)
+        session, robot, sim = self.stage(velocity_feedforward=own, ff_friction=27.0)
+        result, output = self.run_stage(session)
+        friction = result.friction_rounds[0]  # the lead is whole positions: a mean of 0.5 off may call for a correction
+        self.assertEqual(27.0, friction.lead_friction)
+        self.assertIn('--ff-friction', friction.friction_origin)
+        self.assertIn('friction drive of 27 pwm from the --ff-friction option', output)
+        self.assertNotEqual(40.0, friction.lead_friction, 'not the one of the yaml')
+        self.assertNotIn('fitted from the lag in the round without a lead, with the lead', output)
+        self.assertIs(own, robot.servo_handler.get_servo(4).velocity_feedforward)
+
+    def test_ff_friction_0_runs_no_friction_round_whatever_the_yaml_says(self):
+        for own in (None, VelocityFeedforward(3.9, 25, 30.0)):
+            session, robot, sim = self.stage(velocity_feedforward=own, ff_friction=0.0)
+            result, output = self.run_stage(session)
+            self.assertEqual(2, len(result.rounds), 'without a lead and with a lead')
+            self.assertEqual((), result.friction_rounds)
+            self.assertIsNone(result.recommended_friction)
+            self.assertIn('no friction round: --ff-friction is 0', output)
+            self.assertNotIn('      pwm_for_friction:', output, 'the block has no pwm_for_friction line')
+            self.assertIn('pwm_per_degree_per_second', output)
+            self.assertIs(own, robot.servo_handler.get_servo(4).velocity_feedforward)
+
+    def test_a_fit_that_gives_no_friction_and_nothing_asked_for_runs_no_friction_round_and_says_so(self):
+        session, robot, sim = self.stage(ff_friction=None)
+        analyse = tune_servo_gains.analyse_group
+
+        def no_friction(key, rows, *args):
+            found = analyse(key, rows, *args)
+            return dataclasses.replace(found, fit=dataclasses.replace(found.fit, friction_positions=-0.5))
+        with mock.patch.object(tune_servo_gains, 'analyse_group', no_friction):
+            result, output = self.run_stage(session)
+        self.assertEqual(2, len(result.rounds))
+        self.assertEqual((), result.friction_rounds)
+        self.assertIn('no friction round: the lag at no speed gives a friction drive of 0.0 pwm', output)
+        self.assertIn('--ff-friction tries one', output)
+        self.assertNotIn('      pwm_for_friction:', output)
+        # a value asked for is measured all the same
+        session, robot, sim = self.stage(ff_friction=20.0)
+        with mock.patch.object(tune_servo_gains, 'analyse_group', no_friction):
+            result, output = self.run_stage(session)
+        self.assertEqual([0.0, 0.0, 20.0], [r.lead_friction for r in result.rounds][:3])
+
+    def test_no_round_with_a_lead_means_no_friction_round(self):
+        session, robot, sim = self.stage(ff_friction=None)
+        analyse = tune_servo_gains.analyse_group
+
+        def flat_lag(key, rows, *args):
+            found = analyse(key, rows, *args)
+            return dataclasses.replace(found, fit=dataclasses.replace(found.fit, slope=-0.05))
+        with mock.patch.object(tune_servo_gains, 'analyse_group', flat_lag):
+            result, output = self.run_stage(session)
+        self.assertEqual(1, len(result.rounds))
+        self.assertIn('no friction round: no round with a lead ran', output)
+        self.assertIsNone(robot.servo_handler.get_servo(4).velocity_feedforward)
+
+    def test_a_friction_drive_that_is_too_small_is_corrected_once_and_the_corrected_one_is_right(self):
+        session, robot, sim = self.stage(ff_friction=15.0)
+        result, output = self.run_stage(session)
+        self.assertEqual(4, len(result.rounds), 'without a lead, with a lead, the friction drive, the corrected one')
+        off, on, small, corrected = result.rounds
+        self.assertEqual((15.0, 0.0), (small.lead_friction, on.lead_friction))
+        fit = small.analysis.fit
+        self.assertGreater(fit.intended_mean, 3 * tune_servo_gains.FRICTION_CORRECTION_THRESHOLD)
+        self.assertFalse(fit.friction_taken_out)
+        # the drive in force plus the mean lag left times P / 128, to one decimal
+        expected = round(15.0 + fit.intended_mean * self.P / 128, 1)
+        self.assertEqual(expected, corrected.lead_friction)
+        self.assertEqual(expected, tune_servo_gains.corrected_friction(small))
+        self.assertAlmostEqual(self.TRUE_FRICTION, corrected.lead_friction, delta=0.1 * self.TRUE_FRICTION)
+        self.assertEqual('the correction of round 3', corrected.friction_origin)
+        self.assertEqual((on.lead_gain, on.max_positions), (corrected.lead_gain, corrected.max_positions))
+        self.assertTrue(corrected.analysis.fit.friction_taken_out)
+        self.assertLess(abs(corrected.analysis.fit.intended_mean), abs(fit.intended_mean))
+        self.assertTrue(result.friction_taken_out)
+        self.assertEqual(corrected.lead_friction, result.recommended_friction)
+        self.assertIn('the friction drive should be {:g} pwm instead of 15'.format(expected), output)
+        self.assertIn('round 4, with the lead and the corrected friction drive of {:g} pwm'.format(expected), output)
+        self.assertIn('      pwm_for_friction: {:.1f}'.format(expected), output)
+        self.assertNotIn('not verified', output)
+
+    def test_a_friction_drive_that_is_too_large_is_corrected_down(self):
+        session, robot, sim = self.stage(ff_friction=45.0)
+        result, output = self.run_stage(session)
+        off, on, large, corrected = result.rounds
+        self.assertLess(large.analysis.fit.intended_mean, -3 * tune_servo_gains.FRICTION_CORRECTION_THRESHOLD)
+        self.assertLess(corrected.lead_friction, 45.0)
+        self.assertAlmostEqual(self.TRUE_FRICTION, corrected.lead_friction, delta=0.1 * self.TRUE_FRICTION)
+
+    def test_a_friction_drive_is_never_corrected_twice(self):
+        # whatever is left of the lag, a correction is measured once: the threshold is 0 for this stage
+        session, robot, sim = self.stage(ff_friction=None)
+        with mock.patch.object(tune_servo_gains, 'FRICTION_CORRECTION_THRESHOLD', 0.0):
+            result, output = self.run_stage(session)
+        self.assertEqual(4, len(result.rounds), 'one round with the drive and one with its correction')
+        self.assertEqual(1, output.count('the friction drive should be'))
+        self.assertEqual(2, len(result.friction_rounds))
+        first, second = result.friction_rounds
+        self.assertEqual(tune_servo_gains.corrected_friction(first), second.lead_friction)
+
+    def test_a_correction_that_changes_nothing_is_not_measured(self):
+        session, robot, sim = self.stage(ff_friction=None)
+        with mock.patch.object(tune_servo_gains, 'FRICTION_CORRECTION_THRESHOLD', 0.0), \
+                mock.patch.object(tune_servo_gains, 'corrected_friction', lambda r: r.lead_friction):
+            result, output = self.run_stage(session)
+        self.assertEqual(3, len(result.rounds))
+        self.assertIn('that is no change worth measuring again', output)
+
+    def test_a_lead_at_its_clamp_in_the_friction_round_is_not_corrected(self):
+        # the clamp of 6 positions cuts the lead at the faster speeds, in the round with the lead as well
+        session, robot, sim = self.stage(ff_friction=None, ff_max_positions=6)
+        result, output = self.run_stage(session)
+        self.assertEqual(3, len(result.rounds), 'no correction round, it would only chase the clamp')
+        friction = result.friction_rounds[0]
+        self.assertTrue(friction.clamped)
+        self.assertFalse(friction.analysis.fit.friction_taken_out)
+        self.assertGreater(abs(friction.analysis.fit.intended_mean), tune_servo_gains.FRICTION_CORRECTION_THRESHOLD)
+        self.assertIsNone(result.recommended_friction)
+        self.assertIn('positions on average over the speeds (further than 0.5 from zero) while the lead is at its '
+                      'clamp of 6 positions: no correction is measured, raise --ff-max-positions', output)
+        self.assertEqual(0, output.count('the friction drive should be'))
+
+    def test_the_csv_has_the_friction_drive_of_every_round(self):
+        session, robot, sim = self.stage(ff_friction=15.0)
+        buffer = io.StringIO()
+        session.ff_writer = csv.DictWriter(buffer, fieldnames=FF_SAMPLE_FIELDS)
+        session.ff_writer.writeheader()
+        result, output = self.run_stage(session)
+        rows = list(csv.DictReader(io.StringIO(buffer.getvalue())))
+        self.assertIn('lead_friction', rows[0])
+        off, on, small, corrected = result.rounds
+        by_round = {}
+        for row in rows:
+            by_round.setdefault((row['lead_gain'], row['lead_friction']), []).append(row)
+        self.assertEqual({('0', '0'), ('{:g}'.format(on.lead_gain), '0'), ('{:g}'.format(on.lead_gain), '15'),
+                          ('{:g}'.format(on.lead_gain), '{:g}'.format(corrected.lead_friction))}, set(by_round))
+        self.assertEqual(4, len(by_round))
+        # the rows of the rounds are in the order they ran, three speeds each
+        order = [(row['lead_gain'], row['lead_friction']) for row in rows]
+        self.assertEqual(sorted(set(order), key=order.index), [('0', '0'), ('{:g}'.format(on.lead_gain), '0'),
+                                                               ('{:g}'.format(on.lead_gain), '15'),
+                                                               ('{:g}'.format(on.lead_gain),
+                                                                '{:g}'.format(corrected.lead_friction))])
+        for key, members in by_round.items():
+            self.assertEqual({'10.0', '20.0', '30.0'}, {row['speed'] for row in members}, key)
+
+    def test_the_servo_has_its_own_velocity_feedforward_back_whatever_ends_a_friction_round(self):
+        own = VelocityFeedforward(3.7, 25)
+        expected = {'a stop request': tune_servo_gains.Stop, 'an abort rule': tune_servo_gains.Stop,
+                    'ctrl+c': KeyboardInterrupt}
+        for ending, make in self.endings().items():
+            with self.subTest(ending=ending):
+                session, robot, sim = self.stage(velocity_feedforward=own, ff_friction=None)
+                handler = robot.servo_handler
+                servo = handler.get_servo(4)
+                when = lambda: (servo.velocity_feedforward is not None
+                                and servo.velocity_feedforward.pwm_for_friction > 0)
+                handler.before_read = lambda: make(session, handler, sim, when)
+                with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(expected[ending]):
+                    session.run_feedforward(parse_pose('elbow_out'))
+                self.assertIs(own, servo.velocity_feedforward, 'its own is back, the friction drive is gone')
+                session.stop.requested = False
+                handler.before_read = None
+                self.assertTrue(session.restore())
+                self.assertIs(own, servo.velocity_feedforward)
+                self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+
+    def test_a_servo_without_a_velocity_feedforward_has_none_again_after_an_abort_in_a_friction_round(self):
+        session, robot, sim = self.stage(ff_friction=None)
+        handler = robot.servo_handler
+        servo = handler.get_servo(4)
+        warm = int(AbortLimits().max_temperature)
+        handler.before_read = lambda: setattr(
+            sim, 'temperature', warm if servo.velocity_feedforward is not None
+            and servo.velocity_feedforward.pwm_for_friction > 0 else 30)
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(tune_servo_gains.Stop):
+            session.run_feedforward(parse_pose('elbow_out'))
+        self.assertIsNone(servo.velocity_feedforward)
+        self.assertEqual((self.MOVE_TIME, 0), handler.profiles[4])
+
+    def test_a_servo_mounted_reversed_gets_the_friction_drive_in_the_direction_of_its_position(self):
+        session, robot, sim = self.stage(reverse=True, ff_friction=None)
+        buffer = io.StringIO()
+        session.ff_writer = csv.DictWriter(buffer, fieldnames=FF_SAMPLE_FIELDS)
+        session.ff_writer.writeheader()
+        result, output = self.run_stage(session)
+        off, on, friction = result.rounds
+        self.assertAlmostEqual(self.TRUE_FRICTION, friction.lead_friction, delta=0.08 * self.TRUE_FRICTION)
+        self.assertTrue(friction.analysis.fit.friction_taken_out)
+        rows = [row for row in csv.DictReader(io.StringIO(buffer.getvalue()))
+                if row['cruise'] == '1' and row['lead_friction'] != '0']
+        self.assertTrue(rows)
+        self.assertGreaterEqual(min(int(row['lead']) * int(row['direction']) for row in rows), 0)
 
     def test_a_coefficient_that_is_too_small_is_corrected_once_and_the_corrected_one_is_right(self):
         session, robot, sim = self.stage(ff_lead=2.0, ff_max_positions=22)
@@ -2282,12 +2569,16 @@ class FeedforwardReportTests(unittest.TestCase):
     K = 3.9
 
     @staticmethod
-    def round_of(lead_gain, k=K, max_positions=30, origin='the test', **rows):
+    def round_of(lead_gain, k=K, max_positions=30, origin='the test', lead_friction=0.0, friction=20.0,
+                 friction_origin='the friction test', **rows):
+        """a round of the model of the rows: the servo needs `friction` pwm, the lead has `lead_friction` of it"""
         analysis = fit_velocity_lead.analyse_group(
-            fit_velocity_lead.GroupKey('', 4, lead_gain),
-            as_text(sweep_rows(joint=4, k=k, friction=20.0, p=1000.0, lead_gain=lead_gain, **rows)))
+            fit_velocity_lead.GroupKey('', 4, lead_gain, lead_friction),
+            as_text(sweep_rows(joint=4, k=k, friction=friction, p=1000.0, lead_gain=lead_gain,
+                               lead_friction=lead_friction, **rows)))
         return tune_servo_gains.FeedforwardRound(lead_gain, max_positions if lead_gain else 0,
-                                                 origin if lead_gain else '', analysis)
+                                                 origin if lead_gain else '', analysis, lead_friction,
+                                                 friction_origin if lead_friction else '')
 
     def report(self, *rounds):
         servo = Servo(0, 4096, -pi, pi, POSITION_CONTROL_MODE, p=1000, i=0, d=0)
@@ -2375,6 +2666,116 @@ class FeedforwardReportTests(unittest.TestCase):
         self.assertIsNone(result.recommended)
         self.assertIn('no coefficient to recommend: the lead was at its clamp of 3 positions in round 2', output)
         self.assertNotIn('velocity_feedforward:', output)
+
+    # the rounds with a friction drive: the servo of the model needs 20 pwm of friction, 2.56 positions at P 1000
+
+    def test_a_friction_round_with_the_whole_drive_takes_the_friction_out_and_its_value_is_the_recommendation(self):
+        off, on = self.round_of(0), self.round_of(self.K)
+        friction = self.round_of(self.K, lead_friction=20.0)
+        result, output = self.report(off, on, friction)
+        self.assertEqual((on,), result.lead_rounds)
+        self.assertEqual((friction,), result.friction_rounds)
+        self.assertTrue(result.flat)
+        self.assertEqual(self.K, result.recommended, 'the coefficient is that of the round with a lead only')
+        self.assertTrue(result.friction_taken_out)
+        self.assertEqual(20.0, result.recommended_friction)
+        self.assertEqual(20.0, result.corrected_friction, 'nothing is left')
+        for expected in ('round 3, with a lead of 3.9 pwm per degree/s from the test and a friction drive of 20 pwm '
+                         'from the friction test, at most 30 positions:',
+                         '  lag behind the intended trajectory: +0.00 positions on average over the speeds, every '
+                         'speed is within 1 position of zero: the friction part is taken out',
+                         'pwm_for_friction of round 3 (from the friction test): the lag behind the intended '
+                         'trajectory is within 1 position of zero at every speed, +0.00 on average:',
+                         'for servo_config.yaml, the coefficient of round 2 (from the test)',
+                         '      max_positions: 30\n      pwm_per_degree_per_second: 3.90\n'
+                         '      pwm_for_friction: 20.0\n'):
+            self.assertIn(expected, output)
+        self.assertEqual(1, output.count('lag behind the intended trajectory: +'), 'once, for the friction round')
+        self.assertIn('round 3: the std of the error is at most 1 position above round 1', output)
+        self.assertIn('round 3: the std of the pwm is at most 7.81 pwm units above round 1', output)
+        self.assertEqual(1, output.count('pwm_for_friction:'), 'one line in the block')
+        self.assertEqual(1, output.count('ratio k_pwm / k_lag'), 'the two fits are for the round without a lead')
+
+    def test_the_lines_of_the_lag_behind_the_intended_trajectory_are_only_for_the_rounds_with_a_friction_drive(self):
+        _, output = self.report(self.round_of(0), self.round_of(self.K))
+        self.assertNotIn('on average over the speeds', output)
+        self.assertNotIn('pwm_for_friction', output, 'no friction round, no pwm_for_friction in the block')
+        self.assertIn('      pwm_per_degree_per_second: 3.90', output)
+
+    def test_a_friction_drive_that_is_too_small_gives_the_corrected_one_not_verified(self):
+        # 10 of the 20 pwm are in the lead: 1.28 positions are left at P 1000, 10 pwm more are needed
+        result, output = self.report(self.round_of(0), self.round_of(self.K), self.round_of(self.K, lead_friction=10.0))
+        last = result.friction_rounds[-1]
+        self.assertFalse(result.friction_taken_out)
+        self.assertEqual(20.0, tune_servo_gains.corrected_friction(last))
+        self.assertEqual(20.0, result.corrected_friction)
+        self.assertEqual(20.0, result.recommended_friction)
+        self.assertIn('the lag behind the intended trajectory is NOT within 1 position of zero at every speed in '
+                      'round 3: +1.28 on average and 1.28 at the worst speed. With the mean taken out pwm_for_friction '
+                      'would be 20 instead of 10 (not verified, not measured), for servo_config.yaml to try:', output)
+        self.assertIn('a speed is 1.28 positions from zero, more than 1: the friction part is not taken out', output)
+        self.assertIn('      pwm_per_degree_per_second: 3.90\n      pwm_for_friction: 20.0\n', output)
+        self.assertNotIn('pwm_for_friction of round 3', output)
+
+    def test_a_friction_drive_that_is_too_large_is_corrected_down_and_never_below_0(self):
+        large = self.round_of(self.K, lead_friction=30.0)  # 10 pwm too much: 1.28 positions the other way
+        self.assertEqual(20.0, tune_servo_gains.corrected_friction(large))
+        self.assertLess(large.analysis.fit.intended_mean, 0)
+        none_needed = self.round_of(self.K, lead_friction=30.0, friction=0.0)
+        self.assertEqual(0.0, tune_servo_gains.corrected_friction(none_needed))
+        way_off = self.round_of(self.K, lead_friction=5.0, friction=-40.0)
+        self.assertEqual(0.0, tune_servo_gains.corrected_friction(way_off))
+
+    def test_the_corrected_friction_is_to_one_decimal_and_the_one_in_force_without_a_p(self):
+        one = self.round_of(self.K, lead_friction=19.0)  # 1 pwm short: 0.128 positions
+        self.assertEqual(20.0, tune_servo_gains.corrected_friction(one))
+        odd = self.round_of(self.K, lead_friction=12.34, friction=21.37)
+        self.assertEqual(21.4, tune_servo_gains.corrected_friction(odd))
+        rows = [dict(row, p='') for row in as_text(sweep_rows(
+            joint=4, k=self.K, friction=20.0, p=1000.0, lead_gain=self.K, lead_friction=12.0))]
+        analysis = fit_velocity_lead.analyse_group(fit_velocity_lead.GroupKey('', 4, self.K, 12.0), rows)
+        self.assertIsNone(analysis.fit.p)
+        no_p = tune_servo_gains.FeedforwardRound(self.K, 30, 'the test', analysis, 12.0, 'the friction test')
+        self.assertEqual(12.0, tune_servo_gains.corrected_friction(no_p))
+
+    def test_a_clamped_lead_in_the_friction_round_gives_no_friction_to_recommend(self):
+        # the lead of the friction round is (3.9 * 15 + 10) * 128 / 1000 = 8.9 positions at 15 degrees/s: at the clamp
+        clamped = self.round_of(self.K, lead_friction=10.0, max_positions=8)
+        self.assertTrue(clamped.clamped)
+        result, output = self.report(self.round_of(0), self.round_of(self.K), clamped)
+        self.assertIsNone(result.recommended_friction)
+        self.assertEqual(self.K, result.recommended, 'the lead of round 2 is fine')
+        self.assertIn('no pwm_for_friction to recommend: the lead was at its clamp of 8 positions in round 3', output)
+        self.assertIn('      pwm_per_degree_per_second: 3.90\n  at P 1000', output, 'a block without the friction')
+        self.assertNotIn('      pwm_for_friction:', output)
+
+    def test_a_clamped_lead_that_is_not_flat_gives_no_block_at_all_even_with_a_friction_round(self):
+        result, output = self.report(self.round_of(0), self.round_of(1.9, max_positions=3),
+                                     self.round_of(1.9, lead_friction=20.0, max_positions=3))
+        self.assertIsNone(result.recommended)
+        self.assertIn('no coefficient to recommend: the lead was at its clamp of 3 positions in round 2', output)
+        self.assertNotIn('      pwm_for_friction:', output)
+        self.assertNotIn('velocity_feedforward:', output)
+
+    def test_the_numbers_of_the_rounds_after_a_correction_are_counted_in_the_order_they_ran(self):
+        # without a lead, a small lead, the corrected lead, the friction drive, the corrected friction drive
+        rounds = (self.round_of(0), self.round_of(1.9), self.round_of(3.9), self.round_of(3.9, lead_friction=10.0),
+                  self.round_of(3.9, lead_friction=20.0))
+        result, output = self.report(*rounds)
+        self.assertEqual((rounds[1], rounds[2]), result.lead_rounds)
+        self.assertEqual((rounds[3], rounds[4]), result.friction_rounds)
+        self.assertIn('for servo_config.yaml, the coefficient of round 3 (from the test)', output)
+        self.assertIn('pwm_for_friction of round 5 (from the friction test)', output)
+        self.assertEqual(20.0, result.recommended_friction, 'the last friction round decides')
+
+    def test_the_recommendation_is_none_without_friction_rounds(self):
+        result, _ = self.report(self.round_of(0), self.round_of(self.K))
+        self.assertEqual((), result.friction_rounds)
+        self.assertIsNone(result.recommended_friction)
+        self.assertIsNone(result.corrected_friction)
+        self.assertFalse(result.friction_taken_out)
+        self.assertEqual([], tune_servo_gains.friction_conclusion(result)[0])
+        self.assertIsNone(tune_servo_gains.friction_conclusion(result)[1])
 
 
 class StreamSweepTests(unittest.TestCase):
@@ -2510,9 +2911,10 @@ class PositionSignTests(unittest.TestCase):
 class FeedforwardOptionTests(unittest.TestCase):
     """main with the options of the stage, with a session that only records what it is asked to do"""
 
-    def run_main(self, argv, move_time=20, stop_in_run=False, joint=4):
+    def run_main(self, argv, move_time=20, stop_in_run=False, joint=4, velocity_feedforward=None):
         sim = SimulatedServo(2048)
         robot = FakeTuningRobot(parse_pose('elbow_out'), joint, sim, move_time=move_time)
+        robot.servo_handler.get_servo(joint).velocity_feedforward = velocity_feedforward
         calls = []
         swing_writers, settings_seen = [], []
 
@@ -2561,8 +2963,43 @@ class FeedforwardOptionTests(unittest.TestCase):
         self.assertIsNone(settings.ff_speeds, 'per joint')
         self.assertIsNone(settings.ff_degrees, 'per joint')
         self.assertIsNone(settings.ff_lead)
+        self.assertIsNone(settings.ff_friction)
         self.assertEqual(30, settings.ff_max_positions)
         self.assertFalse(hasattr(settings, 'ff_max'), 'the old --ff-max is gone')
+
+    def test_the_ff_friction_option_is_passed_to_the_stage_and_named_in_the_first_line(self):
+        code, output = self.run_main(['--ff-only', '--ff-friction', '27.5'])
+        self.assertEqual(0, code)
+        self.assertEqual(27.5, self.settings[0].ff_friction)
+        self.assertIn('then with the lead and a friction drive of 27.5 pwm, output', output)
+        code, output = self.run_main(['--ff-only', '--ff-friction', '0'])
+        self.assertEqual(0, code)
+        self.assertEqual(0.0, self.settings[0].ff_friction)
+        self.assertIn('then with the lead and no friction drive (--ff-friction 0), output', output)
+        code, output = self.run_main(['--ff-only'])
+        self.assertIsNone(self.settings[0].ff_friction)
+        self.assertIn('then with the lead and the friction drive fitted in the first round, output', output)
+
+    def test_the_first_line_names_the_friction_drive_of_the_yaml_when_the_servo_has_one_above_0(self):
+        code, output = self.run_main(['--ff-only'], velocity_feedforward=VelocityFeedforward(3.9, 25, 30.0))
+        self.assertEqual(0, code)
+        self.assertIn('then with the lead and the pwm_for_friction of the yaml, output', output)
+        code, output = self.run_main(['--ff-only'], velocity_feedforward=VelocityFeedforward(3.9, 25))
+        self.assertIn('then with the lead and the friction drive fitted in the first round, output', output)
+        code, output = self.run_main(['--ff-only', '--ff-friction', '12'],
+                                     velocity_feedforward=VelocityFeedforward(3.9, 25, 30.0))
+        self.assertIn('then with the lead and a friction drive of 12 pwm, output', output)
+
+    def test_a_negative_nan_or_infinite_ff_friction_is_refused_before_the_robot_is_touched(self):
+        def no_robot():
+            raise AssertionError('the robot was touched')
+
+        for value in ('-1', '-0.5', 'nan', 'inf', '-inf'):
+            out = io.StringIO()
+            with mock.patch.object(tune_servo_gains, 'get_robot', no_robot), contextlib.redirect_stdout(out):
+                self.assertEqual(1, tune_servo_gains.main(['--joint', '4', '--ff-only', '--ff-friction=' + value]),
+                                 value)
+            self.assertIn('--ff-friction has to be 0 or more', out.getvalue())
 
     def test_without_the_options_the_stage_does_not_run(self):
         code, output = self.run_main([])

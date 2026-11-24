@@ -31,7 +31,8 @@ Terms per joint (h = mass times centre of mass of a link, a along the link, p pe
     joint 2:  cos_q2 (lower arm h2a + everything beyond joint 3 times a2), sin_q2 (-h2p), and the terms of joint 3
     joint 3:  sin_phi (h3a), cos_phi (h3p), wrist_reach (the gripper, m6 c6)
     joint 5:  wrist_pitch (the gripper)
-    joint 4:  wrist_roll (the gripper when the wrist is bent and rolled, small)
+    joint 4:  wrist_roll (the gripper when the wrist is bent and rolled, small), off_axis (the weight that rolls with
+              joint 4 off its axis whatever the bend of the wrist: the body of servo 5, mounted sideways)
 """
 import inspect
 from collections.abc import Callable, Mapping, Sequence
@@ -65,12 +66,19 @@ def joint_3_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 
                  + wrist_reach * gripper_reach)  # the gripper beyond the wrist
 
 
-def joint_4_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0,
-                  wrist_roll: float = 0.0) -> float:
-    """the pwm that holds joint 4, the first wrist joint: the gripper, when the wrist is bent and rolled"""
+def joint_4_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0, wrist_roll: float = 0.0,
+                  off_axis: float = 0.0) -> float:
+    """
+    the pwm that holds joint 4, the first wrist joint: the gripper, when the wrist is bent and rolled, and what rolls
+    with the joint off its axis whatever the bend of the wrist
+    """
     phi = q2 + q3  # pi/2 is the upper arm horizontal
     return float(constant
-                 + wrist_roll * (np.sin(q4) * np.sin(q5) * np.sin(phi)))  # the gripper's weight off the roll axis
+                 + wrist_roll * (np.sin(q4) * np.sin(q5) * np.sin(phi))  # the gripper's weight off the roll axis
+                 # the weight that rolls with joint 4 and sits off the roll axis (the body of servo 5, mounted
+                 # sideways), whatever the bend of the wrist. The part of it that sits to the side of the axis when the
+                 # roll is at 0 follows cos(q4), which the constant takes over the range the roll is used in
+                 + off_axis * (np.sin(q4) * np.sin(phi)))
 
 
 def joint_5_drive(q2: float, q3: float, q4: float, q5: float, constant: float = 0.0,

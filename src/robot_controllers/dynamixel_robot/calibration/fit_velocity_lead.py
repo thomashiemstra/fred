@@ -1,6 +1,7 @@
 """
-Fits the coefficient of the velocity lead of the arm servos to the feedforward recordings of tune_servo_gains.py
-(tune_joint<N>_<date>_<time>_ff.csv) and prints the `velocity_feedforward` blocks for servo_config.yaml:
+Fits the coefficient of the velocity lead and the friction drive of the arm servos to the feedforward recordings of
+tune_servo_gains.py (tune_joint<N>_<date>_<time>_ff.csv) and prints the `velocity_feedforward` blocks for
+servo_config.yaml:
     python -m src.robot_controllers.dynamixel_robot.calibration.fit_velocity_lead FILE.csv [FILE.csv ...]
         [--max-positions 30]
 
@@ -11,30 +12,39 @@ trajectory by an error that grows with the speed. The PC shifts every goal by ex
 with the coefficient in pwm units per degree/s of the joint. It is fitted in pwm units so that it stays valid when P is
 retuned (in positions it would only hold for the P it was recorded at).
 
+The lead has a second term, friction: the motor needs a fixed extra drive to keep the joint sliding, in the direction
+of the motion and whatever the speed (pwm_for_friction in pwm units, see velocity_feedforward.py). It is the intercept
+of the lag fit below: friction drive = friction_positions * P / 128, not below 0, the third line of the yaml block.
+
 In a recording one joint sweeps to and fro at a few speeds, every leg ramping up, cruising at constant speed and
 ramping down. Only the cruise rows are used. Per speed and
 direction the script takes the mean drive (pwm * direction) and the mean error behind the servo's trajectory
 ((position_trajectory - position) * direction, positive when the servo trails; the trajectory includes the lead the PC
 added, so this is the whole error the P term works on, with or without a lead). The two directions are averaged, so
 the pull of gravity, which pushes the same way in both while the direction factor flips it, cancels. Per group of rows
-(one file, joint and lead gain: a recording with and without a lead is two groups that follow each other) two least
-squares lines against the speed in degrees/s are fitted:
+(one file, joint, lead gain and friction drive: a recording with and without a lead is two groups that follow each
+other) two least squares lines against the speed in degrees/s are fitted:
     pwm = friction_pwm + k_pwm * speed          measured directly, the present pwm of the servo
     error = friction_positions + slope * speed  from the lag; k_lag = slope * P / 128 needs the P of the servo
 The two coefficients are the same quantity found in two ways, so k_pwm / k_lag is 1.0 when the factor 128 and the
 reasoning hold. The P is the p column of the csv. The value for the yaml is k_lag when the P is known: the lead works
 through P times the error, so the coefficient fitted from the error is the one that cancels the slope of the error by
 construction; a group whose p cells are blank has no P and gives k_pwm.
-The friction part is what does not depend on the speed: the lead does not touch it.
+The friction part is what does not depend on the speed: the speed term of the lead does not touch it. The error the
+lines work on includes the lead and the friction drive that were in force, so the fit gives the same coefficient and
+the same friction drive whatever was switched on.
 
 How to read the output: the table has a row per speed with the cruise samples, the mean pwm and error, the mean lead
 that was added to the goal (0 without a lead), the lag behind the INTENDED trajectory (error - lead: what the servo
 trails the path the planner meant) and the std of the error and of the pwm, which show whether a lead made the joint
 rougher. Without a lead the lag behind the intended trajectory is the error itself. With the right lead it is flat
-over the speeds, only the friction part is left, and the report says whether it changes by more than a position. A
-ratio far from 1 is a finding about the pwm reading or the factor 128, not necessarily a bug of the script. A
+over the speeds, only the friction part is left, and the report says whether it changes by more than a position. With
+the friction drive in the lead as well, nothing is left: the next line gives the mean of the lag behind the intended
+trajectory over the speeds and says whether every speed is within a position of zero (the friction part is taken out).
+A ratio far from 1 is a finding about the pwm reading or the factor 128, not necessarily a bug of the script. A
 recording without the columns p, lead and lead_gain (those made before 21 November 2026 lack them) is refused: record
-the joint again with tune_servo_gains.py --ff-only.
+the joint again with tune_servo_gains.py --ff-only. The column lead_friction, the pwm_for_friction in force during the
+sweep, is optional: a recording without it, or a blank cell, has no friction drive.
 """
 import argparse
 import csv
@@ -54,6 +64,9 @@ DEGREES_PER_POSITION = 360.0 / 4096
 # positions the lag behind the intended trajectory may change over the speeds to count as flat; the feedforward stage
 # of tune_servo_gains.py corrects its coefficient above the same value
 LAG_TOLERANCE = FF_LAG_TOLERANCE
+# positions the lag behind the intended trajectory may be from zero at every speed for the friction part to count as
+# taken out (with the lead and the friction drive in force the lag should be 0, not only flat)
+INTENDED_TOLERANCE = 1.0
 RATIO_TOLERANCE = 0.15  # the ratio of the two coefficients may be this far from 1 before it is a warning
 LEAD_SPEED = 10.0  # degrees per second at which the report says how large the lead is
 REQUIRED_COLUMNS = ('joint', 'speed', 'direction', 'cruise', 'position', 'position_trajectory', 'pwm')
@@ -66,6 +79,7 @@ class GroupKey(NamedTuple):
     file: str
     joint: int
     lead_gain: float  # pwm per degree/s in force during the sweep, 0 for no lead
+    lead_friction: float = 0.0  # pwm_for_friction in force during the sweep in pwm units, 0 for none
 
 
 class SpeedStatistics(NamedTuple):
@@ -98,6 +112,24 @@ class VelocityFit:
     slowest: SpeedStatistics
     fastest: SpeedStatistics
     intended_slope: float = 0.0  # positions per degree/s the lag behind the intended trajectory still grows by
+    lead_friction: float = 0.0  # pwm_for_friction in force during the sweep in pwm units, 0 for none
+    # the lag behind the intended trajectory over the speeds: what is left of the lag with the lead and the friction
+    # drive that were in force
+    intended_mean: float = 0.0  # positions, the mean of the speeds
+    intended_largest: float = 0.0  # positions, the largest distance from zero of a speed
+
+    @property
+    def friction_drive(self) -> float | None:
+        """
+        pwm units the motor needs at no speed to keep the joint sliding, for pwm_for_friction in the yaml: the lag at no
+        speed times P / 128, not below 0. None without a P.
+        """
+        return None if self.p is None else max(0.0, self.friction_positions * self.p * PWM_PER_POSITION_PER_P)
+
+    @property
+    def friction_taken_out(self) -> bool:
+        """whether the lag behind the intended trajectory is within INTENDED_TOLERANCE of zero at every speed"""
+        return self.intended_largest <= INTENDED_TOLERANCE
 
     @property
     def leftover_coefficient(self) -> float | None:
@@ -186,16 +218,19 @@ def _number(row: dict[str, str], name: str, default: float | None = None) -> flo
 
 def group_rows(rows: Iterable[dict[str, str]]) -> dict[GroupKey, list[dict[str, str]]]:
     """
-    the rows per file, joint and lead gain, in the order of the files, then by joint and with the rows without a lead
-    before those with one, so that the groups of one file that can be compared follow each other
+    the rows per file, joint, lead gain and friction drive (a missing lead_friction column or a blank cell is 0), in
+    the order of the files, then by joint and with the rows without a lead before those with one and those without a
+    friction drive before those with one, so that the groups of one file that can be compared follow each other
     """
     groups: dict[GroupKey, list[dict[str, str]]] = defaultdict(list)
     order: dict[str, int] = {}
     for row in rows:
         order.setdefault(row['file'], len(order))
-        key = GroupKey(row['file'], int(_number(row, 'joint')), _number(row, 'lead_gain', 0.0))
+        key = GroupKey(row['file'], int(_number(row, 'joint')), _number(row, 'lead_gain', 0.0),
+                       _number(row, 'lead_friction', 0.0))
         groups[key].append(row)
-    return {key: groups[key] for key in sorted(groups, key=lambda k: (order[k.file], k.joint, k.lead_gain))}
+    return {key: groups[key] for key in sorted(
+        groups, key=lambda k: (order[k.file], k.joint, k.lead_gain, k.lead_friction))}
 
 
 def group_p(rows: Sequence[dict[str, str]]) -> tuple[float | None, str]:
@@ -249,10 +284,13 @@ def speed_statistics(rows: Sequence[dict[str, str]],
     return statistics, notes
 
 
-def fit_group(joint: int, lead_gain: float, statistics: Sequence[SpeedStatistics], p: float | None) -> VelocityFit:
+def fit_group(joint: int, lead_gain: float, statistics: Sequence[SpeedStatistics], p: float | None,
+              lead_friction: float = 0.0) -> VelocityFit:
     """
-    fit pwm = friction_pwm + k_pwm * speed and error = friction_positions + slope * speed over the speeds
+    fit pwm = friction_pwm + k_pwm * speed and error = friction_positions + slope * speed over the speeds, and take
+    the mean and the largest of the lag behind the intended trajectory over the speeds
     :param p: the P gain of the servo, None when it is not known (there is no k_lag then)
+    :param lead_friction: the pwm_for_friction of the group, only noted in the fit
     :raises ValueError: with fewer than two different speeds
     """
     speeds = [s.speed for s in statistics]
@@ -261,11 +299,13 @@ def fit_group(joint: int, lead_gain: float, statistics: Sequence[SpeedStatistics
             len(set(speeds))))
     pwm_line = fit_line(speeds, [s.pwm for s in statistics])
     error_line = fit_line(speeds, [s.error for s in statistics])
-    intended_line = fit_line(speeds, [s.intended for s in statistics])
+    intended = [s.intended for s in statistics]
+    intended_fit = fit_line(speeds, intended)
     ordered = sorted(statistics, key=lambda s: s.speed)
     return VelocityFit(joint=joint, lead_gain=lead_gain, p=p, friction_pwm=pwm_line.friction, k_pwm=pwm_line.slope,
                        friction_positions=error_line.friction, slope=error_line.slope, slowest=ordered[0],
-                       fastest=ordered[-1], intended_slope=intended_line.slope)
+                       fastest=ordered[-1], intended_slope=intended_fit.slope, lead_friction=lead_friction,
+                       intended_mean=float(np.mean(intended)), intended_largest=float(np.max(np.abs(intended))))
 
 
 def analyse_group(key: GroupKey, rows: Sequence[dict[str, str]], minimum: int = MIN_CRUISE_SAMPLES) -> GroupResult:
@@ -275,7 +315,7 @@ def analyse_group(key: GroupKey, rows: Sequence[dict[str, str]], minimum: int = 
     if remark:
         notes.append(remark)
     try:
-        fit, problem = fit_group(key.joint, key.lead_gain, statistics, p), ''
+        fit, problem = fit_group(key.joint, key.lead_gain, statistics, p, key.lead_friction), ''
     except ValueError as e:
         fit, problem = None, str(e)
     return GroupResult(key, p, statistics, notes, fit, problem)
@@ -290,13 +330,16 @@ def lead_meaning(coefficient: float, p: float) -> str:
         p, slope * LEAD_SPEED, LEAD_SPEED, milliseconds)
 
 
-def yaml_block(joint: int, coefficient: float, max_positions: int) -> str:
+def yaml_block(joint: int, coefficient: float, max_positions: int, pwm_for_friction: float | None = None) -> str:
     """the velocity_feedforward block of a servo for servo_config.yaml; the coefficient is in pwm units per degree/s of
-    the joint"""
-    return '\n'.join(['  {}:'.format(joint),
-                      '    velocity_feedforward:',
-                      '      max_positions: {}'.format(max_positions),
-                      '      pwm_per_degree_per_second: {:.2f}'.format(coefficient)]) + '\n'
+    the joint, the friction drive in pwm units (left out of the block when it is None)"""
+    lines = ['  {}:'.format(joint),
+             '    velocity_feedforward:',
+             '      max_positions: {}'.format(max_positions),
+             '      pwm_per_degree_per_second: {:.2f}'.format(coefficient)]
+    if pwm_for_friction is not None:
+        lines.append('      pwm_for_friction: {:.1f}'.format(pwm_for_friction))
+    return '\n'.join(lines) + '\n'
 
 
 def table(statistics: Sequence[SpeedStatistics]) -> str:
@@ -325,6 +368,17 @@ def intended_line(fit: VelocityFit) -> str:
         'more than {:g} position, the speed dependent part is not taken out'.format(LAG_TOLERANCE))
 
 
+def friction_line(fit: VelocityFit) -> str:
+    """the line about the lag behind the intended trajectory itself: its mean over the speeds and whether every speed
+    is within INTENDED_TOLERANCE of zero, which is the friction part taken out"""
+    return '  lag behind the intended trajectory: {:+.2f} positions on average over the speeds, {}'.format(
+        fit.intended_mean,
+        'every speed is within {:g} position of zero: the friction part is taken out'.format(INTENDED_TOLERANCE)
+        if fit.friction_taken_out else
+        'a speed is {:.2f} positions from zero, more than {:g}: the friction part is not taken out'.format(
+            fit.intended_largest, INTENDED_TOLERANCE))
+
+
 def fit_lines(fit: VelocityFit) -> list[str]:
     """the two fits, the check of the factor 128 by their ratio and the friction part, without the yaml block"""
     lines = ['  from the measured pwm: pwm = {:.1f} + {:.3f} * speed: {:.2f} pwm per degree/s'.format(
@@ -351,13 +405,15 @@ def fit_lines(fit: VelocityFit) -> list[str]:
 
 
 def describe_fit(fit: VelocityFit, max_positions: int) -> str:
-    """the two fits, the ratio, the friction, the lag behind the intended trajectory and the yaml block"""
+    """the two fits, the ratio, the friction, the lag behind the intended trajectory and the yaml block, which has the
+    friction drive of the lag fit when the P is known"""
     lines = fit_lines(fit)
     lines.append(intended_line(fit))
+    lines.append(friction_line(fit))
     source = 'the lag (the lead works through P times the error)' if fit.p is not None else \
         'the measured pwm, the P is not known'
     lines.append('  for servo_config.yaml, from {}:'.format(source))
-    lines.append(yaml_block(fit.joint, fit.coefficient, max_positions).rstrip('\n'))
+    lines.append(yaml_block(fit.joint, fit.coefficient, max_positions, fit.friction_drive).rstrip('\n'))
     if fit.coefficient <= 0:
         lines.append('  warning: the coefficient is not positive, no drive that grows with the speed was measured')
     if fit.p is not None:
@@ -369,6 +425,8 @@ def describe(result: GroupResult, max_positions: int) -> str:
     """the report of one group: its header, the table, the notes and the fit or the reason there is none"""
     key = result.key
     lead = 'lead gain {:g} pwm per degree/s'.format(key.lead_gain) if key.lead_gain else 'no lead'
+    if key.lead_friction:
+        lead += ', friction drive {:g} pwm'.format(key.lead_friction)
     p = 'P {:g}'.format(result.p) if result.p is not None else 'P not known'
     lines = ['{}: joint {}, {}, {}'.format(key.file, key.joint, lead, p)]
     if result.statistics:

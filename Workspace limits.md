@@ -63,3 +63,21 @@ a2 + d4 = 42 cm from it, the tip 12 cm (d6) beyond. The sphere was measured from
   `tests/servo_controller_tests/static_load_scripts_tests.py`, the pose comment of `tune_servo_gains.py`, the pose
   section of `Tuning the servo gains.md` and both handovers.
 - Tested offline only (the unit tests and the tuning poses checked against the new limits); not yet run on the arm.
+
+## The floor of the gripper tip, 24 November 2026
+
+`z_min` went from -2 to 2 cm (`wrist_z_min` stays 1). The -2 dated from the old wrist, which dropped onto its
+fingertips with the tip at -1.3 by the kinematics; the wrist was rebuilt in November and the arm now rests with the
+gripper pointing forward, its tip at about 3.7 cm and its wrist centre at about 2.3 cm. Checked that day: joint 2 is
+157 mm above the table, joint 2 to 3 is 200 mm, joint 3 to the wrist centre 210 mm, and servos 1 and 2 read within 2
+positions of their yaml offsets in the jig, so the heights of the model can be taken as they are. The tip of the
+model (d6 14 cm) is the point where the gripper grips and stays; the closed fingers reach 150 mm from the wrist
+centre, 1 cm beyond it, so 2 cm keeps the fingertips 1 cm above the table when the gripper points straight down.
+
+`tests/servo_controller_tests/workspace_floor_tests.py` holds what has to keep working under the limit: from rest to
+the tuning poses and to the rest pose, the step tests, the feedforward and swing sweeps of every joint, every
+default load sweep, the recorder's random poses and the start of the gamepad. The margins: the arm rests with its
+tip at 3.7 cm and the gamepad starts at 4.0 cm, so a floor above about 3.7 would stop every move from rest.
+
+The random poses of `record_static_load.py` depend on the floor (a refused pose is skipped and the later ones
+shift), so a seed gives other poses than it gave before this change; `--floor -2` gives the old ones.

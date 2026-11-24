@@ -420,6 +420,41 @@ afterwards: 0.65 to 0.74 positions with the angle rising and 0.82 to 0.86 fallin
 20 November without a lead the falling figure was about 0.7, and the std of the error in the lead round was 0.1
 position higher at 10 and 15 degrees/s, so the lead costs about a tenth of a position of swing there.
 
+The friction round, since 23 November 2026. What is left with the lead does not depend on the speed: friction, the
+drive the joint needs to keep sliding. The block has a third, optional value for it, `pwm_for_friction`, and the
+drive becomes `pwm_per_degree_per_second * speed + pwm_for_friction * direction`, the direction being the commanded
+speed divided by `FRICTION_FULL_SPEED` (1 degree/s) and clipped to -1 and 1, so the shift is whole from 1 degree/s
+and zero at rest. One value per joint, the same in both directions. After the lead rounds the stage sweeps once more
+with the lead and the friction drive: `--ff-friction` when given, else the yaml's, else the offset of the lag fit of
+round 1 times P / 128. When the mean lag is then more than 0.5 position from zero it corrects once (the value plus
+that mean times P / 128) and measures again. The csv has a `lead_friction` column, and `fit_velocity_lead.py` prints
+the value with the block.
+
+Results of 23 November 2026 (all in the yaml; lag in positions without feedforward, with the lead, with both):
+
+| Joint | pwm_for_friction | Speeds (degrees/s) | Nothing | Lead | Lead and friction |
+|---|---|---|---|---|---|
+| 1 | 17.1 | 5, 10, 15 | 4.5, 7.8, 11.2 | 1.5, 1.0, 1.4 | 0.5, 0.0, 0.4 |
+| 2 | 31.6 | 5, 10, 15 | 6.6, 11.0, 15.7 | 2.6, 2.0, 2.7 | 0.6, -0.1, 0.7 |
+| 3 | 48.4 | 10, 20, 30 | 2.1, 2.7, 3.5 | 1.1, 0.8, 0.6 | 0.0, -0.2, -0.4 |
+| 4 | 24.8 | 10, 20, 30 | 7.0, 9.3, 11.5 | 4.4, 4.2, 4.4 | 0.1, 0.2, 0.4 |
+| 5 | 13.2 | 10, 20, 30 | 6.2, 10.8, 14.5 | 2.3, 2.8, 1.5 | 0.3, -0.2, -0.5 |
+| 6 | none | 10, 20, 30 | 5.1, 11.5, 16.1 | -0.8, 0.4, -0.9 | |
+
+- Joint 4 needed the correction (29 from the fit left it 0.7 position ahead, 24.8 is the corrected value); on the
+  others the fitted value held. No joint was rougher by the stage's test; joint 4 at 10 degrees/s is the nearest
+  to it (error std 1.1 without feedforward, 1.8 with both terms).
+- Joint 6 got no friction term: the fit of that day put the lag at no speed at zero, and its lead coefficient went
+  from 4.45 to 4.97 instead. At 10 degrees/s the joint moves in a stick-slip way (error std 2 positions, 0.7 at the
+  higher speeds) and its mean lag there was 6.2 on 21 November and 5.1 on 23 November, so on this joint the split
+  between the part that grows with the speed and the constant part is uncertain by about a position.
+- Joint 2 with both terms in the swing stage: 0.47 to 0.56 positions with the angle rising and 0.60 to 0.68
+  falling at P 2000, no more than with the lead alone two days before (0.65 to 0.74 and 0.82 to 0.86).
+- At rest the term adds nothing, but the joints stop closer to their goals, see the check at rest of 23 November
+  in `Handover Gravity and Spring Compensation.md`.
+- Not measured: below 5 degrees/s (10 on joints 3 to 6), where friction is larger and the term is only partly on
+  under 1 degree/s; a second pose or load per joint.
+
 Where the stage can mislead: it measures the lag against the Position Trajectory of the servo, so it assumes the
 trajectory is what the loop follows when goals stream (see "Assumptions the plan still rests on"). On joint 6 (the
 XC330) the measured pwm is half of P / 128 times the error at every speed, on 18 and on 21 November; the lead uses

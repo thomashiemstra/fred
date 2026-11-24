@@ -603,9 +603,42 @@ class ServoVelocityFeedforwardTest(unittest.TestCase):
         with_function.set_target_position_from_angle(50, [0.0] * 7, 0.3)
         self.assertEqual(50, with_function.target_position)
 
+    def test_the_flip_of_the_friction_term_at_a_reversal_is_rate_limited_like_any_other_change_of_the_lead(self):
+        # 27 pwm of friction are 5.4 positions at P 640, and 5 degrees/s add 10 more: the lead is 15.4 going up and
+        # -15.4 going down, so the commanded velocity jumping from +5 to -5 degrees/s asks for a jump of 30.8 positions
+        feedforward = VelocityFeedforward(10.0, 30, 27.0)
+        for servo, angle, direction in ((Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640,
+                                                velocity_feedforward=feedforward), 0.5 * pi, 1),
+                                        (Servo(3072, 1024, -pi / 2, pi / 2, EXTENDED_POSITION_CONTROL, p=640,
+                                               velocity_feedforward=feedforward), 0.0, -1)):
+            with self.subTest(direction=direction):
+                going_up = self.leads(servo, angle, 5.0, 12)
+                self.assertEqual(direction * 15, going_up[-1], 'the friction is in the lead (10 + 5.4 positions)')
+                going_down = self.leads(servo, angle, -5.0, 20)
+                self.assertEqual(direction * -15, going_down[-1])
+                path = [going_up[-1]] + going_down
+                steps = np.abs(np.diff(path))
+                self.assertLessEqual(steps.max(), MAX_LEAD_STEP, 'one call never moves the lead by more than the limit')
+                self.assertGreaterEqual(np.count_nonzero(steps), 15, 'the 31 positions took many calls')
+                # the same when the velocity wobbles from one sign to the other at every call
+                wobble = [servo.lead_positions]
+                for call in range(20):
+                    servo.set_target_position_from_angle(angle, None, degrees_per_second(5.0 * (-1) ** call))
+                    wobble.append(servo.lead_positions)
+                self.assertLessEqual(np.abs(np.diff(wobble)).max(), MAX_LEAD_STEP)
+
+    def test_a_speed_below_the_full_friction_speed_gets_a_part_of_the_friction_only(self):
+        # 27 pwm at P 640 are 5.4 positions: at 0.5 degrees/s half of them, and the coefficient is 0
+        servo = Servo(1024, 3072, 0, pi, EXTENDED_POSITION_CONTROL, p=640,
+                      velocity_feedforward=VelocityFeedforward(0.0, 30, 27.0))
+        self.leads(servo, 0.5 * pi, 0.5, 10)
+        self.assertEqual(3, servo.lead_positions, '2.7 positions')
+        self.leads(servo, 0.5 * pi, 0.0, 10)
+        self.assertEqual(0, servo.lead_positions, 'the friction lead is gone when the joint stands still')
+
     def test_the_string_of_the_servo_shows_the_velocity_feedforward(self):
-        self.assertIn('velocity_feedforward=VelocityFeedforward(pwm_per_degree_per_second=10.0, max_positions=30)',
-                      str(self.servo))
+        self.assertIn('velocity_feedforward=VelocityFeedforward(pwm_per_degree_per_second=10.0, max_positions=30, '
+                      'pwm_for_friction=0.0)', str(self.servo))
         self.assertIn('velocity_feedforward=None', str(Servo(0, 100, 0, 100, EXTENDED_POSITION_CONTROL)))
 
 

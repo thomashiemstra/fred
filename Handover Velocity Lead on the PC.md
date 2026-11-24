@@ -57,6 +57,15 @@ Results (lag in positions without and with the lead, at the speeds of the stage;
   0.7 on 20 November, and 0.1 position more std of the error at 10 and 15 degrees/s in the stage. Under the limit of
   1 position.
 
+Friction, 23 November 2026: the block has a third value, `pwm_for_friction`, the drive that keeps the joint sliding,
+added in the direction of the commanded motion (whole from 1 degree/s, zero at rest, one value per joint for both
+directions). The stage measures it in a round after the lead and corrects it once. In the yaml: joint 1 17.1,
+joint 2 31.6, joint 3 48.4, joint 4 24.8, joint 5 13.2, joint 6 none (and its coefficient 4.97 instead of 4.45).
+With both terms every joint follows its trajectory within 1 position at the speeds of the stage (the table is in
+`Tuning the servo gains.md`); joint 2 does not swing more. At rest the joints stop closer to their goals: the band
+between the two approach directions went from 1.9 to 0.3 positions on joint 2, 0.8 to 0.4 on joint 3, 2.5 to 0.8 on
+joint 4 and 2.8 to 1.5 on joint 5 (`Handover Gravity and Spring Compensation.md`).
+
 Open:
 
 - The gamepad loop (`xbox_robot_controller.py`) sends velocities since 21 November: the change of the angles of
@@ -66,8 +75,8 @@ Open:
   or let go), which is what the rate limit is for, a step can ask up to 218 degrees/s of a joint, where every lead
   sits at its clamp of 30 positions, and the gamepad has not run on the arm since the time-based profile of 18
   November either. First try: slowly, with the arm folded, joint 2 last.
-- What is left is friction, largest on joint 4 (4.5 positions): a term on the same commanded velocity, in the same
-  `velocity_feedforward` block, is the next step.
+- Friction below 5 degrees/s and under another load has not been measured: the term is one constant per joint,
+  and joint 6 moves in a stick-slip way at 10 degrees/s. A joint that rests off its goal gets nothing from it.
 - Every joint was measured at one pose. That the coefficient does not depend on the pose is assumed.
 - Not tried above 15 degrees/s on joints 1 and 2 and 30 on the others.
 

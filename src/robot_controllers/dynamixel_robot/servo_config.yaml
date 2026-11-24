@@ -3,7 +3,8 @@
 # Every servo has:
 #   name                   what the servo does
 #   model                  the dynamixel model (optional)
-#   bus                    the connector of the usb adapter it is on, servos on the same bus are read together
+#   bus                    rs485 or ttl: the connector of the usb adapter it is on, servos on the same bus are read
+#                          together
 #   mode                   position, extended_position or current_based_position
 #   positions: [a, b]      the servo positions (4096 per turn) at the ends of the range, b smaller than a when the
 #                          servo is mounted the other way around
@@ -18,8 +19,9 @@
 #                          added to every target as drive * 128 / p positions, at most max_positions. Fitted by
 #                          calibration/fit_static_load.py, the terms are in static_compensation.py
 #   velocity_feedforward   the lead of a moving joint (optional): the drive in pwm units the motor needs per
-#                          degree/s, added to every target that is sent with a velocity as
-#                          pwm_per_degree_per_second * degrees/s * 128 / p positions, at most max_positions.
+#                          degree/s (pwm_per_degree_per_second) and, optional, to overcome friction once it moves
+#                          (pwm_for_friction). Every target that is sent with a velocity is shifted ahead by
+#                          that drive * 128 / p positions, at most max_positions; nothing is added at rest.
 #                          Measured and verified by calibration/tune_servo_gains.py --ff-only
 #
 # How every value was found, and what was tried before it, is in "Tuning the servo gains.md" under "History of the
@@ -47,6 +49,7 @@ servos:
     velocity_feedforward:  # 21 November 2026, run tune_joint1_20261121_1455
       max_positions: 30
       pwm_per_degree_per_second: 10.54
+      pwm_for_friction: 17.1  # 23 November 2026, run tune_joint1_20261123_2305
   2:
     name: shoulder
     model: XM540-W270
@@ -66,6 +69,7 @@ servos:
     velocity_feedforward:  # 21 November 2026, run tune_joint2_20261121_2213
       max_positions: 30
       pwm_per_degree_per_second: 13.97
+      pwm_for_friction: 31.6  # 23 November 2026, run tune_joint2_20261123_2307
   3:
     name: elbow
     model: XM430-W350
@@ -81,6 +85,7 @@ servos:
     velocity_feedforward:  # 21 November 2026, run tune_joint3_20261121_2216
       max_positions: 30
       pwm_per_degree_per_second: 3.07
+      pwm_for_friction: 48.4  # 23 November 2026, run tune_joint3_20261123_2303
   4:
     name: wrist 1
     model: XC430-W150
@@ -91,9 +96,15 @@ servos:
     offset: 3  # measured in the jig at 0 degrees, raw 2051
     profile: {velocity: 300, acceleration: 100, move_time: 15}
     pid: {p: 780, i: 0, d: 1020}  # 18 November 2026
+    # 24 November 2026, fitted on 90 poses at rest (the sweeps at five bends of the wrist give -2.5, -62.7 and
+    # +11.5). off_axis is the body of servo 5, which is mounted sideways and rolls with this joint
+    compensation:
+      max_positions: 15
+      terms: {constant: -3.067, wrist_roll: -62.729, off_axis: 9.798}
     velocity_feedforward:  # 21 November 2026, run tune_joint4_20261121_2217
       max_positions: 30
       pwm_per_degree_per_second: 1.45
+      pwm_for_friction: 24.8  # 23 November 2026, run tune_joint4_20261123_2230
   # directly on the wrist joint since November 2026, which reversed its direction (hence the reversed positions).
   # The offset has not been checked in the jig since
   5:
@@ -105,9 +116,16 @@ servos:
     angles: [-180, 180]
     profile: {velocity: 300, acceleration: 100, move_time: 15}
     pid: {p: 760, i: 0, d: 640}  # 17 November 2026
+    # 23 November 2026, fitted on 60 poses at rest, NOT on sweeps: the sweeps give constant -12.4 and wrist_pitch
+    # -22.4, which holds the joint 1.6 positions too high at rest. Lifting costs this joint more friction than
+    # lowering, so the mean of the two directions of a sweep is not its gravity load
+    compensation:
+      max_positions: 15
+      terms: {constant: 3.728, wrist_pitch: -35.581}
     velocity_feedforward:  # 21 November 2026, run tune_joint5_20261121_2219
       max_positions: 30
       pwm_per_degree_per_second: 2.50
+      pwm_for_friction: 13.2  # 23 November 2026, run tune_joint5_20261123_2300
   # an XC330-T288-T on the 12 V bus since 11 November 2026, in position mode since 18 November. The positions have to
   # be calibrated for the new mounting
   6:
@@ -119,11 +137,12 @@ servos:
     angles: [-180, 180]
     profile: {velocity: 200, acceleration: 50, move_time: 15}
     pid: {p: 1150, i: 0, d: 0}  # 18 November 2026
-    # 21 November 2026, run tune_joint6_20261121_2220. On this servo the measured pwm is half of P / 128 times the
-    # error, so the value is the one fitted from the lag and its "pwm units" are twice the real ones
+    # 23 November 2026, run tune_joint6_20261123_2301 (4.45 on 21 November). On this servo the measured pwm is half
+    # of P / 128 times the error, so the value is the one fitted from the lag and its "pwm units" are twice the
+    # real ones. No friction term: the fit gives none, and at 10 degrees/s the joint moves in a stick-slip way
     velocity_feedforward:
       max_positions: 30
-      pwm_per_degree_per_second: 4.45
+      pwm_per_degree_per_second: 4.97
   # an XC330-T288-T on the 12 V bus since 11 November 2026. NOT CALIBRATED: the positions are still those of the
   # XL330 it replaced and the new servo sits far outside them, so don't open or close the gripper until its open and
   # closed positions are measured. 0 is open and 100 is closed

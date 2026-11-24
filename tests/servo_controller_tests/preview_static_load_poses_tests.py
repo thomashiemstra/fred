@@ -224,10 +224,12 @@ class PreviewTests(unittest.TestCase):
             np.testing.assert_array_equal(expected, actual)
 
     def test_the_poses_of_the_real_recording_are_listed_with_their_heights(self):
-        # printed by the real robot for these options: poses 1, 3, 4 and 8 in degrees, heights from the first run
+        # poses 1, 3 and 6 in degrees as the tool lists them with the floor at 2 cm. The recordings of 21 to 24 November
+        # 2026 had the floor at -2 cm and visited other poses (a pose 3 with the tip at 0.2 cm among them): the poses
+        # the floor refuses now are skipped, and the ones that followed move up
         poses = previewed_poses(RECORDING)
-        for number, expected in ((1, [66.8, -9.2, 39.3, -10.9]), (3, [54.4, -11.6, -35.6, -28.5]),
-                                 (4, [97.5, -26.4, -1.8, 57.7]), (8, [103.8, 1.1, 1.3, 30.4])):
+        for number, expected in ((1, [66.8, -9.2, 39.3, -10.9]), (3, [97.5, -26.4, -1.8, 57.7]),
+                                 (6, [103.8, 1.1, 1.3, 30.4])):
             np.testing.assert_allclose(expected, np.degrees(poses[number - 1][2:6]), atol=0.06)
             self.assertEqual(90.0, np.degrees(poses[number - 1][1]))
         result, output = run_preview(RECORDING)
@@ -235,10 +237,9 @@ class PreviewTests(unittest.TestCase):
         pose_line = re.compile(r'^ *(\d+) {2,}\d.*\|.*\|.*$', re.M)  # not the summary lines that start with a number
         lines = {int(match.group(1)): match.group(0) for match in pose_line.finditer(output)}
         self.assertEqual(list(range(1, 31)), sorted(lines))
-        # pose 3: the tip at the pose, above and below, as the throwaway script printed it
-        self.assertRegex(lines[3], r'\|\s+3\.8\s+8\.6\s+0\.2\s+<-- LOW$')
-        self.assertRegex(lines[25], r'\|\s+4\.7\s+9\.2\s+1\.4\s+<-- LOW$')
-        self.assertNotIn('LOW', lines[1])
+        # pose 24 has the lowest tip of the recording: at the pose, above and below, 4.0 cm is above the 3 cm of --warn
+        self.assertRegex(lines[24], r'\|\s+7\.8\s+12\.5\s+4\.0$')
+        self.assertNotIn('<-- LOW', output)
 
     def test_without_a_seed_it_says_that_a_recording_will_differ(self):
         _, output = run_preview(['--poses', '3'])
@@ -261,12 +262,18 @@ class PreviewTests(unittest.TestCase):
         self.assertIn('floor {} cm (wrist {} cm)'.format(WorkSpaceLimits.z_min, WorkSpaceLimits.wrist_z_min), output)
         self.assertIn('joint 2: 45 to 115 degrees', output)
         self.assertIn('30 poses of 30 asked', output)
-        self.assertRegex(output, r'lowest gripper tip: 0\.2 cm, pose \d+, at the overshoot below')
-        self.assertRegex(output, r'lowest wrist centre: 13\.2 cm, pose 3, at the overshoot below')
+        self.assertRegex(output, r'lowest gripper tip: 4\.0 cm, pose 24, at the overshoot below')
+        self.assertRegex(output, r'lowest wrist centre: 14\.6 cm, pose 26, at the overshoot below')
         self.assertRegex(output, r'lowest elbow: \d+\.\d cm, pose \d+, ')
-        self.assertIn('3 poses with the tip or the wrist under 2 cm', output)
+        self.assertIn('0 poses with the tip or the wrist under 3 cm', output)
         self.assertIn('does not check the gripper fingers or the elbow', output)
         self.assertIn('WorkSpaceLimits', output)
+        self.assertIn('the closed fingers reach 1 cm beyond it', output)
+        self.assertNotIn('just below the table', output)
+
+    def test_the_default_warning_height_is_1_cm_above_the_limit_of_the_tip(self):
+        self.assertEqual(WorkSpaceLimits.z_min + 1.0, preview.DEFAULT_WARN)
+        self.assertEqual(preview.DEFAULT_WARN, preview.build_parser().parse_args([]).warn)
 
     def test_the_summary_of_hand_made_poses(self):
         # joint 2 at 10 degrees with the forearm down: the tip is low, and lowest at the overshoot below
@@ -288,10 +295,12 @@ class PreviewTests(unittest.TestCase):
 
     def test_the_warning_height_option_changes_the_marks(self):
         _, default = run_preview(RECORDING)
-        _, strict = run_preview(RECORDING + ['--warn', '0.5'])
+        _, strict = run_preview(RECORDING + ['--warn', '4.5'])
         _, loose = run_preview(RECORDING + ['--warn', '10'])
-        self.assertEqual(3, default.count('<-- LOW'))
-        self.assertEqual(2, strict.count('<-- LOW'))  # poses 3 and 6 only, 0.2 cm; pose 25 comes to 1.4
+        _, tight = run_preview(RECORDING + ['--warn', '0.5'])
+        self.assertEqual(0, default.count('<-- LOW'), 'the lowest tip of this recording is 4.0 cm')
+        self.assertEqual(0, tight.count('<-- LOW'))
+        self.assertEqual(3, strict.count('<-- LOW'))  # poses 12, 21 and 24, their tips at 4.0 to 4.1 cm
         self.assertGreater(loose.count('<-- LOW'), 3)
 
     def test_floor_changes_the_limits_and_the_accepted_poses(self):

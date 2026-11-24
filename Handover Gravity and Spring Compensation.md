@@ -205,7 +205,75 @@ yaml, see `Handover Velocity Lead on the PC.md`). The sweeps of joint 2 recorded
 and +2.5 positions, the sag is unchanged at 0.27 rms. The recorders measure against the goal without the lead and
 log it in a `lead` column.
 
-Still open: joint 4; joint 5 (see above); the wrist model is the simplified
+The check at rest again, 23 November 2026 (`calibration/tuning/static_load_20261123_check.csv`, the same 30 poses,
+now with the velocity lead and the friction term of every joint, which act while the joint moves to the pose and
+are zero once it rests). In positions, 21 November first:
+
+| Joint | Band between the two approach directions | Largest error of one approach | Sag left (mean, rms) |
+|---|---|---|---|
+| 2 | 1.9 to 0.3 | 3.0 to 1.6 | +0.12, 0.39 to -0.32, 0.48 |
+| 3 | 0.8 to 0.4 | 2.2 to 1.2 | +0.03, 0.38 to -0.30, 0.47 |
+| 4 | 2.5 to 0.8 | 10.4 to 7.0 | +0.42, 2.82 to +0.51, 2.48 |
+| 5 | 2.8 to 1.5 | 9.0 to 8.0 | +3.06, 3.53 to +2.89, 3.44 |
+
+- The joints arrive on their trajectory and stay there, so they stop closer to the goal from either side: joint 2
+  stopped 2 positions short from both sides and now ends 0.6 below coming from below and on the goal from above.
+- The sag of joints 2 and 3 moved by about -0.4 position: with the friction band gone from the measurement, the
+  mean of the two directions is where the joint settles, 0.3 position off on both. Inside the rounding of the
+  compensation; one pose of joint 2 is at -1.1.
+- Joints 4 and 5 are now limited by their sag, which has no compensation: -4.5 to +6 positions on joint 4, and on
+  joint 5 a steady +3 (0 to +6) whichever way it arrives. A gravity block for both is what is left to gain at rest.
+
+Gravity blocks for joints 4 and 5, 23 November 2026. Both are fitted on poses AT REST, not on sweeps:
+
+- Joint 5: the sweeps (`calibration/tuning/load_sweep_joint5_20261123_before.csv`, 182 bins) fit constant -12.4 and
+  wrist_pitch -22.4, as they did on 19 November (-10.2 and -21.7). With that block the joint sat 1.6 positions too
+  HIGH at rest (sag +2.9 before, -1.6 with it). Lifting costs this joint more friction than lowering, so the mean
+  of the two directions of a sweep is not its gravity load: the difference shows up as a constant and takes away
+  from the gravity term. A fit of the 60 poses at rest of that day (`static_load_20261123_check.csv` and
+  `_check_wrist.csv`, `fit_static_load.py` reads them as they are) gives constant +3.7 and wrist_pitch -35.6,
+  leaving 0.5 position, and the 30 poses of 21 November give the same (+1.9 and -34.6). The constant of the sweeps
+  was an artefact, there is no steady force on the joint. Do not fit joint 5 from sweeps.
+- Joint 4: the sweeps (`load_sweep_joint4_20261123_before.csv`, 128 bins with the gripper bent 60 degrees either
+  way) show a sag of -11 to +9 positions and fit wrist_roll -61.2; the poses at rest give constant -3.3 and
+  wrist_roll -65.9, which is in the yaml. Either leaves 1 to 1.5 positions: the load swings about 40 pwm units with
+  the gripper bent one way and 60 the other, so the gripper's weight sits off its centreline and the one term does
+  not have that. Trial fits put a term in sin(q4) alone at about +10 and bring the sweeps from 1.5 to 1.1
+  positions; whether it goes with cos(q5) needs a sweep with the wrist straight. Not built.
+- Validation on 30 other poses (`static_load_20261123_check_seed6.csv`, another seed than the fit): the sag of
+  joint 5 is +0.04 on average, 0.76 rms, -1.5 to +1.5 (it was +2.9, 3.5 rms, 0 to +6); of joint 4 +0.39, 1.12 rms,
+  -1.0 to +2.5 (it was 2.5 rms, -4.5 to +6). The largest error of one approach is 4.0 on joint 5 (was 8) and 5.0 on
+  joint 4 (was 7). Joints 2 and 3 as before (0.54 and 0.48 rms), so their sweep based blocks hold at rest.
+- A run with `--floor 3` failed that evening: the floor also raises the floor of the wrist, which lies at 2.4 cm
+  when the arm rests, so the planner refused every move, the lowering included, with the torque already on.
+  `lower_arm.py` put the arm down. A floor has to stay below where the arm rests; neither the recorder nor the
+  preview checks that yet. Since 24 November the limit of the tip itself is 2 cm (it was -2, from the old wrist,
+  see `Workspace limits.md`), so the recorder no longer picks poses with the fingertips at table level and a
+  `--floor` is not needed; a seed gives other poses than before that change.
+
+The third term of joint 4, 24 November 2026. Sweeps at three more bends of the wrist
+(`load_sweep_joint4_20261124_straight.csv`: joint 5 at 0, 30 and -30 degrees; with the two of the day before five
+bends, 320 bins) show what the two terms missed: with the wrist straight the roll still carries about 15 pwm units,
+following sin(q4), a sag of up to 4 positions. The load of joint 4 follows sin(q4) at every bend with the size
++63.5, +43.8, +14.7, -20.1 and -44.3 pwm units at -60, -30, 0, 30 and 60 degrees, which is -62.7 * sin(q5) plus
+about 11 to 15 at every bend. The cause is the body of servo 5: it is mounted sideways, off the roll axis, turns
+with the roll and is not moved by joint 5. (Joint 5's own load is shifted by 4 degrees only, so it is not the
+gripper being 13 degrees off its centreline, and not the zero of joint 5.) The formula has a term for it,
+`off_axis * sin(q4) * sin(phi)`; the part of that weight beside the axis follows cos(q4), which the constant takes.
+
+- The fit on 90 poses at rest: constant -3.1, wrist_roll -62.7, off_axis +9.8, leaving 0.7 position (0.6 on the
+  poses held out); the sweeps give -2.5, -62.7 and +11.5 and leave 1.06 positions against 1.64 without the term.
+  On this joint the sweeps and the poses at rest agree. What the sweeps leave is two tracks of dots where the two
+  speeds disagree (friction that differs between the directions), which no gravity term follows.
+- Validation on 30 other poses (`static_load_20261124_check_seed12.csv`): the sag of joint 4 is +0.03 on average,
+  0.67 rms, -1.5 to +1.0 (1.12 rms with two terms, 2.8 without a block); the largest error of one approach is 3.0
+  (was 5.0). Joint 5 0.75 rms, joints 2 and 3 0.52 and 0.62, as before.
+- `calibration/plot_static_load.py` draws the measured holding drive of a joint with the block of the yaml, a fit
+  of all terms (`--fit`) and a fit with terms left out (`--without`): one panel per pose of the other joints for
+  sweeps, measured against model for poses at rest. `calibration/plots/static_load_joint4_sweeps.png` is the
+  figure of the five bends.
+
+Still open: the wrist model is the simplified
 one; what the encoder does not see (flex) needs an outside reference, see Step 6. A webcam with aruco markers on
 the arm (`aruco_markers_a4.pdf`) records the runs since 19 November, as a check of what happened, not as a
 measurement.

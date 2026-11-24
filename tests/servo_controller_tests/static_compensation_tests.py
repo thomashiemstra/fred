@@ -61,6 +61,7 @@ class BasisTests(unittest.TestCase):
     def test_term_names_and_rows(self):
         self.assertEqual(('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach'), term_names(2))
         self.assertEqual(('constant', 'wrist_pitch'), term_names(5))
+        self.assertEqual(('constant', 'wrist_roll', 'off_axis'), term_names(4))
         for joint in (1, 6, 7):
             with self.assertRaises(ValueError):
                 term_names(joint)
@@ -91,10 +92,11 @@ def old_term_values(joint, angles):
         'wrist_reach': np.sin(phi) * np.cos(q5) + np.cos(phi) * np.cos(q4) * np.sin(q5),
         'wrist_pitch': np.cos(phi) * np.sin(q5) + np.cos(q4) * np.cos(q5) * np.sin(phi),
         'wrist_roll': np.sin(q4) * np.sin(q5) * np.sin(phi),
+        'off_axis': np.sin(q4) * np.sin(phi),
     }
     names = {2: ('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach'),
              3: ('constant', 'sin_phi', 'cos_phi', 'wrist_reach'),
-             4: ('constant', 'wrist_roll'),
+             4: ('constant', 'wrist_roll', 'off_axis'),
              5: ('constant', 'wrist_pitch')}[joint]
     return {name: values[name] for name in names}
 
@@ -113,7 +115,7 @@ class FormulaTests(unittest.TestCase):
     # the terms of every joint as the yaml checks read them, written out so that the table and the formulas can't drift
     TERMS = {2: ('constant', 'cos_q2', 'sin_q2', 'sin_phi', 'cos_phi', 'wrist_reach'),
              3: ('constant', 'sin_phi', 'cos_phi', 'wrist_reach'),
-             4: ('constant', 'wrist_roll'),
+             4: ('constant', 'wrist_roll', 'off_axis'),
              5: ('constant', 'wrist_pitch')}
     FORMULAS = {2: joint_2_drive, 3: joint_3_drive, 4: joint_4_drive, 5: joint_5_drive}
 
@@ -194,6 +196,8 @@ class FormulaTests(unittest.TestCase):
                                joint_3_drive(q2, q3, q4, q5, constant=3, sin_phi=4, cos_phi=0.5, wrist_reach=-6))
         self.assertAlmostEqual(-2 + 7 * np.sin(q4) * np.sin(q5) * np.sin(phi),
                                joint_4_drive(q2, q3, q4, q5, constant=-2, wrist_roll=7))
+        self.assertAlmostEqual(-2 + 7 * np.sin(q4) * np.sin(q5) * np.sin(phi) + 11 * np.sin(q4) * np.sin(phi),
+                               joint_4_drive(q2, q3, q4, q5, constant=-2, wrist_roll=7, off_axis=11))
         self.assertAlmostEqual(1 + 8 * (np.cos(phi) * np.sin(q5) + np.cos(q4) * np.cos(q5) * np.sin(phi)),
                                joint_5_drive(q2, q3, q4, q5, constant=1, wrist_pitch=8))
 
@@ -202,6 +206,108 @@ class FormulaTests(unittest.TestCase):
             self.assertFalse(hasattr(static_compensation, name), name)
         with self.assertRaises(TypeError):
             StaticCompensation(2, {}, 60, spring=None)  # type: ignore[call-arg]
+
+
+class Joint4OffAxisTests(unittest.TestCase):
+    """the off_axis term of joint 4: what rolls with the joint off its axis, whatever the bend of the wrist"""
+
+    @staticmethod
+    def pose(q2_degrees, q3_degrees, q4_degrees, q5_degrees):
+        angles = np.zeros(7)
+        angles[2:6] = np.radians([q2_degrees, q3_degrees, q4_degrees, q5_degrees])
+        return angles
+
+    def test_the_term_comes_last_and_defaults_to_zero(self):
+        self.assertEqual(('constant', 'wrist_roll', 'off_axis'), term_names(4))
+        parameters = inspect.signature(joint_4_drive).parameters
+        self.assertEqual(0.0, parameters['off_axis'].default)
+        self.assertEqual(('constant', 'wrist_roll', 'off_axis'), tuple(parameters)[4:])
+
+    def test_the_drive_by_hand(self):
+        # the forearm horizontal: q2 + q3 = 90 degrees, the wrist straight
+        compensation = StaticCompensation(4, {'off_axis': 15.0}, max_positions=40)
+        self.assertAlmostEqual(15.0, compensation.drive(self.pose(0, 90, 90, 0)))
+        self.assertAlmostEqual(-7.5, compensation.drive(self.pose(0, 90, -30, 0)))
+        self.assertAlmostEqual(0.0, compensation.drive(self.pose(0, 90, 0, 0)))
+        self.assertAlmostEqual(0.0, compensation.drive(self.pose(0, 0, 90, 0)))  # phi = 0: the forearm hangs down
+        # phi = 60 degrees
+        self.assertAlmostEqual(15 * np.sin(np.radians(60)), compensation.drive(self.pose(30, 30, 90, 0)))
+        # whatever the bend of the wrist: the term does not depend on q5
+        for q5 in (-80, -20, 0, 35, 90):
+            self.assertAlmostEqual(-7.5, compensation.drive(self.pose(0, 90, -30, q5)), msg='q5 {}'.format(q5))
+
+    def test_the_three_terms_together(self):
+        compensation = StaticCompensation(4, {'constant': -2.5, 'wrist_roll': -60.0, 'off_axis': 11.5}, 40)
+        # q4 = 90, q5 = 90, phi = 90: sin 1 each
+        self.assertAlmostEqual(-2.5 - 60.0 + 11.5, compensation.drive(self.pose(0, 90, 90, 90)))
+        # q4 = 30, q5 = 60, phi = 90
+        self.assertAlmostEqual(-2.5 - 60.0 * 0.5 * np.sin(np.radians(60)) + 11.5 * 0.5,
+                               compensation.drive(self.pose(0, 90, 30, 60)))
+
+    def test_the_regressor_row_has_a_column_for_it(self):
+        angles = self.pose(10, 70, 40, 25)  # phi = 80 degrees
+        phi, q4, q5 = np.radians(80), np.radians(40), np.radians(25)
+        row = regressor_row(4, angles)
+        self.assertEqual((3,), row.shape)
+        self.assertTrue(np.allclose([1.0, np.sin(q4) * np.sin(q5) * np.sin(phi), np.sin(q4) * np.sin(phi)], row))
+        self.assertEqual([np.sin(q4) * np.sin(phi)], list(regressor_row(4, angles, names=('off_axis',))))
+        self.assertEqual(('constant', 'wrist_roll', 'off_axis'), tuple(term_values(4, angles)))
+        with self.assertRaisesRegex(ValueError, 'no terms'):
+            regressor_row(5, angles, names=('off_axis',))  # it is a term of joint 4 only
+
+    def test_a_block_without_the_term_gives_the_drive_it_gave_before(self):
+        rng = np.random.default_rng(6)
+        compensation = StaticCompensation(4, {'constant': -2.5, 'wrist_roll': -62.7}, max_positions=40)
+        for _ in range(100):
+            angles = random_angles(rng)
+            q2, q3, q4, q5 = (float(angles[i]) for i in (2, 3, 4, 5))
+            before = -2.5 - 62.7 * np.sin(q4) * np.sin(q5) * np.sin(q2 + q3)
+            self.assertAlmostEqual(before, compensation.drive(angles), places=9)
+            self.assertAlmostEqual(before, joint_4_drive(q2, q3, q4, q5, constant=-2.5, wrist_roll=-62.7,
+                                                         off_axis=0.0), places=9)
+        self.assertEqual({'constant': -2.5, 'wrist_roll': -62.7}, compensation.terms)
+
+    def test_the_servo_config_loads_blocks_with_and_without_it(self):
+        from src.robot_controllers.dynamixel_robot.servo_config import parse_servo_config
+        servo = {'name': 'wrist roll', 'bus': 'ttl', 'mode': 'position', 'positions': [1024, 3072], 'angles': [-90, 90],
+                 'profile': {'velocity': 150, 'acceleration': 50}, 'pid': {'p': 1500, 'i': 0, 'd': 0}}
+        without = {'constant': -2.5, 'wrist_roll': -62.7}
+        for terms in (without, {**without, 'off_axis': 11.5}):
+            config = parse_servo_config({'temperature_warning': 45, 'temperature_limit': 50, 'servos': {
+                4: {**servo, 'compensation': {'max_positions': 40, 'terms': terms}}}})
+            self.assertEqual(StaticCompensation(4, terms, 40), config.servos[4].compensation)
+            self.assertEqual(terms, config.servos[4].compensation.terms)
+
+    def test_the_fit_recovers_the_three_coefficients(self):
+        from src.robot_controllers.dynamixel_robot.calibration import fit_static_load
+        from src.robot_controllers.dynamixel_robot.calibration.fit_static_load import Sample
+        true = {'constant': -2.5, 'wrist_roll': -62.7, 'off_axis': 11.5}
+        rng = np.random.default_rng(11)
+        samples = []
+        for _ in range(200):
+            angles = np.zeros(7)
+            angles[2], angles[3] = rng.uniform(0.2, 2.9), rng.uniform(-1.3, 1.3)
+            angles[4], angles[5] = rng.uniform(-1.5, 1.5), rng.uniform(-1.5, 1.5)  # the roll and the bend both vary
+            static = float(regressor_row(4, angles) @ np.array([true[name] for name in term_names(4)]))
+            samples.append(Sample(angles, {4: static + rng.normal(0, 0.5)}, {4: 3.0}))
+        fit = fit_static_load.fit_joint(4, samples, holdout=0.2, rng=rng)
+        self.assertEqual(('constant', 'wrist_roll', 'off_axis'), tuple(fit.names))
+        for name, value in true.items():
+            self.assertAlmostEqual(value, fit.coefficients[name], delta=1.0, msg=name)
+        self.assertLess(fit.rms_train, 1.0)
+        self.assertLess(fit.rms_holdout, 1.0)
+        self.assertEqual([], fit.undetermined())
+        self.assertLess(fit.condition, 100)
+        # the terms are told apart: with the wrist straight in all poses wrist_roll has no data, off_axis still has
+        straight = []
+        for sample in samples:
+            angles = sample.angles.copy()
+            angles[5] = 0.0
+            straight.append(Sample(angles, {4: float(regressor_row(4, angles, ('constant', 'off_axis'))
+                                                     @ np.array([true['constant'], true['off_axis']]))}, {}))
+        fit = fit_static_load.fit_joint(4, straight, names=('constant', 'off_axis'))
+        self.assertAlmostEqual(11.5, fit.coefficients['off_axis'], places=6)
+        self.assertAlmostEqual(-2.5, fit.coefficients['constant'], places=6)
 
 
 class StaticCompensationTests(unittest.TestCase):

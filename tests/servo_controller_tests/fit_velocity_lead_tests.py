@@ -7,23 +7,28 @@ import unittest
 
 from src.robot_controllers.dynamixel_robot.calibration import gain_tuning
 from src.robot_controllers.dynamixel_robot.calibration.fit_velocity_lead import (
-    LAG_TOLERANCE, GroupKey, SpeedStatistics, analyse_group, describe, describe_fit, fit_group, fit_lines, group_p,
-    group_rows, intended_line, is_flat, lead_meaning, main, speed_statistics, table, yaml_block)
+    INTENDED_TOLERANCE, LAG_TOLERANCE, GroupKey, SpeedStatistics, analyse_group, describe, describe_fit, fit_group,
+    fit_lines, friction_line, group_p, group_rows, intended_line, is_flat, lead_meaning, main, read_rows,
+    speed_statistics, table, yaml_block)
 from src.robot_controllers.dynamixel_robot.calibration.gain_tuning import Sample, SweepSample, cruise_statistics
 
 COLUMNS = ['joint', 'pose', 'speed', 'time', 'direction', 'cruise', 'goal', 'position', 'position_trajectory',
-           'velocity', 'velocity_trajectory', 'pwm', 'current', 'voltage', 'temperature', 'p', 'lead', 'lead_gain']
+           'velocity', 'velocity_trajectory', 'pwm', 'current', 'voltage', 'temperature', 'p', 'lead', 'lead_gain',
+           'lead_friction']
 SPEEDS = (5.0, 10.0, 15.0)
+JOINT_4_RECORDING = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src', 'robot_controllers',
+                                 'dynamixel_robot', 'calibration', 'tuning', 'tune_joint4_20261121_2217_ff.csv')
 
 
 def sweep_rows(joint=1, k=10.0, friction=20.0, gravity=0.0, p=2000.0, lead_gain=0.0, speeds=SPEEDS, count=6,
-               jitter=0.0, pwm_scale=1.0, file='a.csv', cruise=1, directions=(1, -1)):
+               jitter=0.0, pwm_scale=1.0, file='a.csv', cruise=1, directions=(1, -1), lead_friction=0.0):
     """
     the cruise rows of a sweep of a joint at every speed in both directions, for a servo that obeys the model: the
     drive in the direction of the move is friction + k * speed, gravity adds the same drive in both directions of the
     world (so it flips against the direction), and the servo drives with P / 128 * (trajectory - present) where the
     trajectory includes the lead, so the error is the drive times 128 / P.
     :param lead_gain: the coefficient of the lead in pwm per degree/s, 0 for rows without a lead
+    :param lead_friction: the pwm_for_friction of the lead in pwm units, 0 for rows without a friction drive
     :param jitter: alternate rows have the error and the pwm this far above and below the model (a std of the jitter)
     :param pwm_scale: the measured pwm is this times the drive that makes the error
     """
@@ -38,7 +43,8 @@ def sweep_rows(joint=1, k=10.0, friction=20.0, gravity=0.0, p=2000.0, lead_gain=
                              'direction': direction, 'cruise': cruise, 'goal': 1000, 'position': 1000,
                              'position_trajectory': 1000 + error, 'velocity': 0, 'velocity_trajectory': 0,
                              'pwm': drive * pwm_scale + wobble, 'current': 0, 'voltage': 11.5, 'temperature': 30,
-                             'p': p, 'lead': direction * lead_gain * speed * 128.0 / p, 'lead_gain': lead_gain})
+                             'p': p, 'lead': direction * (lead_gain * speed + lead_friction) * 128.0 / p,
+                             'lead_gain': lead_gain, 'lead_friction': lead_friction})
     return rows
 
 
@@ -379,6 +385,239 @@ class TextTests(unittest.TestCase):
     def test_the_source_of_the_yaml_value_is_named(self):
         self.assertIn('from the lag', describe(fit_of(sweep_rows()), 30))
         self.assertIn('from the measured pwm', describe(fit_of(blank(sweep_rows(), 'p')), 30))
+
+
+def friction_fit_of(rows, joint=1, lead_gain=0.0, lead_friction=0.0):
+    return analyse_group(GroupKey('a.csv', joint, lead_gain, lead_friction), as_text(rows))
+
+
+class FrictionDriveTests(unittest.TestCase):
+    """the friction drive of the lag fit, the lag that is left behind the intended trajectory and the yaml block"""
+
+    def test_the_friction_drive_is_the_lag_at_no_speed_times_p_over_128(self):
+        fit = fit_of(sweep_rows(k=10.0, friction=20.0, p=2000.0)).fit
+        self.assertAlmostEqual(20.0 * 128 / 2000.0, fit.friction_positions, places=6)
+        self.assertAlmostEqual(20.0, fit.friction_drive, places=6)
+        self.assertAlmostEqual(fit.friction_pwm, fit.friction_drive, places=6, msg='the measured pwm agrees')
+        # at another P the same drive is another number of positions, and the drive stays 20 pwm
+        self.assertAlmostEqual(20.0, fit_of(sweep_rows(k=10.0, friction=20.0, p=800.0)).fit.friction_drive, places=6)
+
+    def test_the_friction_drive_is_the_same_whatever_was_switched_on(self):
+        # the error the fit works on includes the lead and the friction shift, so it gives the same drive
+        plain = fit_of(sweep_rows(k=12.0, friction=20.0)).fit
+        led = friction_fit_of(sweep_rows(k=12.0, friction=20.0, lead_gain=12.0), lead_gain=12.0).fit
+        both = friction_fit_of(sweep_rows(k=12.0, friction=20.0, lead_gain=12.0, lead_friction=20.0),
+                               lead_gain=12.0, lead_friction=20.0).fit
+        for fit in (led, both):
+            self.assertAlmostEqual(plain.friction_drive, fit.friction_drive, places=6)
+            self.assertAlmostEqual(plain.k_lag, fit.k_lag, places=6)
+        self.assertEqual(20.0, both.lead_friction)
+        self.assertEqual(0.0, plain.lead_friction)
+
+    def test_the_friction_drive_is_not_below_0_and_none_without_a_p(self):
+        negative = fit_of(sweep_rows(k=10.0, friction=-10.0)).fit
+        self.assertAlmostEqual(-10.0 * 128 / 2000.0, negative.friction_positions, places=6)
+        self.assertEqual(0.0, negative.friction_drive)
+        self.assertIsNone(fit_of(blank(sweep_rows(k=10.0, friction=20.0), 'p')).fit.friction_drive)
+
+    def test_without_a_lead_the_lag_behind_the_intended_trajectory_is_the_error_and_the_friction_is_not_taken_out(self):
+        fit = fit_of(sweep_rows(k=10.0, friction=20.0)).fit
+        statistics, _ = speed_statistics(as_text(sweep_rows(k=10.0, friction=20.0)))
+        self.assertAlmostEqual(sum(s.error for s in statistics) / 3, fit.intended_mean, places=6)
+        self.assertAlmostEqual(max(s.error for s in statistics), fit.intended_largest, places=6)
+        self.assertFalse(fit.friction_taken_out)
+
+    def test_with_the_lead_and_the_whole_friction_drive_nothing_is_left(self):
+        rows = sweep_rows(k=12.0, friction=20.0, gravity=30.0, lead_gain=12.0, lead_friction=20.0)
+        fit = friction_fit_of(rows, lead_gain=12.0, lead_friction=20.0).fit
+        self.assertAlmostEqual(0.0, fit.intended_mean, places=6)
+        self.assertAlmostEqual(0.0, fit.intended_largest, places=6)
+        self.assertTrue(fit.friction_taken_out)
+        self.assertTrue(is_flat(fit))
+
+    def test_the_mean_is_signed_and_the_largest_is_the_distance_from_zero(self):
+        # 40 pwm of friction and a drive of 60 in the lead: 20 pwm too much, 1.28 positions at P 2000
+        rows = sweep_rows(k=12.0, friction=40.0, lead_gain=12.0, lead_friction=60.0)
+        fit = friction_fit_of(rows, lead_gain=12.0, lead_friction=60.0).fit
+        self.assertAlmostEqual(-20.0 * 128 / 2000.0, fit.intended_mean, places=6)
+        self.assertAlmostEqual(20.0 * 128 / 2000.0, fit.intended_largest, places=6)
+        self.assertFalse(fit.friction_taken_out, '1.28 positions are more than 1')
+
+    def test_within_1_position_at_every_speed_is_taken_out(self):
+        # 10 pwm of friction left at P 2000 is 0.64 positions at every speed
+        fit = friction_fit_of(sweep_rows(k=12.0, friction=30.0, lead_gain=12.0, lead_friction=20.0),
+                              lead_gain=12.0, lead_friction=20.0).fit
+        self.assertAlmostEqual(0.64, fit.intended_mean, places=6)
+        self.assertTrue(fit.friction_taken_out)
+        self.assertEqual(1.0, INTENDED_TOLERANCE)
+        # 15.7 pwm left are 1.005 positions at P 2000: a hair above the tolerance is not within it
+        near = friction_fit_of(sweep_rows(k=12.0, friction=35.7, lead_gain=12.0, lead_friction=20.0),
+                               lead_gain=12.0, lead_friction=20.0).fit
+        self.assertFalse(near.friction_taken_out)
+
+    def test_one_speed_off_is_enough_to_not_take_the_friction_out(self):
+        # the lead is right at 5 and 10 degrees/s and a position and a half short at 15 (a clamp, say)
+        rows = [dict(row, position_trajectory=row['position_trajectory'] - (
+            1.5 * row['direction'] if row['speed'] == 15.0 else 0.0)) for row in sweep_rows(
+                k=12.0, friction=20.0, lead_gain=12.0, lead_friction=20.0)]
+        fit = friction_fit_of(rows, lead_gain=12.0, lead_friction=20.0).fit
+        self.assertAlmostEqual(-0.5, fit.intended_mean, places=6)
+        self.assertAlmostEqual(1.5, fit.intended_largest, places=6)
+        self.assertFalse(fit.friction_taken_out)
+        self.assertIn('is not taken out', friction_line(fit))
+
+    def test_the_friction_line_says_the_mean_and_whether_the_friction_part_is_taken_out(self):
+        out = friction_fit_of(sweep_rows(k=12.0, friction=30.0, lead_gain=12.0, lead_friction=20.0),
+                              lead_gain=12.0, lead_friction=20.0).fit
+        self.assertEqual('  lag behind the intended trajectory: +0.64 positions on average over the speeds, every '
+                         'speed is within 1 position of zero: the friction part is taken out', friction_line(out))
+        left = fit_of(sweep_rows(k=12.0, friction=20.0)).fit
+        self.assertIn('lag behind the intended trajectory: +', friction_line(left))
+        self.assertIn('a speed is ', friction_line(left))
+        self.assertIn('more than 1: the friction part is not taken out', friction_line(left))
+        self.assertNotIn('is taken out', friction_line(left).replace('not taken out', ''))
+
+    def test_every_group_report_has_the_line_after_the_one_about_the_change_over_the_speeds(self):
+        for result in (fit_of(sweep_rows(k=12.0)),
+                       friction_fit_of(sweep_rows(k=12.0, lead_gain=12.0, lead_friction=20.0), lead_gain=12.0,
+                                       lead_friction=20.0)):
+            text = describe(result, 30)
+            self.assertIn(intended_line(result.fit) + '\n' + friction_line(result.fit), text)
+
+    def test_describe_fit_starts_with_the_pieces_the_stage_prints(self):
+        fit = friction_fit_of(sweep_rows(k=12.0, lead_gain=6.0, lead_friction=10.0), lead_gain=6.0,
+                              lead_friction=10.0).fit
+        parts = fit_lines(fit) + [intended_line(fit), friction_line(fit)]
+        self.assertTrue(describe_fit(fit, 30).startswith('\n'.join(parts)))
+
+
+class YamlBlockFrictionTests(unittest.TestCase):
+
+    def test_the_block_has_three_lines_with_the_friction_to_one_decimal(self):
+        self.assertEqual('  4:\n'
+                         '    velocity_feedforward:\n'
+                         '      max_positions: 30\n'
+                         '      pwm_per_degree_per_second: 1.45\n'
+                         '      pwm_for_friction: 27.1\n', yaml_block(4, 1.45, 30, 27.1234))
+        self.assertIn('pwm_for_friction: 0.0\n', yaml_block(4, 1.45, 30, 0.0))
+        self.assertIn('pwm_for_friction: 27.0\n', yaml_block(4, 1.45, 30, 27))
+
+    def test_the_block_without_a_friction_has_two_lines_as_before(self):
+        self.assertEqual('  2:\n'
+                         '    velocity_feedforward:\n'
+                         '      max_positions: 30\n'
+                         '      pwm_per_degree_per_second: 14.29\n', yaml_block(2, 14.2857, 30))
+        self.assertNotIn('pwm_for_friction', yaml_block(2, 14.2857, 30, None))
+
+    def test_the_report_has_the_friction_drive_of_the_lag_fit_in_the_block_when_the_p_is_known(self):
+        text = describe(fit_of(sweep_rows(k=10.0, friction=20.0, p=2000.0)), 25)
+        self.assertIn('      max_positions: 25\n      pwm_per_degree_per_second: 10.00\n      pwm_for_friction: 20.0',
+                      text)
+        # from the lag, not from the measured pwm: the pwm reads half of what the error needs
+        scaled = describe(fit_of(sweep_rows(k=10.0, friction=20.0, p=2000.0, pwm_scale=0.5)), 25)
+        self.assertIn('pwm_for_friction: 20.0', scaled)
+
+    def test_without_a_p_the_block_has_no_friction_line(self):
+        text = describe(fit_of(blank(sweep_rows(k=10.0, friction=20.0), 'p')), 25)
+        self.assertIn('pwm_per_degree_per_second: 10.00', text)
+        self.assertNotIn('pwm_for_friction', text)
+
+    def test_the_friction_of_the_block_is_the_same_for_every_group_of_a_recording(self):
+        rows = (sweep_rows(k=12.0, friction=20.0) + sweep_rows(k=12.0, friction=20.0, lead_gain=12.0)
+                + sweep_rows(k=12.0, friction=20.0, lead_gain=12.0, lead_friction=20.0))
+        text = describe_all(rows)
+        self.assertEqual(3, text.count('pwm_for_friction: 20.0'))
+
+
+def describe_all(rows):
+    return '\n'.join(describe(analyse_group(key, members), 30) for key, members in group_rows(as_text(rows)).items())
+
+
+class LeadFrictionColumnTests(unittest.TestCase):
+    """the column lead_friction is optional: a recording before the friction drive has none"""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+
+    def path(self, name):
+        return os.path.join(self.directory.name, name)
+
+    def test_a_missing_column_reads_as_no_friction_drive_and_gives_the_numbers_it_gave_before(self):
+        with_column, without_column = self.path('with.csv'), self.path('without.csv')
+        rows = sweep_rows(k=12.0, friction=20.0, p=2500.0) + sweep_rows(k=12.0, friction=20.0, p=2500.0, lead_gain=12.0)
+        write_csv(with_column, rows)
+        write_csv(without_column, rows, without=('lead_friction',))
+        old = [analyse_group(key, members) for key, members in group_rows(read_rows([without_column])).items()]
+        new = [analyse_group(key, members) for key, members in group_rows(read_rows([with_column])).items()]
+        self.assertEqual([GroupKey(without_column, 1, 0.0, 0.0), GroupKey(without_column, 1, 12.0, 0.0)],
+                         [result.key for result in old])
+        for before, after in zip(old, new):
+            self.assertEqual(after.statistics, before.statistics)
+            self.assertEqual(after.fit, before.fit)
+            self.assertEqual(0.0, before.fit.lead_friction)
+        self.assertAlmostEqual(12.0, old[0].fit.k_lag, places=6)
+        self.assertAlmostEqual(20.0, old[0].fit.friction_drive, places=6)
+
+    def test_a_recording_without_the_column_is_not_refused(self):
+        path = self.path('before.csv')
+        write_csv(path, sweep_rows(lead_gain=5.0), without=('lead_friction',))
+        code, output = run_main(path)
+        self.assertEqual(0, code)
+        self.assertNotIn('no column', output)
+        self.assertIn('lead gain 5 pwm per degree/s, P 2000', output, 'no friction drive in the heading')
+
+    def test_a_blank_cell_is_no_friction_drive(self):
+        rows = as_text(blank(sweep_rows(lead_gain=5.0, lead_friction=8.0), 'lead_friction'))
+        self.assertEqual([GroupKey('a.csv', 1, 5.0, 0.0)], list(group_rows(rows)))
+
+    def test_the_column_is_part_of_the_group(self):
+        rows = as_text(sweep_rows(lead_gain=12.0, lead_friction=20.0, count=1) + sweep_rows(lead_gain=12.0, count=1)
+                       + sweep_rows(count=1) + sweep_rows(lead_gain=12.0, lead_friction=30.0, count=1))
+        groups = group_rows(rows)
+        # without a lead first, then the lead without and with friction in rising order
+        self.assertEqual([GroupKey('a.csv', 1, 0.0, 0.0), GroupKey('a.csv', 1, 12.0, 0.0),
+                          GroupKey('a.csv', 1, 12.0, 20.0), GroupKey('a.csv', 1, 12.0, 30.0)], list(groups))
+        self.assertEqual({6}, {len(members) for members in groups.values()})
+
+    def test_the_group_key_has_no_friction_drive_by_default(self):
+        self.assertEqual(GroupKey('a.csv', 1, 3.0, 0.0), GroupKey('a.csv', 1, 3.0))
+
+    def test_the_heading_of_a_group_says_which_drive_it_had(self):
+        text = describe(friction_fit_of(sweep_rows(lead_gain=12.0, lead_friction=27.5), lead_gain=12.0,
+                                        lead_friction=27.5), 30)
+        self.assertTrue(text.startswith('a.csv: joint 1, lead gain 12 pwm per degree/s, friction drive 27.5 pwm, '
+                                        'P 2000\n'))
+        plain = describe(fit_of(sweep_rows(lead_gain=12.0), lead_gain=12.0), 30)
+        self.assertTrue(plain.startswith('a.csv: joint 1, lead gain 12 pwm per degree/s, P 2000\n'))
+
+    def test_end_to_end_with_the_three_kinds_of_round(self):
+        path = self.path('three.csv')
+        write_csv(path, sweep_rows(k=12.0, friction=20.0, p=2500.0) + sweep_rows(k=12.0, friction=20.0, p=2500.0,
+                                                                                 lead_gain=12.0)
+                  + sweep_rows(k=12.0, friction=20.0, p=2500.0, lead_gain=12.0, lead_friction=20.0))
+        code, output = run_main(path)
+        self.assertEqual(0, code)
+        self.assertIn('joint 1, no lead, P 2500', output)
+        self.assertIn('joint 1, lead gain 12 pwm per degree/s, P 2500', output)
+        self.assertIn('joint 1, lead gain 12 pwm per degree/s, friction drive 20 pwm, P 2500', output)
+        self.assertEqual(3, output.count('      pwm_for_friction: 20.0'))
+        self.assertEqual(1, output.count('the friction part is taken out'), 'only the last group has taken it out')
+        self.assertEqual(2, output.count('the friction part is not taken out'))
+
+    @unittest.skipUnless(os.path.exists(JOINT_4_RECORDING), 'the recording of joint 4 of 21 November 2026 is not here')
+    def test_the_recording_of_joint_4_of_21_november_has_no_column_and_still_fits_1_45_and_27(self):
+        groups = group_rows(read_rows([JOINT_4_RECORDING]))
+        results = [analyse_group(key, members) for key, members in groups.items()]
+        self.assertEqual([(4, 0.0, 0.0), (4, 1.45, 0.0)], [(r.key.joint, r.key.lead_gain, r.key.lead_friction)
+                                                           for r in results])
+        without_lead = results[0]
+        self.assertEqual(780.0, without_lead.p)
+        self.assertAlmostEqual(1.45, without_lead.fit.coefficient, places=2)
+        self.assertAlmostEqual(27.0, without_lead.fit.friction_drive, delta=0.5)
+        self.assertFalse(without_lead.fit.friction_taken_out)
+        text = describe(without_lead, 30)
+        self.assertIn('      pwm_per_degree_per_second: 1.45\n      pwm_for_friction: 27.1', text)
 
 
 class MainTests(unittest.TestCase):

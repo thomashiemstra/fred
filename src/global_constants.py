@@ -34,10 +34,13 @@ class WorkSpaceLimits:
     Where the arm may go, in cm from the origin on the ground under the base. The gripper tip has to stay at least
     radius_min from the origin, at y >= y_min and at z >= z_min. The wrist centre (the axis of joint 5) has to stay
     within wrist_reach_max of the shoulder (the axis of joint 2, d1 above the origin) and at z >= wrist_z_min: when the
-    gripper points up the wrist servo body hangs about 1.8cm below the wrist centre, so this keeps it off the table
-    while the tip may come down to the table. Neither can be higher than where the arm comes to rest when the torque
-    goes off, or no move can start from rest: on its fingertips (the tip at -1.3cm by the kinematics) or with the
-    wrist servo lying on the table (wrist_z_min).
+    gripper points up the wrist servo body hangs about 1.8cm below the wrist centre, so this keeps it off the table.
+    The tip of the model (d6 from the wrist centre) is the point where the gripper grips, the closed fingers reach
+    about 1cm beyond it (150mm from the wrist centre, measured on 24 November 2026), so z_min keeps the fingertips 1cm
+    above the table when the gripper points straight down. The geometry the heights come from (d1, a2, d4 and the zeros
+    of joints 1 and 2) was confirmed in the jig on that day. The arm rests on the table with the gripper pointing
+    forward, its tip at about 3.7cm and its wrist centre at about 2.3cm by the kinematics. Neither limit may be higher
+    than where the arm rests, or no move can start from rest.
 
     The reach is measured from the shoulder because that is where the arm reaches from: the wrist centre can get at
     most a2 + d4 = 42cm from it, with the elbow straight. wrist_reach_max keeps the elbow bent at least about 11
@@ -55,7 +58,8 @@ class WorkSpaceLimits:
     radius_min = 10
     wrist_reach_max = 41.8  # the wrist centre from the shoulder, the elbow bent at least about 11 degrees
     y_min = d6 + 0.1  # y=0 is bad for the IK calculation, so let's make sure that never happens
-    # the gripper tip, the fingers may rest on the table: the arm dropped onto its fingertips puts the tip at -1.3
-    # (measured 25 October 2026), so moves can start from there
-    z_min = -2
+    # the gripper tip of the model, the point where the gripper grips: the closed fingers reach 1cm beyond it (150mm
+    # from the wrist centre, 24 November 2026), so with the gripper pointing down the fingertips stay 1cm above the
+    # table. The arm rests with its tip at about 3.7cm, so moves can start from there
+    z_min = 2
     wrist_z_min = 1  # the wrist centre, just under the resting height of the wrist servo lying on the table
