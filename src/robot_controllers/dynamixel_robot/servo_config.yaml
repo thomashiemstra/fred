@@ -143,15 +143,20 @@ servos:
     velocity_feedforward:
       max_positions: 30
       pwm_per_degree_per_second: 4.97
-  # an XC330-T288-T on the 12 V bus since 11 November 2026. NOT CALIBRATED: the positions are still those of the
-  # XL330 it replaced and the new servo sits far outside them, so don't open or close the gripper until its open and
-  # closed positions are measured. 0 is open and 100 is closed
+  # an XC330-T288-T on the 12 V bus since 11 November 2026. 0 is open and 100 is closed. The positions were read on
+  # 25 November 2026 with the torque off: 1086 where the gripper was set open by hand, 2037 with the fingers
+  # touching. The mechanical end on the open side is at 974, 112 positions (10 degrees) beyond the open position.
+  # Under power at 60 mA (gripper_test --calibrate) it closed to 2038 and opened again to 1063: the last stretch to
+  # the open end takes more than that. The grip, tested that day with gripper_test: closing empty it stops at 2032
+  # with 11 mA, so it does not push against its closed end. On an object it holds the goal current whatever the
+  # target is beyond it (150 mA at 10, 20 and 25 states). It draws no more than about 640 mA whatever the goal
+  # current, and from 600 mA the supply at the servo sags from 11.5 to 10.6 V, so stay well below that
   7:
     name: gripper
     model: XC330-T288-T
     bus: ttl
     mode: current_based_position
-    positions: [1024, 2048]
+    positions: [1086, 2037]
     states: [0, 100]
     goal_current: 150  # squeezes about as hard as the 400 mA of the XL330 did, the limit of the servo is 910 mA
     profile: {velocity: 50, acceleration: 50}
