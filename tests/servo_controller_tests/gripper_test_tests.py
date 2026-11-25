@@ -14,6 +14,7 @@ from src.robot_controllers.dynamixel_robot.calibration import gripper_test
 from src.robot_controllers.dynamixel_robot.calibration.gripper_test import CONTACT, NO_CONTACT, NO_MOVE
 from src.robot_controllers.dynamixel_robot.servo import Servo
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config, DEFAULT_SERVO_CONFIG_PATH
+from src.xbox_control import xbox_robot_controller
 
 GRIPPER = gripper_test.GRIPPER_ID
 
@@ -734,6 +735,61 @@ class InteractiveTests(unittest.TestCase):
         handler = FakeHandler()
         handler.failing_reads = 1
         self.assertFalse(quietly(gripper_test.gripper_is_calibrated, handler)[0])
+
+
+class LeadTestsTests(unittest.TestCase):
+    """the interactive lead test squeezes an object at position 1500 that pushes back with 3 mA per position"""
+
+    @staticmethod
+    def run_lead_tests(handler):
+        with mock.patch.object(gripper_test, 'sleep', handler.sleep), \
+                mock.patch.object(gripper_test, 'perf_counter', handler.clock):
+            return quietly(gripper_test.lead_tests, handler)[1]
+
+    def test_the_leads_are_positions_and_the_last_is_the_cap_of_the_gamepad(self):
+        self.assertEqual(gripper_test.LEADS, [30, 60, 85])
+        self.assertEqual(gripper_test.LEADS[-1], xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS)
+
+    def test_the_targets_are_30_60_and_85_positions_beyond_the_object_and_the_gripper_is_opened_again(self):
+        handler = FakeHandler(closed_end=1500, stiffness=3.0, torque=True)
+        out = self.run_lead_tests(handler)
+        goals = handler.goals()
+        self.assertEqual(goals[0], 2048)  # closes until the object stops it
+        self.assertEqual(goals[1:4], [1530, 1560, 1585])
+        self.assertEqual(goals[4:], [1024])  # opened again, and nothing after it
+        self.assertIn('the object stops the gripper at state 46.5', out)
+
+    def test_the_targets_are_beyond_the_object_when_the_gripper_closes_towards_lower_positions(self):
+        handler = FakeHandler(positions=(2048, 1024), open_position=2000, closed_end=1500, open_end=2040,
+                              stiffness=3.0, torque=True)
+        self.run_lead_tests(handler)
+        goals = handler.goals()
+        self.assertEqual(goals[1:4], [1470, 1440, 1415])
+        self.assertEqual(goals[4:], [2048])
+
+    def test_the_printed_lines_say_positions_and_give_the_current(self):
+        handler = FakeHandler(closed_end=1500, stiffness=3.0, torque=True)
+        out = self.run_lead_tests(handler)
+        lines = [line for line in out.splitlines() if 'beyond the object' in line]
+        self.assertEqual(len(lines), 4)  # the announcement and one line per lead
+        self.assertIn('positions beyond the object', lines[0])
+        self.assertIn('30, 60, 85', lines[0])
+        for lead, line, current in zip(gripper_test.LEADS, lines[1:], (90, 180, 255)):  # 3 mA per position
+            self.assertIn('target {} positions beyond the object: average {}mA'.format(lead, current), line)
+        self.assertNotIn('states beyond', out)
+
+    def test_a_lead_beyond_the_closed_end_stops_at_the_closed_state(self):
+        handler = FakeHandler(closed_end=2040, stiffness=3.0, torque=True)
+        self.run_lead_tests(handler)
+        goals = handler.goals()
+        self.assertEqual(goals[1:4], [2048, 2048, 2048])
+
+    def test_a_shut_down_gripper_stops_the_test_without_moving_it_again(self):
+        handler = FakeHandler(closed_end=1500, stiffness=3.0, torque=True)
+        handler.errors = ['overload']
+        out = self.run_lead_tests(handler)
+        self.assertEqual(len(handler.goals()), 2)  # the closing and the first lead
+        self.assertIn('the gripper shut down, stopping the lead tests', out)
 
 
 def measure(handler, **kwargs):

@@ -22,8 +22,8 @@ reports the open and the closed position, the travel and the current, and the li
 or a warm servo stop it: the servo holds where it is and the torque is disabled.
 
 --measure-lead measures how far the target of the gripper has to be beyond an object for a whole squeeze, which is the
-lead the gamepad needs (GRIPPER_MAX_LEAD in xbox_robot_controller.py). Put the gripper open, with the torque off and an
-object between the fingers. It starts like --calibrate (same checks, the goal current of --current mA is written and
+lead the gamepad needs (GRIPPER_MAX_LEAD_POSITIONS, in positions, in xbox_robot_controller.py). Put the gripper open,
+with the torque off and an object between the fingers. It starts like --calibrate (same checks, the goal current of --current mA is written and
 read back before the torque goes on) and closes gently until the object stops the gripper: the contact position. It
 then writes the goal current of the yaml (the squeeze of a grip) and, for every lead of --leads (positions, taken in
 ascending order), sets the goal that many positions beyond the contact position, waits 0.5 s and reads the current and
@@ -42,8 +42,8 @@ start when the gripper stands more than 50 positions outside the range of the ya
 2. optionally squeezes an object with increasing goal currents (up to the current limit of the model, 910mA for the
    XC330-T288-T) and reports the current, the position, the temperature and the hardware errors. It stops at a
    hardware error or when the gripper gets warm
-3. squeezes an object with the target a few states beyond the object, like the xbox controller does, to check how
-   much of the goal current that uses
+3. squeezes an object with the target 30, 60 and 85 positions beyond the object (85 is what the gamepad commands at
+   most), to check how much of the goal current that uses
 4. disables the torque of the gripper
 
 The gripper is open at state 0 and closed at state 100.
@@ -81,8 +81,10 @@ OTHER_CURRENT_LIMITS = {'XC330-M288': 910, 'XC330-M181': 910, 'XL330-M077': 1750
 DEFAULT_CURRENT_LIMIT = 910  # mA
 # the squeeze tests stop when the gripper gets warmer than this, it shuts down at 70C
 MAX_TEMPERATURE = 55  # degrees celsius
-# how far the target is beyond the object, the xbox controller uses GRIPPER_MAX_LEAD
-LEADS = [10, 20, 25]  # gripper states
+# how far the target is beyond the object in the interactive lead test; the last is the cap of the gamepad,
+# GRIPPER_MAX_LEAD_POSITIONS of xbox_robot_controller.py. It is a literal because importing that module loads pybullet,
+# scipy and the kinematics, which a calibration script should not do (a test checks that the two are the same)
+LEADS = [30, 60, 85]  # positions
 SQUEEZE_TIME = 3.0  # seconds
 MOVE_TIMEOUT = 5.0  # seconds
 OPEN_STATE = 0
@@ -309,10 +311,16 @@ def squeeze_tests(handler: ServoHandler, goal_currents: Sequence[int]) -> bool:
 
 
 def lead_tests(handler: ServoHandler) -> None:
-    """squeeze with the target a few states beyond the object, like the xbox controller does"""
-    goal_current = handler.get_servo(GRIPPER_ID).goal_current
-    print('\nsqueezing with the target a few states beyond the object, with the configured goal current of {}mA'
-          .format(goal_current))
+    """
+    squeeze with the target LEADS positions beyond the object, up to what the gamepad commands. The positions are
+    converted to states (with the positions per state of the calibrated range of the gripper) because the target is
+    set by state, which also keeps it within the range of the gripper
+    """
+    servo = handler.get_servo(GRIPPER_ID)
+    goal_current = servo.goal_current
+    positions_per_state = abs(servo.max_position - servo.min_position) / abs(servo.max_angle - servo.min_angle)
+    print('\nsqueezing with the target {} positions beyond the object, with the configured goal current of {}mA'
+          .format(', '.join(str(lead) for lead in LEADS), goal_current))
     move_and_wait(handler, CLOSED_STATE)
     contact_state = gripper_state(handler)
     if contact_state is None:
@@ -321,12 +329,12 @@ def lead_tests(handler: ServoHandler) -> None:
     print('the object stops the gripper at state {:.1f}'.format(contact_state))
 
     for lead in LEADS:
-        target = min(contact_state + lead, CLOSED_STATE)
+        target = min(contact_state + lead / positions_per_state, CLOSED_STATE)
         handler.set_angle(GRIPPER_ID, target)
         handler.move_to_angles()
         sleep(0.5)
         average_current, peak_current = measure_current(handler, 1.5)
-        print('target {} beyond the object: average {:.0f}mA ({:.0f}% of the goal current), peak {}mA'.format(
+        print('target {} positions beyond the object: average {:.0f}mA ({:.0f}% of the goal current), peak {}mA'.format(
             lead, average_current, 100 * average_current / goal_current, peak_current))  # type: ignore[operator]  # the gripper has a goal current in the servo config
         if print_status(handler, 'squeezing'):
             print('the gripper shut down, stopping the lead tests')

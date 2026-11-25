@@ -66,8 +66,9 @@ servos:
   # 0 is open and 100 is closed, it closes freely all the way. When an object blocks the gripper, it squeezes with
   # about 2mA per position the target is beyond the object (with p=500), up to the goal current. Squeezing a pen was
   # tested without hardware errors and without heating up up to about 580mA, the most it reaches with the target at
-  # the closed end. To squeeze harder, raise the goal current together with GRIPPER_MAX_LEAD of the xbox controller,
-  # it needs about goal current / 20 states (1 state is 10 positions). The current limit of the XL330-M288 is 1750mA
+  # the closed end. To squeeze harder, raise the goal current together with GRIPPER_MAX_LEAD_POSITIONS of the xbox
+  # controller, it needs about goal current / 20 states (1 state is 10 positions). The current limit of the XL330-M288
+  # is 1750mA
   7:
     name: gripper
     model: XL330-M288
