@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -56,12 +57,16 @@ class FakeHandler:
     mechanical ends (the open end and the closed end, in either order); it draws the goal current register when it
     pushes against an end, WORKING_CURRENT when it moves and IDLE_CURRENT otherwise. Time only passes in sleep(). The
     writes are recorded in calls, in order.
+
+    With a stiffness (mA per position) the closed end is an object: when it blocks the gripper, the current is
+    min(goal current, stiffness * (goal - position)). The object gives way give positions per 100 mA of current.
     """
     SPEED = 1500.0  # positions per second
     WORKING_CURRENT = 25
     IDLE_CURRENT = 5
 
-    def __init__(self, open_position=1086, closed_end=1900, open_end=1040, positions=(1024, 2048), torque=False):
+    def __init__(self, open_position=1086, closed_end=1900, open_end=1040, positions=(1024, 2048), torque=False,
+                 stiffness=None, give=0.0):
         self.servo = make_servo(positions)
         self.now = 0.0
         self.position = float(open_position)
@@ -69,6 +74,8 @@ class FakeHandler:
         self.lower_end = min(open_end, closed_end)
         self.upper_end = max(open_end, closed_end)
         self.torque = torque
+        self.stiffness = stiffness
+        self.give = give
         self.goal_current_register = 910  # what the servo holds until it is written, its maximum
         self.goal_current_at_torque_on = None
         self.ignore_goal_current_writes = False
@@ -78,6 +85,8 @@ class FakeHandler:
         self.failing_reads = 0  # the next reads of the position that fail
         self.on_read = None  # called with the handler at every read of the position, once
         self.calls: list[tuple] = []
+        self.goal_log: list[tuple[int, int]] = []  # (goal, goal current register) at every goal write
+        self.register_reads: list[tuple[int, int]] = []  # (number of calls so far, value) of every register read
         self.port_handler = object()
         self.packet_handler = SimpleNamespace(read2ByteTxRx=self.read_2_bytes)
 
@@ -95,12 +104,27 @@ class FakeHandler:
         new_position = max(self.lower_end, min(self.upper_end, self.position + move))
         blocked = abs(new_position - self.position - move) > 1e-9 and abs(self.goal - new_position) > 1
         self.position = new_position
-        if blocked:
+        if blocked and self.stiffness is not None:
+            self.press_against_object(1 if new_position >= self.upper_end else -1)
+        elif blocked:
             self.current = self.goal_current_register
         elif abs(move) > 0.5:
             self.current = self.WORKING_CURRENT
         else:
             self.current = self.IDLE_CURRENT
+
+    def press_against_object(self, direction):
+        """
+        the gripper is blocked by the object, whose surface is at self.position, and squeezes it in the closing
+        direction by give * current / 100 positions: with the distance d between the goal and the surface, the current c
+        is stiffness * (d - give * c / 100), at most the goal current register
+        """
+        surface = self.position
+        give = self.give / 100.0
+        distance = (self.goal - surface) * direction
+        current = min(self.goal_current_register, self.stiffness * distance / (1.0 + self.stiffness * give))
+        self.current = round(max(current, 0.0))
+        self.position = surface + direction * give * self.current
 
     # reads
     def get_servo(self, servo_id):
@@ -133,6 +157,7 @@ class FakeHandler:
 
     def read_2_bytes(self, port_handler, servo_id, address):
         if address == cfg.ADDR_GOAL_CURRENT:
+            self.register_reads.append((len(self.calls), self.goal_current_register))
             return self.goal_current_register, 0, 0
         return self.current, 0, 0
 
@@ -174,6 +199,7 @@ class FakeHandler:
 
     def move_servo_to_pos(self, servo_id, position):
         self.calls.append(('goal', position))
+        self.goal_log.append((position, self.goal_current_register))
         self.goal = position
         return True
 
@@ -710,6 +736,521 @@ class InteractiveTests(unittest.TestCase):
         self.assertFalse(quietly(gripper_test.gripper_is_calibrated, handler)[0])
 
 
+def measure(handler, **kwargs):
+    kwargs.setdefault('yes', True)
+    kwargs.setdefault('ask', no_questions)
+    return quietly(gripper_test.measure_lead, handler, sleep=handler.sleep, clock=handler.clock, **kwargs)
+
+
+def measure_with_rows(handler, **kwargs):
+    """returns the code, the output and the rows that measure_leads gave (None when it was not reached)"""
+    captured = []
+    original = gripper_test.measure_leads
+
+    def spy(*args, **kw):
+        rows = original(*args, **kw)
+        captured.append(rows)
+        return rows
+    with mock.patch.object(gripper_test, 'measure_leads', spy):
+        code, out = measure(handler, **kwargs)
+    return code, out, captured[0] if captured else None
+
+
+def goals_after_yaml_current(handler):
+    """the goals written after the goal current of the yaml (150 mA)"""
+    start = handler.calls.index(('goal_current', 150))
+    return [call[1] for call in handler.calls[start:] if call[0] == 'goal']
+
+
+def make_row(lead, distance, mean_current, goal_current=150):
+    return gripper_test.LeadRow(lead, 1500.0, distance, mean_current, int(mean_current),
+                                100.0 * mean_current / goal_current)
+
+
+LEADS = [2, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100]
+
+
+class MeasureLeadTests(unittest.TestCase):
+    """the gripper holds an object at position 1500 that pushes back with 3 mA per position unless told otherwise"""
+
+    @staticmethod
+    def object_in_the_gripper(**kwargs):
+        kwargs.setdefault('closed_end', 1500)
+        kwargs.setdefault('stiffness', 3.0)
+        return FakeHandler(**kwargs)
+
+    def test_contact_is_found_at_the_object(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler)
+        self.assertEqual(code, 0)
+        self.assertIn('the object stops the gripper at position 1500', out)
+        self.assertEqual([row.position for row in rows], [1500.0] * len(rows))
+
+    def test_goal_current_is_the_gentle_one_while_closing_and_the_one_of_the_yaml_while_the_leads_are_measured(self):
+        handler = self.object_in_the_gripper()
+        measure(handler)
+        first_lead = [goal for goal, register in handler.goal_log].index(1502)
+        self.assertGreater(first_lead, 10)  # the closing wrote many goals
+        self.assertTrue(all(register == 60 for goal, register in handler.goal_log[:first_lead]))
+        self.assertTrue(all(register == 150 for goal, register in handler.goal_log[first_lead:]))
+        self.assertEqual(handler.goal_current_at_torque_on, 60)
+
+    def test_each_goal_current_is_read_back_before_it_is_used(self):
+        handler = self.object_in_the_gripper()
+        measure(handler)
+        for value in (60, 150):
+            written = handler.calls.index(('goal_current', value))
+            self.assertIn((written + 1, value), handler.register_reads, value)  # the read straight after the write
+        self.assertLess(handler.calls.index(('goal_current', 60)), handler.calls.index(('torque', True)))
+        # the current is raised after the goal is back at the object, before the first lead
+        raised = handler.calls.index(('goal_current', 150))
+        self.assertEqual(handler.calls[raised - 1], ('goal', 1500))
+        self.assertEqual(handler.calls[raised + 1], ('goal', 1502))
+
+    def test_current_option_is_the_goal_current_while_closing(self):
+        handler = self.object_in_the_gripper()
+        measure(handler, current=40)
+        self.assertEqual(handler.goal_current_at_torque_on, 40)
+        self.assertNotIn(('goal_current', 60), handler.calls)
+
+    def test_rows_have_the_commanded_leads_in_ascending_order(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler, leads=[50, 10, 30, 10])
+        self.assertEqual([row.lead for row in rows], [10, 30, 50])
+        self.assertEqual(goals_after_yaml_current(handler)[:3], [1510, 1530, 1550])
+
+    def test_default_leads(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler)
+        self.assertEqual([row.lead for row in rows], LEADS)
+        self.assertEqual(gripper_test.DEFAULT_LEADS, LEADS)
+
+    def test_distances_and_currents_of_the_rows(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler)
+        for row in rows:
+            self.assertEqual(row.distance, row.lead)  # the object does not give way
+            self.assertAlmostEqual(row.mean_current, min(150, 3 * row.lead))
+            self.assertEqual(row.peak_current, min(150, 3 * row.lead))
+            self.assertAlmostEqual(row.percent, 100 * min(150, 3 * row.lead) / 150)
+
+    def test_object_that_gives_way_shows_in_the_distance(self):
+        handler = self.object_in_the_gripper(give=10.0)  # 10 positions per 100 mA
+        code, out, rows = measure_with_rows(handler, leads=[10, 20, 30, 40])
+        self.assertEqual([row.lead for row in rows], [10, 20, 30, 40])
+        contact = int(re.search(r'stops the gripper at position (\d+)', out).group(1))
+        self.assertLess(contact, 1510)  # the closing with 60 mA already squeezed the object a little
+        for row in rows:
+            self.assertGreater(row.position, 1500)
+            self.assertEqual(row.distance, contact + row.lead - row.position)
+            self.assertLess(row.distance, row.lead)  # the gripper squeezes the object, it is not at the contact
+            # the object pushes back 3 mA per position of what the servo sees, the positions are whole
+            self.assertAlmostEqual(row.mean_current, 3 * row.distance, delta=2)
+
+    def test_peak_current_is_the_largest_read_and_the_mean_the_average(self):
+        handler = self.object_in_the_gripper()
+        handler.torque = True
+        handler.goal_current_register = 150
+        handler.goal = 1500
+        handler.position = 1500.0
+        levels = iter([10, -40, 20] * 20)  # the sign is dropped
+
+        def noisy(servo_ids=None):  # a current that changes with every read
+            return {GRIPPER: next(levels)}
+        handler.read_present_current = noisy
+        rows, out = quietly(gripper_test.measure_leads, handler, 1500, 1, [10], 150, handler.sleep, handler.clock)
+        self.assertEqual(rows[0].peak_current, 40)
+        self.assertGreater(rows[0].mean_current, 10)
+        self.assertLess(rows[0].mean_current, 40)
+
+    def test_next_goal_comes_one_and_a_half_seconds_after_the_previous_one(self):
+        handler = self.object_in_the_gripper()
+        times = {}
+        original = handler.move_servo_to_pos
+
+        def timed(servo_id, position):
+            times.setdefault(position, handler.now)
+            return original(servo_id, position)
+        handler.move_servo_to_pos = timed
+        measure(handler, leads=[10, 20, 30])
+        for earlier, later in ((1510, 1520), (1520, 1530)):
+            self.assertGreaterEqual(times[later] - times[earlier], 1.5)  # 0.5 s settle, 1.0 s of reads
+            self.assertLess(times[later] - times[earlier], 1.75)
+
+    def test_current_and_position_are_read_about_every_100_ms_for_one_second(self):
+        handler = self.object_in_the_gripper()
+        handler.torque = True
+        handler.goal_current_register = 150
+        handler.goal = 1500
+        handler.position = 1500.0
+        reads = []
+
+        def count(h):
+            reads.append(h.now)
+            h.on_read = count
+        handler.on_read = count
+        quietly(gripper_test.measure_leads, handler, 1500, 1, [10, 20], 150, handler.sleep, handler.clock)
+        self.assertGreaterEqual(len(reads), 18)
+        self.assertLessEqual(len(reads), 22)
+        self.assertGreaterEqual(reads[0], 0.5 + 0.09)  # not before the settle time
+        self.assertAlmostEqual(reads[1] - reads[0], 0.1)
+
+    def test_whole_squeeze_from_50_positions_and_the_recommendation(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler)
+        self.assertEqual(code, 0)
+        self.assertEqual(gripper_test.saturation_distance(rows), 50)
+        self.assertAlmostEqual(gripper_test.current_per_position(rows), 3.0)
+        self.assertEqual(gripper_test.recommended_lead(50), 65)
+        self.assertIn('the squeeze is whole (at least 95% of the goal current) from 50.0 positions', out)
+        self.assertIn('grows by 3.00 mA per position', out)
+        self.assertIn('lead for the gamepad: 65 positions (6.3 states', out)  # 65 * 100 / 1024 of the fake yaml
+        self.assertIn('the goal current is 150 mA', out)
+
+    def test_table_has_a_line_per_lead(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler, leads=[10, 50])
+        lines = out.splitlines()
+        header = [i for i, line in enumerate(lines) if line.split()[:3] == ['lead', 'goal', '-']]
+        self.assertEqual(len(header), 1)
+        table = lines[header[0] + 1:header[0] + 3]
+        self.assertEqual(table[0].split(), ['10', '10.0', '30.0', '20', '30', '1500.0'])
+        self.assertEqual(table[1].split(), ['50', '50.0', '150.0', '100', '150', '1500.0'])
+
+    def test_squeeze_that_is_not_whole_within_the_leads_says_so(self):
+        handler = self.object_in_the_gripper()
+        code, out, rows = measure_with_rows(handler, leads=[2, 5, 10, 20])
+        self.assertEqual(code, 0)  # the table was measured
+        self.assertIsNone(gripper_test.saturation_distance(rows))
+        self.assertIn('did not reach 95% of the goal current within the leads tried', out)
+        self.assertNotIn('lead for the gamepad', out)
+        self.assertIn('grows by 3.00 mA per position', out)
+
+    def test_stiff_object_has_a_small_whole_squeeze_distance(self):
+        handler = self.object_in_the_gripper(stiffness=30.0)  # 150 mA from 5 positions
+        code, out, rows = measure_with_rows(handler)
+        self.assertEqual(gripper_test.saturation_distance(rows), 5)
+        self.assertIn('lead for the gamepad: 10 positions', out)  # 5 * 1.25 = 6.25
+
+    def test_leads_beyond_the_range_of_the_servo_end_the_measuring_but_keep_the_smaller_ones(self):
+        handler = self.object_in_the_gripper(open_position=3900, open_end=3800, closed_end=4040)
+        code, out, rows = measure_with_rows(handler, leads=[10, 50, 100, 200])
+        self.assertEqual(code, 0)
+        self.assertEqual([row.lead for row in rows], [10, 50])
+        self.assertIn('outside the range of the servo', out)
+        self.assertLessEqual(max(handler.goals()), cfg.MAX_POSITION)
+
+    def test_closing_down(self):
+        handler = self.object_in_the_gripper(open_position=1086, closed_end=900, open_end=1100)
+        code, out, rows = measure_with_rows(handler, closing='down')
+        self.assertEqual(code, 0)
+        self.assertIn('the object stops the gripper at position 900', out)
+        self.assertEqual([row.distance for row in rows], LEADS)
+        self.assertEqual(goals_after_yaml_current(handler)[:2], [898, 895])
+        self.assertEqual(gripper_test.saturation_distance(rows), 50)
+        self.assertLessEqual(abs(handler.position - 1086), gripper_test.ARRIVED)
+
+    def test_gripper_is_opened_again_and_the_torque_is_off(self):
+        handler = self.object_in_the_gripper()
+        measure(handler)
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+        self.assertLessEqual(abs(handler.position - 1086), gripper_test.ARRIVED)
+        self.assertEqual(handler.goal, 1086)
+        goals = goals_after_yaml_current(handler)
+        self.assertEqual(goals[:len(LEADS)], [1500 + lead for lead in LEADS])
+        self.assertEqual(goals[len(LEADS)], 1500)  # it stops pushing first
+        back = goals[len(LEADS):]
+        self.assertTrue(all(abs(b - a) <= 10 for a, b in zip(back, back[1:])))  # and opens in small steps
+
+    def test_output_says_what_goal_current_the_servo_is_left_with(self):
+        handler = self.object_in_the_gripper()
+        code, out = measure(handler)
+        self.assertIn('left with a goal current of 150 mA', out)
+        self.assertIn('writes the goal current of the yaml when it starts', out)
+        self.assertEqual(handler.goal_current_register, 150)
+
+    def test_exception_during_the_leads_holds_where_it_is_and_switches_the_torque_off(self):
+        handler = self.object_in_the_gripper()
+
+        def explode(h):
+            if h.goal_current_register == 150 and h.torque and h.goal >= 1530:  # while the leads are measured
+                raise RuntimeError('the usb adapter fell out')
+            h.on_read = explode
+        handler.on_read = explode
+        with self.assertRaises(RuntimeError):
+            measure(handler)
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+        self.assertLessEqual(abs(handler.goal - handler.position), 1)  # not pushing any more
+        self.assertGreater(handler.goal, 1086 + 300)  # and not opened either, the gripper holds
+
+    def test_ctrl_c_during_the_leads_holds_where_it_is_and_switches_the_torque_off(self):
+        handler = self.object_in_the_gripper()
+
+        def interrupt(h):
+            if h.goal_current_register == 150 and h.torque and h.goal >= 1530:  # while the leads are measured
+                raise KeyboardInterrupt
+            h.on_read = interrupt
+        handler.on_read = interrupt
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+        self.assertLessEqual(abs(handler.goal - handler.position), 1)
+        self.assertNotIn('the squeeze is whole', out)
+        self.assertIn('left with a goal current of 150 mA', out)
+
+    def test_hardware_error_between_two_leads_ends_the_measuring(self):
+        handler = self.object_in_the_gripper()
+
+        def fail(h):
+            if h.goal_current_register == 150 and h.torque and h.goal >= 1520:  # the fifth lead
+                h.errors = ['overload']
+            else:
+                h.on_read = fail
+        handler.on_read = fail
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertIn('overload', out)
+        self.assertEqual(goals_after_yaml_current(handler), [1502, 1505, 1510, 1515, 1520])
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+        self.assertNotIn('the squeeze is whole', out)
+
+    def test_warm_servo_between_two_leads_ends_the_measuring(self):
+        handler = self.object_in_the_gripper()
+
+        def heat(h):
+            if h.goal_current_register == 150 and h.torque and h.goal >= 1520:
+                h.temperature = gripper_test.MAX_TEMPERATURE + 1
+            else:
+                h.on_read = heat
+        handler.on_read = heat
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertIn('warmer than', out)
+        self.assertEqual(goals_after_yaml_current(handler), [1502, 1505, 1510, 1515, 1520])
+        self.assertFalse(handler.torque)
+
+    def test_three_failed_reads_in_a_row_end_the_measuring(self):
+        handler = self.object_in_the_gripper()
+
+        def outage(h):
+            if h.goal_current_register == 150 and h.torque and h.goal >= 1520:
+                h.failing_reads = 3
+            else:
+                h.on_read = outage
+        handler.on_read = outage
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+
+    def test_stop_within_the_first_30_positions_returns_1_without_squeezing(self):
+        handler = self.object_in_the_gripper(closed_end=1100)
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertIn('did not move in that direction', out)
+        self.assertNotIn(('goal_current', 150), handler.calls)  # the squeeze current is never written
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+        self.assertEqual(handler.goal, 1086)
+        self.assertIn('left with a goal current of 60 mA', out)
+
+    def test_no_contact_within_the_travel_returns_1_without_squeezing(self):
+        handler = self.object_in_the_gripper(closed_end=4000)
+        code, out = measure(handler, max_travel=300)
+        self.assertEqual(code, 1)
+        self.assertIn('did not stop within 300 positions', out)
+        self.assertNotIn(('goal_current', 150), handler.calls)
+        self.assertFalse(handler.torque)
+        self.assertEqual(handler.calls[-1], ('torque', False))
+        self.assertLessEqual(abs(handler.position - 1086), gripper_test.ARRIVED)
+
+    def test_failed_write_of_the_goal_current_of_the_yaml_opens_again_and_returns_1(self):
+        for acknowledged in (True, False):
+            handler = self.object_in_the_gripper()
+            original = handler.set_goal_current
+
+            def set_goal_current(servo_id, value, original=original, handler=handler, acknowledged=acknowledged):
+                if value == 150:  # the register is not changed, and the write is or is not acknowledged
+                    handler.calls.append(('goal_current', value))
+                    return acknowledged
+                return original(servo_id, value)
+            handler.set_goal_current = set_goal_current
+            code, out = measure(handler)
+            self.assertEqual(code, 1, acknowledged)
+            self.assertIn('not squeezing', out)
+            self.assertNotIn(1502, handler.goals())  # no lead was tried
+            self.assertFalse(handler.torque)
+            self.assertEqual(handler.calls[-1], ('torque', False))
+            self.assertLessEqual(abs(handler.position - 1086), gripper_test.ARRIVED)  # opened again
+            self.assertIn('left with a goal current of 60 mA', out)
+
+    def test_failed_goal_current_write_before_the_start_does_not_enable_the_torque(self):
+        handler = self.object_in_the_gripper()
+        handler.ignore_goal_current_writes = True
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertNotIn(('torque', True), handler.calls)
+
+    def test_hardware_error_torque_on_or_a_failed_read_before_the_start_refuse_without_writing(self):
+        handler = self.object_in_the_gripper()
+        handler.errors = ['overload']
+        self.assertEqual(measure(handler)[0], 1)
+        self.assertEqual(handler.calls, [])
+        handler = self.object_in_the_gripper(torque=True)
+        self.assertEqual(measure(handler)[0], 1)
+        self.assertEqual(handler.calls, [])
+        handler = self.object_in_the_gripper()
+        handler.failing_reads = 3
+        self.assertEqual(measure(handler)[0], 1)
+        self.assertEqual(handler.calls, [])
+
+    def test_bad_arguments_are_refused_before_anything_is_written(self):
+        for kwargs in ({'leads': [0, 5]}, {'leads': [-3]}, {'leads': []}, {'current': 0}, {'current': 151},
+                       {'step': 0}, {'max_travel': 30}):
+            handler = self.object_in_the_gripper()
+            self.assertEqual(measure(handler, **kwargs)[0], 1, kwargs)
+            self.assertEqual(handler.calls, [], kwargs)
+
+    def test_a_gripper_without_a_goal_current_in_the_yaml_is_refused(self):
+        handler = self.object_in_the_gripper()
+        handler.servo.goal_current = None
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertIn('no goal_current', out)
+        self.assertEqual(handler.calls, [])
+
+    def test_torque_that_cannot_be_confirmed_off_returns_1(self):
+        handler = self.object_in_the_gripper()
+        handler.read_torque_enabled = lambda ids=None: {GRIPPER: ('torque', True) in handler.calls}
+        code, out = measure(handler)
+        self.assertEqual(code, 1)
+        self.assertIn('COULD NOT CONFIRM', out)
+
+    def test_question_before_moving_is_asked_without_yes_and_nothing_happens_on_no(self):
+        handler = self.object_in_the_gripper()
+        questions = []
+        code, out = quietly(gripper_test.measure_lead, handler, yes=False, ask=lambda q: questions.append(q) or 'no',
+                            sleep=handler.sleep, clock=handler.clock)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(questions), 1)
+        self.assertIn('type yes to continue', questions[0])
+        self.assertEqual(handler.calls, [])
+
+    def test_typed_yes_starts_it(self):
+        handler = self.object_in_the_gripper()
+        code, out = quietly(gripper_test.measure_lead, handler, yes=False, ask=lambda q: 'yes', sleep=handler.sleep,
+                            clock=handler.clock)
+        self.assertEqual(code, 0)
+        self.assertIn(('torque', True), handler.calls)
+
+
+class LeadArithmeticTests(unittest.TestCase):
+
+    def test_saturation_distance_is_the_smallest_distance_at_95_percent(self):
+        rows = [make_row(10, 10, 30), make_row(40, 38, 120), make_row(50, 49, 143), make_row(60, 59, 150)]
+        self.assertEqual(gripper_test.saturation_distance(rows), 49)
+
+    def test_saturation_distance_with_one_row(self):
+        self.assertEqual(gripper_test.saturation_distance([make_row(50, 48, 150)]), 48)
+        self.assertIsNone(gripper_test.saturation_distance([make_row(10, 10, 30)]))
+
+    def test_saturation_distance_with_all_rows_saturated_is_the_smallest_distance(self):
+        rows = [make_row(5, 5, 150), make_row(10, 10, 150), make_row(20, 20, 150)]
+        self.assertEqual(gripper_test.saturation_distance(rows), 5)
+
+    def test_saturation_distance_with_no_row_saturated_is_none(self):
+        rows = [make_row(5, 5, 15), make_row(10, 10, 30), make_row(20, 20, 60)]
+        self.assertIsNone(gripper_test.saturation_distance(rows))
+        self.assertIsNone(gripper_test.saturation_distance([]))
+
+    def test_95_percent_counts_and_just_below_does_not(self):
+        self.assertEqual(gripper_test.saturation_distance([make_row(10, 10, 142.5)]), 10)
+        self.assertIsNone(gripper_test.saturation_distance([make_row(10, 10, 142.4)]))
+
+    def test_distance_not_the_lead_is_what_counts(self):
+        rows = [make_row(60, 41, 150), make_row(80, 62, 150)]  # the object gave way
+        self.assertEqual(gripper_test.saturation_distance(rows), 41)
+
+    def test_current_per_position_of_the_rows_below_saturation(self):
+        rows = [make_row(10, 10, 30), make_row(20, 20, 60), make_row(40, 40, 120), make_row(50, 50, 150),
+                make_row(80, 80, 150)]
+        self.assertAlmostEqual(gripper_test.current_per_position(rows), 3.0)
+
+    def test_current_per_position_is_a_least_squares_line_through_the_origin(self):
+        rows = [make_row(10, 10, 35), make_row(20, 20, 55)]
+        self.assertAlmostEqual(gripper_test.current_per_position(rows), (10 * 35 + 20 * 55) / (100 + 400))
+
+    def test_current_per_position_needs_two_rows_below_saturation(self):
+        self.assertIsNone(gripper_test.current_per_position([make_row(10, 10, 30)]))  # one row
+        self.assertIsNone(gripper_test.current_per_position([make_row(10, 10, 30), make_row(50, 50, 150)]))
+        self.assertIsNone(gripper_test.current_per_position([make_row(50, 50, 150), make_row(80, 80, 150)]))  # none
+        self.assertIsNone(gripper_test.current_per_position([]))
+
+    def test_90_percent_is_already_saturation(self):
+        rows = [make_row(10, 10, 30), make_row(20, 20, 60), make_row(45, 45, 135)]  # the last one is at 90%
+        self.assertAlmostEqual(gripper_test.current_per_position(rows), 3.0)
+        rows = [make_row(10, 10, 30), make_row(45, 45, 135)]
+        self.assertIsNone(gripper_test.current_per_position(rows))
+
+    def test_rows_without_a_distance_are_not_on_the_slope(self):
+        rows = [make_row(2, 0, 5), make_row(5, -1, 4), make_row(10, 10, 30), make_row(20, 20, 60)]
+        self.assertAlmostEqual(gripper_test.current_per_position(rows), 3.0)
+
+    def test_recommended_lead_is_the_distance_times_1_25_rounded_up_to_5_positions(self):
+        self.assertEqual(gripper_test.recommended_lead(50), 65)  # 62.5
+        self.assertEqual(gripper_test.recommended_lead(40), 50)  # 50.0 exactly
+        self.assertEqual(gripper_test.recommended_lead(48), 60)
+        self.assertEqual(gripper_test.recommended_lead(49.3), 65)  # 61.6
+        self.assertEqual(gripper_test.recommended_lead(100), 125)
+        self.assertEqual(gripper_test.recommended_lead(2), 5)  # 2.5
+        self.assertEqual(gripper_test.recommended_lead(0), 5)  # never zero
+
+    def test_states_per_position_follows_the_positions_of_the_yaml(self):
+        self.assertAlmostEqual(gripper_test.states_per_position(make_servo((1024, 2048))), 100 / 1024)
+        self.assertAlmostEqual(gripper_test.states_per_position(make_servo((1086, 2037))), 100 / 951)
+        self.assertAlmostEqual(gripper_test.states_per_position(make_servo((2048, 1024))), 100 / 1024)
+        self.assertAlmostEqual(65 * gripper_test.states_per_position(make_servo((1086, 2037))), 6.83, places=2)
+
+    def test_report_with_a_whole_squeeze(self):
+        rows = [make_row(10, 10, 30), make_row(40, 40, 120), make_row(50, 50, 150)]
+        report = gripper_test.lead_report(rows, 150, 100 / 951)
+        self.assertIn('from 50.0 positions', report)
+        self.assertIn('grows by 3.00 mA per position', report)
+        self.assertIn('lead for the gamepad: 65 positions (6.8 states', report)
+        self.assertEqual(len(gripper_test.lead_table(rows).splitlines()), 4)
+
+    def test_report_with_all_rows_saturated_has_no_slope(self):
+        rows = [make_row(10, 10, 150), make_row(20, 20, 150)]
+        report = gripper_test.lead_report(rows, 150, 100 / 951)
+        self.assertIn('from 10.0 positions', report)
+        self.assertIn('no mA per position', report)
+        self.assertIn('lead for the gamepad: 15 positions', report)  # 12.5
+
+    def test_report_with_no_row_saturated_has_no_recommendation(self):
+        rows = [make_row(10, 10, 30), make_row(20, 20, 60)]
+        report = gripper_test.lead_report(rows, 150, 100 / 951)
+        self.assertIn('did not reach 95%', report)
+        self.assertIn('(largest distance 20.0 positions)', report)
+        self.assertNotIn('lead for the gamepad', report)
+        self.assertIn('grows by 3.00 mA per position', report)
+
+    def test_report_with_one_row(self):
+        report = gripper_test.lead_report([make_row(10, 10, 30)], 150, 100 / 951)
+        self.assertIn('no mA per position', report)
+        self.assertNotIn('lead for the gamepad', report)
+
+    def test_check_lead_arguments(self):
+        servo = make_servo()
+        self.assertIsNone(gripper_test.check_lead_arguments(servo, [1, 50]))
+        self.assertIsNotNone(gripper_test.check_lead_arguments(servo, []))
+        self.assertIsNotNone(gripper_test.check_lead_arguments(servo, [5, 0]))
+        self.assertIn('goal_current', gripper_test.check_lead_arguments(make_servo(goal_current=None), [5]))
+
+
 class MainTests(unittest.TestCase):
 
     def setUp(self):
@@ -759,6 +1300,74 @@ class MainTests(unittest.TestCase):
                        ['--closing', 'up']):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 gripper_test.main(option + ['--config', self.path])
+
+    def test_measure_lead_runs_and_closes_the_port(self):
+        handler = FakeHandler(closed_end=1500, stiffness=3.0)
+        code, out, setup = self.run_main(handler, ['--measure-lead', '--yes', '--current', '40', '--step', '20',
+                                                   '--leads', '10', '50', '30'])
+        self.assertEqual(code, 0)
+        self.assertEqual(handler.goal_current_at_torque_on, 40)
+        self.assertEqual(handler.goals()[0], 1106)  # the step option
+        self.assertEqual(goals_after_yaml_current(handler)[:3], [1510, 1530, 1550])
+        self.assertIn('from 50.0 positions', out)
+        self.assertIn('lead for the gamepad: 65 positions', out)
+        self.port_handler.closePort.assert_called_once_with()
+        self.assertFalse(handler.torque)
+
+    def test_measure_lead_without_leads_uses_the_default_ones(self):
+        handler = FakeHandler(closed_end=1500, stiffness=3.0)
+        code, out, setup = self.run_main(handler, ['--measure-lead', '--yes'])
+        self.assertEqual(code, 0)
+        self.assertEqual(goals_after_yaml_current(handler)[:11], [1500 + lead for lead in gripper_test.DEFAULT_LEADS])
+
+    def test_measure_lead_closing_option(self):
+        handler = FakeHandler(open_position=1086, closed_end=900, open_end=1100, stiffness=3.0)
+        code, out, setup = self.run_main(handler, ['--measure-lead', '--yes', '--closing', 'down'])
+        self.assertEqual(code, 0)
+        self.assertIn('the object stops the gripper at position 900', out)
+
+    def test_measure_lead_returns_1_when_nothing_was_measured(self):
+        handler = FakeHandler(closed_end=1100, stiffness=3.0)
+        code, out, setup = self.run_main(handler, ['--measure-lead', '--yes'])
+        self.assertEqual(code, 1)
+        self.port_handler.closePort.assert_called_once_with()
+
+    def test_bad_measure_lead_arguments_are_refused_before_the_port_is_opened(self):
+        for options in (['--leads', '0'], ['--leads', '10', '-5'], ['--current', '200'], ['--step', '0']):
+            handler = FakeHandler(closed_end=1500, stiffness=3.0)
+            code, out, setup = self.run_main(handler, ['--measure-lead', '--yes'] + options)
+            self.assertEqual(code, 1, options)
+            setup.assert_not_called()
+            self.assertEqual(handler.calls, [], options)
+
+    def test_leads_need_measure_lead(self):
+        for options in (['--leads', '10'], ['--calibrate', '--leads', '10']):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+                gripper_test.main(options + ['--config', self.path])
+            self.assertIn('--leads only works with --measure-lead', stderr.getvalue())
+
+    def test_measure_lead_and_calibrate_exclude_each_other(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            gripper_test.main(['--measure-lead', '--calibrate', '--config', self.path])
+        self.assertIn('can not be used together', stderr.getvalue())
+
+    def test_write_does_not_apply_to_measure_lead(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            gripper_test.main(['--measure-lead', '--write', '--config', self.path])
+        self.assertIn('--write only works with --calibrate', stderr.getvalue())
+
+    def test_leads_must_be_whole_numbers(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            gripper_test.main(['--measure-lead', '--leads', '2.5', '--config', self.path])
+
+    def test_shared_options_need_a_mode(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            gripper_test.main(['--step', '5', '--config', self.path])
+        self.assertIn('--calibrate or --measure-lead', stderr.getvalue())
 
     def test_interactive_tests_refuse_an_uncalibrated_gripper(self):
         handler = FakeHandler(open_position=3000, open_end=2900, closed_end=3100)

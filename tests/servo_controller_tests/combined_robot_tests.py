@@ -22,6 +22,9 @@ class FakeDynamixelRobot:
         self.velocities.append(velocities)
         return 'moved'
 
+    def gripper_positions_per_state(self):
+        return 9.51
+
     def get_present_currents(self, servo_ids=(1, 2)):
         return {servo_id: 10 for servo_id in servo_ids}
 
@@ -56,6 +59,11 @@ class SimulatedRobotVelocitiesTests(unittest.TestCase):
             self.assertEqual((2, list(range(6))), call.args[:2])
         self.assertEqual(first.kwargs.keys(), second.kwargs.keys())
 
+    def test_the_simulated_robot_does_not_know_the_positions_of_a_gripper_state(self):
+        robot = SimulatedRobotController.__new__(SimulatedRobotController)  # no physics server in a test
+
+        self.assertIsNone(robot.gripper_positions_per_state())
+
 
 class CombinedRobotTests(unittest.TestCase):
 
@@ -63,6 +71,9 @@ class CombinedRobotTests(unittest.TestCase):
         self.dynamixel = FakeDynamixelRobot()
         self.simulated = FakeSimulatedRobot()
         self.robot = CombinedRobot(self.dynamixel, self.simulated)
+
+    def test_the_positions_of_a_gripper_state_are_those_of_the_physical_robot(self):
+        self.assertEqual(9.51, self.robot.gripper_positions_per_state())
 
     def test_moves_go_to_both_robots(self):
         angles = np.array([0, 1, 2, 3, 4, 5, 6], dtype=float)

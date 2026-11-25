@@ -422,6 +422,38 @@ class TestDynamixelRobotController(unittest.TestCase):
         self.bus.unresponsive = {7}
         self.assertIsNone(self.robot.get_gripper_state())
 
+    def test_gripper_positions_per_state_of_the_real_configuration(self):
+        real_config = load_servo_config()
+        self.bus = FakeBus(list(real_config.servos.values()), real_config.buses)
+        self.servo_config = real_config
+
+        # 951 positions, 1086 to 2037, for the 100 states
+        self.assertAlmostEqual(9.51, self.make_robot().gripper_positions_per_state(), places=6)
+
+    def test_gripper_positions_per_state_of_the_test_configuration(self):
+        # 1024 to 2048 for the 100 states
+        self.assertAlmostEqual(10.24, self.robot.gripper_positions_per_state(), places=6)
+
+    def test_gripper_positions_per_state_is_positive_for_a_reversed_range(self):
+        gripper = self.servos[6]
+        gripper.min_position, gripper.max_position = gripper.max_position, gripper.min_position
+
+        self.assertAlmostEqual(10.24, self.robot.gripper_positions_per_state(), places=6)
+
+    def test_gripper_positions_per_state_follows_the_states_of_the_range(self):
+        self.servos[6].max_angle = 50  # the positions of the range are the states 0 to 50
+
+        self.assertAlmostEqual(20.48, self.robot.gripper_positions_per_state(), places=6)
+
+    def test_gripper_positions_per_state_is_none_for_an_empty_range(self):
+        gripper = self.servos[6]
+        gripper.max_position = gripper.min_position
+        self.assertIsNone(self.robot.gripper_positions_per_state())
+
+        gripper.max_position = 2048
+        gripper.max_angle = gripper.min_angle
+        self.assertIsNone(self.robot.gripper_positions_per_state())
+
     def test_reboot_reinitializes_the_servos(self):
         self.bus.memory[1][cfg.ADDR_P:cfg.ADDR_P + 2] = bytes(2)
         with mock.patch('src.robot_controllers.dynamixel_robot.servo_handler.time.sleep'):

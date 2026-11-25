@@ -76,6 +76,10 @@ class AbstractRobotController(ABC):
         """returns the actual state of the gripper (0 to 100), or None if it is unknown"""
         return None
 
+    def gripper_positions_per_state(self) -> float | None:
+        """returns how many servo positions one state of the gripper is, or None if the robot has no such servo"""
+        return None
+
     def get_angle_limits(self) -> dict[int, tuple[float, float]] | None:
         """returns a mapping of joint number to the (min angle, max angle) the joint can reach, or None if unknown"""
         return None

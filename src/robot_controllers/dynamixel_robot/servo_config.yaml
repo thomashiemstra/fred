@@ -126,8 +126,8 @@ servos:
       max_positions: 30
       pwm_per_degree_per_second: 2.50
       pwm_for_friction: 13.2  # 23 November 2026, run tune_joint5_20261123_2300
-  # an XC330-T288-T on the 12 V bus since 11 November 2026, in position mode since 18 November. The positions have to
-  # be calibrated for the new mounting
+  # an XC330-T288-T on the 12 V bus since 11 November 2026, in position mode since 18 November. The gripper is
+  # mounted directly on its horn, so its zero needs no calibration
   6:
     name: wrist 3
     model: XC330-T288-T
@@ -150,7 +150,10 @@ servos:
   # the open end takes more than that. The grip, tested that day with gripper_test: closing empty it stops at 2032
   # with 11 mA, so it does not push against its closed end. On an object it holds the goal current whatever the
   # target is beyond it (150 mA at 10, 20 and 25 states). It draws no more than about 640 mA whatever the goal
-  # current, and from 600 mA the supply at the servo sags from 11.5 to 10.6 V, so stay well below that
+  # current, and from 600 mA the supply at the servo sags from 11.5 to 10.6 V, so stay well below that. The squeeze
+  # grows by 2.39 mA per position the target is beyond the object and is whole (150 mA) from about 65 positions
+  # (gripper_test --measure-lead); the gamepad keeps its target within 85 (GRIPPER_MAX_LEAD_POSITIONS). Measure
+  # that again when the goal current or the P gain changes
   7:
     name: gripper
     model: XC330-T288-T

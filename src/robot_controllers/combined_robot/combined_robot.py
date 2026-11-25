@@ -79,6 +79,9 @@ class CombinedRobot(AbstractRobotController):
     def get_gripper_state(self) -> float | None:
         return self.dynamixel_robot.get_gripper_state()
 
+    def gripper_positions_per_state(self) -> float | None:
+        return self.dynamixel_robot.gripper_positions_per_state()
+
     def get_angle_limits(self) -> dict[int, tuple[float, float]]:
         return self.dynamixel_robot.get_angle_limits()
 

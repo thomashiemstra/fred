@@ -46,10 +46,18 @@ MAXIMUM_SPEED = 50
 MAXIMUM_SPEED_STEP = 5
 # how much the gripper state (0 to 100) changes every step while a bumper is held
 GRIPPER_STEP = 1
-# how far the target of the gripper can be beyond its actual state, this determines how hard the gripper squeezes an
-# object, at most with the goal current of the servo. 25 states is 256 positions, which is about 500mA, so the goal
-# current of the gripper (400mA) limits the squeeze
-GRIPPER_MAX_LEAD = 25
+# how far the target of the gripper can be beyond its actual state, in servo positions. The lead decides how hard the
+# gripper squeezes an object (at most with the goal current of the servo) and how long it takes to let go: when the
+# user opens, the target first has to come back through the whole lead. Measured on 25 November 2026 with
+# gripper_test.py --measure-lead: at P 600 the current grows by 2.39 mA per position between the target and the
+# gripper, and reaches the whole goal current of 150 mA from about 65 positions; more lead adds no grip, only delay.
+# 85 is 1.25 times that. Measure again when the goal current or the P gain of the gripper changes: with a larger goal
+# current this lead would cap the squeeze (85 positions give about 200 mA). It is in positions and not in states,
+# because the states change their meaning whenever the gripper is calibrated again and the positions do not
+GRIPPER_MAX_LEAD_POSITIONS = 85
+# the positions of one gripper state when the robot can not tell (the simulation): the gripper of the arm has 951
+# positions for its 100 states
+DEFAULT_GRIPPER_POSITIONS_PER_STATE = 9.5
 # a stick step that is too fast is slowed down to this fraction of recommended_max_servo_speed, below the speed check
 SLOW_DOWN_MARGIN = 0.95
 # set to False the gamepad sends its steps without velocities, as before 21 November 2026, to compare by hand how the
@@ -437,19 +445,29 @@ class XboxRobotController:
 
     def __move_gripper(self, delta: float) -> None:
         """
-        Move the target state of the gripper, it stays within GRIPPER_MAX_LEAD of the actual state. When an object
-        blocks the gripper it squeezes harder the further the target is beyond the object, and when the gripper is
-        opened again it lets go within GRIPPER_MAX_LEAD steps, instead of first undoing everything the target would
-        have run ahead.
+        Move the target state of the gripper, it stays within GRIPPER_MAX_LEAD_POSITIONS (converted to states with the
+        calibrated range of the gripper) of the actual state. When an object blocks the gripper it squeezes harder the
+        further the target is beyond the object, and when the gripper is opened again it lets go within that lead,
+        instead of first undoing everything the target would have run ahead. When the actual state can not be read
+        the target is not clipped to it for this pass.
+        :param delta: the change of the target state
         """
         new_state = self.gripper_state + delta
         actual_state = self.robot.get_gripper_state()
         if actual_state is not None:
-            new_state = np.clip(new_state, actual_state - GRIPPER_MAX_LEAD, actual_state + GRIPPER_MAX_LEAD)
+            max_lead = GRIPPER_MAX_LEAD_POSITIONS / self.__positions_per_state()
+            new_state = np.clip(new_state, actual_state - max_lead, actual_state + max_lead)
         new_state = float(np.clip(new_state, 0, 100))
         if new_state != self.gripper_state:
             self.robot.set_gripper(new_state)
             self.gripper_state = new_state
+
+    def __positions_per_state(self) -> float:
+        """the positions of one state of the gripper, the default when the robot can not tell or tells nonsense"""
+        positions_per_state = self.robot.gripper_positions_per_state()
+        if positions_per_state is None or not positions_per_state > 0:
+            return DEFAULT_GRIPPER_POSITIONS_PER_STATE
+        return positions_per_state
 
     def handle_buttons(self) -> None:
         """

@@ -59,7 +59,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 - Blocked by an object, it squeezes with about 2mA per position the target is beyond the object (with the position P
   gain of 500 in `servo_config.yaml`), capped by the goal current. With the target at 2048 that is at most ~580mA.
 - No hardware errors and no heating (25 -> 29C) up to 600mA. The goal current is 400mA, the xbox controller clips the
-  target to at most `GRIPPER_MAX_LEAD = 25` states (256 positions, ~500mA) beyond the actual state, so the goal
+  target to at most `GRIPPER_MAX_LEAD = 25` states (256 positions, ~500mA; since 25 November 2026 `GRIPPER_MAX_LEAD_POSITIONS = 85`, measured for the XC330-T288-T) beyond the actual state, so the goal
   current limits the squeeze. To squeeze harder raise both: the lead in states has to be about the goal current in mA
   divided by 20.
 - The earlier shutdowns of the gripper came from the old code never writing the goal current, so it pushed with the
@@ -294,7 +294,7 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   reset.
 - Gripper: `lb`/`rb` move the target `gripper_state` (0 open, 100 closed) by `GRIPPER_STEP = 1` every loop step while
   held. `__move_gripper` reads the actual state every step (one bus read) and clips the target to actual +/-
-  `GRIPPER_MAX_LEAD = 25`, so a blocked gripper squeezes with at most the goal current and lets go within 25 steps;
+  `GRIPPER_MAX_LEAD = 25` (85 positions, 9 states, since 25 November 2026), so a blocked gripper squeezes with at most the goal current and lets go within that many steps;
   when the read fails the target is only clipped to 0-100. `start()` resets `gripper_state` to 0 (open) and after the
   start move `open_gripper()` sends it.
 - Recording and playback: `y` appends `current_pose` to `recorded_positions` when it has the flip of the first pose

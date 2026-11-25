@@ -335,6 +335,18 @@ class DynamixelRobotController(AbstractRobotController):
             return None
         return self.servo_handler.get_angle(GRIPPER_ID, self.servo7.current_position)
 
+    def gripper_positions_per_state(self) -> float | None:
+        """
+        returns how many servo positions one state of the gripper is, from the calibrated range of the gripper servo
+        (always positive, whichever way the gripper turns), or None if the range of positions or of states is empty
+        """
+        servo = self.servo7
+        positions = abs(servo.max_position - servo.min_position)
+        states = abs(servo.max_angle - servo.min_angle)
+        if positions == 0 or states == 0:
+            return None
+        return float(positions / states)
+
     def set_drive_mode(self) -> bool:
         return self.servo_handler.set_configured_drive_mode()
 

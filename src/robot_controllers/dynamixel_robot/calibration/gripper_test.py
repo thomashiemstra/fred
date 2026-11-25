@@ -1,9 +1,12 @@
 """
 Test script that moves the physical gripper (servo 7), the other servos are not enabled. Run it from the project root.
-There are two modes:
+There are three modes:
 
     python -m src.robot_controllers.dynamixel_robot.calibration.gripper_test --calibrate [--current 60] [--step 10]
         [--max-travel 1500] [--closing up|down] [--write] [--yes]
+    python -m src.robot_controllers.dynamixel_robot.calibration.gripper_test --measure-lead
+        [--leads 2 5 10 15 20 30 40 50 60 80 100] [--current 60] [--step 10] [--max-travel 1500] [--closing up|down]
+        [--yes]
     python -m src.robot_controllers.dynamixel_robot.calibration.gripper_test [--yes]
 
 --calibrate finds the closed position of the gripper, which servo_config.yaml needs before the gripper can be driven
@@ -18,8 +21,23 @@ reports the open and the closed position, the travel and the current, and the li
 --closing is the direction of the closed position, by default that of the positions in the yaml. Ctrl+C, an error
 or a warm servo stop it: the servo holds where it is and the torque is disabled.
 
-Without --calibrate it runs the interactive tests, which need calibrated positions (they refuse to start when the
-gripper stands more than 50 positions outside the range of the yaml; run --calibrate first):
+--measure-lead measures how far the target of the gripper has to be beyond an object for a whole squeeze, which is the
+lead the gamepad needs (GRIPPER_MAX_LEAD in xbox_robot_controller.py). Put the gripper open, with the torque off and an
+object between the fingers. It starts like --calibrate (same checks, the goal current of --current mA is written and
+read back before the torque goes on) and closes gently until the object stops the gripper: the contact position. It
+then writes the goal current of the yaml (the squeeze of a grip) and, for every lead of --leads (positions, taken in
+ascending order), sets the goal that many positions beyond the contact position, waits 0.5 s and reads the current and
+the position for 1 s. At the end it stops pushing, opens the gripper again and disables the torque. The table has a row
+per lead: the distance between the goal and the gripper (what the servo sees, the object gives way a little), the mean
+and peak current and the mean as a percentage of the goal current. After it come the distance from which the mean
+current is at least 95% of the goal current ("the squeeze is whole from N positions"), the mA per position below
+saturation, and a lead for the gamepad: that distance times 1.25, rounded up to 5 positions, in positions and in
+states. The gripper is left with the goal current of the yaml (the robot writes it when it starts anyway), the output
+says which. Ctrl+C, an error or a warm servo stop it like in --calibrate: the servo holds where it is and the torque is
+disabled.
+
+Without --calibrate and --measure-lead it runs the interactive tests, which need calibrated positions (they refuse to
+start when the gripper stands more than 50 positions outside the range of the yaml; run --calibrate first):
 1. closes the gripper without an object, to check whether it pushes against its mechanical end at the closed end
 2. optionally squeezes an object with increasing goal currents (up to the current limit of the model, 910mA for the
    XC330-T288-T) and reports the current, the position, the temperature and the hardware errors. It stops at a
@@ -34,6 +52,7 @@ Ctrl+C disables the torque of the gripper and exits.
 """
 import argparse
 import logging
+import math
 import re
 import sys
 from collections.abc import Callable, Sequence
@@ -89,6 +108,15 @@ OPEN_TIMEOUT = 3.0  # seconds to wait for the gripper to be back at the open pos
 ARRIVED = 10  # positions from the open position that count as back
 TORQUE_OFF_ATTEMPTS = 3
 POSITIONS_PER_TURN = 4096
+# --measure-lead
+DEFAULT_LEADS = [2, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100]  # positions the goal is beyond the contact position
+LEAD_SETTLE_TIME = 0.5  # seconds between a new goal and the first read
+LEAD_MEASURE_TIME = 1.0  # seconds the current and the position are read for
+LEAD_SAMPLE_TIME = 0.1  # seconds between two reads
+WHOLE_SQUEEZE = 95.0  # percent of the goal current from which the squeeze counts as whole
+BELOW_SATURATION = 90.0  # percent of the goal current under which a row is on the slope, not on the plateau
+LEAD_MARGIN = 1.25  # the recommended lead is the smallest whole squeeze distance times this
+LEAD_ROUNDING = 5  # positions, the recommended lead is rounded up to a multiple of this
 CONTACT = 'contact'
 NO_MOVE = 'no move'
 NO_CONTACT = 'no contact'
@@ -115,6 +143,16 @@ class ContactResult(NamedTuple):
     goal: int  # the last goal that was written
     peak_current: int  # mA, absolute, while closing
     contact_current: int | None  # mA, absolute, when the gripper was stopped, None without a stop
+
+
+class LeadRow(NamedTuple):
+    """what one lead of --measure-lead gave"""
+    lead: int  # positions the goal was commanded beyond the contact position
+    position: float  # mean present position
+    distance: float  # positions the goal is beyond the mean position in the closing direction: what the servo sees
+    mean_current: float  # mA, absolute
+    peak_current: int  # mA, absolute
+    percent: float  # the mean current as a percentage of the goal current
 
 
 def read_present_current(handler: ServoHandler) -> int | None:
@@ -578,6 +616,55 @@ def confirm_move(yes: bool, ask: Callable[[str], str]) -> bool:
     return ask('\nthe gripper will move, keep your fingers clear. type yes to continue: ').strip().lower() == 'yes'
 
 
+def read_start(handler: ServoHandler, servo: Servo, closing: str | None,
+               sleep: Callable[[float], None] = sleep) -> tuple[int, int] | None:
+    """
+    the checks that --calibrate and --measure-lead start with, before anything is written: reads and prints the status
+    of the gripper, which must have no hardware error and its torque off, and takes its position as the open one
+    :param closing: 'up' or 'down', None for the direction of the yaml
+    :return: the open position and the closing direction (+1 or -1), None with a message when it can't start
+    """
+    try:
+        status = read_status(handler)
+    except Stop as e:
+        print(e)
+        return None
+    print('gripper: position {} current {}mA temperature {}C voltage {}V hardware errors {} torque {}'.format(
+        status.position, status.current, status.temperature, status.voltage, status.errors or None,
+        'on' if status.torque else 'off'))
+    if status.errors:
+        print('the gripper has a hardware error ({}), reboot the servo first'.format(', '.join(status.errors)))
+        return None
+    if status.torque:
+        print('the torque of the gripper is on: switch it off and put the gripper open by hand, the position it has '
+              'now is taken as the open position')
+        return None
+
+    try:
+        open_position = median_position(handler, sleep)
+    except Stop as e:
+        print(e)
+        return None
+    direction = closing_direction(servo, closing)
+    if room_to_close(open_position, direction) <= MIN_TRAVEL:
+        print('the open position {} is at the end of the range of the servo in the closing direction ({}), use '
+              '--closing {}'.format(open_position, 'up' if direction > 0 else 'down',
+                                    'down' if direction > 0 else 'up'))
+        return None
+    return open_position, direction
+
+
+def contact_problem(result: ContactResult, open_position: int, max_travel: int) -> str | None:
+    """the message for a closing that found no object, None when the gripper was stopped by something"""
+    if result.outcome == NO_MOVE:
+        return 'the gripper did not move in that direction (it stopped after {} positions): is --closing right, or ' \
+               'is it already closed or blocked?'.format(abs(result.position - open_position))
+    if result.outcome == NO_CONTACT:
+        return 'the gripper did not stop within {} positions of travel: nothing closed it, raise --max-travel or ' \
+               'check the direction'.format(max_travel)
+    return None
+
+
 def calibrate(handler: ServoHandler, current: int = DEFAULT_CALIBRATION_CURRENT, step: int = DEFAULT_STEP,
               max_travel: int = DEFAULT_MAX_TRAVEL, closing: str | None = None, write: bool = False,
               yes: bool = False, config_path: str = DEFAULT_SERVO_CONFIG_PATH,
@@ -598,33 +685,10 @@ def calibrate(handler: ServoHandler, current: int = DEFAULT_CALIBRATION_CURRENT,
     if problem:
         print(problem)
         return 1
-    try:
-        status = read_status(handler)
-    except Stop as e:
-        print(e)
+    start = read_start(handler, servo, closing, sleep)
+    if start is None:
         return 1
-    print('gripper: position {} current {}mA temperature {}C voltage {}V hardware errors {} torque {}'.format(
-        status.position, status.current, status.temperature, status.voltage, status.errors or None,
-        'on' if status.torque else 'off'))
-    if status.errors:
-        print('the gripper has a hardware error ({}), reboot the servo first'.format(', '.join(status.errors)))
-        return 1
-    if status.torque:
-        print('the torque of the gripper is on: switch it off and put the gripper open by hand, the position it has '
-              'now is taken as the open position')
-        return 1
-
-    try:
-        open_position = median_position(handler, sleep)
-    except Stop as e:
-        print(e)
-        return 1
-    direction = closing_direction(servo, closing)
-    if room_to_close(open_position, direction) <= MIN_TRAVEL:
-        print('the open position {} is at the end of the range of the servo in the closing direction ({}), use '
-              '--closing {}'.format(open_position, 'up' if direction > 0 else 'down',
-                                    'down' if direction > 0 else 'up'))
-        return 1
+    open_position, direction = start
     print('open position {}; the gripper closes towards {} positions, at most {} positions, with {} mA, in steps of '
           '{} positions'.format(open_position, 'higher' if direction > 0 else 'lower', max_travel, current, step))
     if not confirm_move(yes, ask):
@@ -670,13 +734,9 @@ def calibrate(handler: ServoHandler, current: int = DEFAULT_CALIBRATION_CURRENT,
     if not torque_off or result is None:
         return 1
 
-    if result.outcome == NO_MOVE:
-        print('the gripper did not move in that direction (it stopped after {} positions): is --closing right, or is '
-              'it already closed or blocked?'.format(abs(result.position - open_position)))
-        return 1
-    if result.outcome == NO_CONTACT:
-        print('the gripper did not stop within {} positions of travel: nothing closed it, raise --max-travel or check '
-              'the direction'.format(max_travel))
+    problem = contact_problem(result, open_position, max_travel)
+    if problem:
+        print(problem)
         return 1
     print(report(open_position, result))
     if not write:
@@ -687,6 +747,234 @@ def calibrate(handler: ServoHandler, current: int = DEFAULT_CALIBRATION_CURRENT,
         return 0
     write_positions(config_path, GRIPPER_ID, open_position, result.position)
     print('written to {}, the gripper can be driven by state now'.format(config_path))
+    return 0
+
+
+def check_lead_arguments(servo: Servo, leads: Sequence[int]) -> str | None:
+    """the reason the leads or the servo are refused for --measure-lead, None when they are fine"""
+    if not leads:
+        return 'there are no leads to measure'
+    if min(leads) < 1:
+        return 'the leads are positions beyond the object and have to be at least 1, not {}'.format(min(leads))
+    if servo.goal_current is None:
+        return 'servo {} has no goal_current in servo_config.yaml to measure the squeeze against'.format(GRIPPER_ID)
+    return None
+
+
+def measure_leads(handler: ServoHandler, contact_position: int, direction: int, leads: Sequence[int],
+                  goal_current: int, sleep: Callable[[float], None] = sleep,
+                  clock: Callable[[], float] = perf_counter) -> list[LeadRow]:
+    """
+    for every lead, in ascending order, put the goal that many positions beyond the contact position in the closing
+    direction, wait LEAD_SETTLE_TIME and read the current and the position every LEAD_SAMPLE_TIME for
+    LEAD_MEASURE_TIME seconds. The health of the gripper is checked after every lead. A lead whose goal would be
+    outside the range of the servo ends the measuring, the rows of the smaller leads are kept.
+    :param contact_position: where the object stopped the gripper
+    :param goal_current: mA, the goal current the servo has now, for the percentages
+    :param direction: +1 when the gripper closes towards higher positions, -1 towards lower ones
+    :raises Stop: when a read or a write fails, on a hardware error or a servo that is too warm
+    """
+    rows = []
+    for lead in sorted(set(leads)):
+        goal = contact_position + direction * lead
+        if not cfg.MIN_POSITION <= goal <= cfg.MAX_POSITION:
+            print('a lead of {} positions would put the goal at {}, outside the range of the servo: no larger lead '
+                  'is measured'.format(lead, goal))
+            break
+        write_goal(handler, goal)
+        sleep(LEAD_SETTLE_TIME)
+        positions = []
+        currents = []
+        start = clock()
+        while clock() - start < LEAD_MEASURE_TIME:
+            sleep(LEAD_SAMPLE_TIME)
+            positions.append(read_position(handler))
+            currents.append(read_abs_current(handler))
+        check_health(handler)
+        position = sum(positions) / len(positions)
+        mean_current = sum(currents) / len(currents)
+        rows.append(LeadRow(lead, position, (goal - position) * direction, mean_current, max(currents),
+                            100.0 * mean_current / goal_current))
+        print('lead {}: goal {} positions beyond the gripper, {:.0f} mA ({:.0f}% of the goal current)'.format(
+            lead, rows[-1].distance, mean_current, rows[-1].percent))
+    return rows
+
+
+def saturation_distance(rows: Sequence[LeadRow]) -> float | None:
+    """the smallest distance between the goal and the gripper at which the mean current was at least WHOLE_SQUEEZE
+    percent of the goal current, None when no row got there"""
+    distances = [row.distance for row in rows if row.percent >= WHOLE_SQUEEZE]
+    return min(distances) if distances else None
+
+
+def current_per_position(rows: Sequence[LeadRow]) -> float | None:
+    """
+    the mA per position of the rows below saturation (under BELOW_SATURATION percent of the goal current, with the goal
+    beyond the gripper): the slope of the least squares line through the origin of mean current over distance. None
+    when fewer than two rows are below saturation.
+    """
+    slope_rows = [row for row in rows if row.percent < BELOW_SATURATION and row.distance > 0]
+    if len(slope_rows) < 2:
+        return None
+    return sum(row.distance * row.mean_current for row in slope_rows) / sum(row.distance ** 2 for row in slope_rows)
+
+
+def recommended_lead(distance: float) -> int:
+    """the lead for the gamepad in positions: the distance of the whole squeeze times LEAD_MARGIN, rounded up to a
+    multiple of LEAD_ROUNDING (the rounding is there to keep 40 * 1.25 from becoming 55 through float noise)"""
+    return max(LEAD_ROUNDING, math.ceil(round(distance * LEAD_MARGIN / LEAD_ROUNDING, 9)) * LEAD_ROUNDING)
+
+
+def states_per_position(servo: Servo) -> float:
+    """the states one position of the gripper is, from the positions of the yaml for state 0 and the last state"""
+    return (CLOSED_STATE - OPEN_STATE) / max(abs(servo.max_position - servo.min_position), 1)
+
+
+def lead_table(rows: Sequence[LeadRow]) -> str:
+    """the table of the rows, one line per lead"""
+    lines = ['{:>5} {:>12} {:>8} {:>6} {:>7} {:>9}'.format('lead', 'goal - pos.', 'mean mA', 'mean %', 'peak mA',
+                                                          'position')]
+    for row in rows:
+        lines.append('{:>5} {:>12.1f} {:>8.1f} {:>6.0f} {:>7} {:>9.1f}'.format(
+            row.lead, row.distance, row.mean_current, row.percent, row.peak_current, row.position))
+    return '\n'.join(lines)
+
+
+def lead_report(rows: Sequence[LeadRow], goal_current: int, states_per_pos: float) -> str:
+    """
+    the table and what follows from it: where the squeeze is whole, the mA per position below that and the lead
+    :param goal_current: mA, the goal current of the squeeze
+    :param states_per_pos: the states one position of the gripper is, see states_per_position
+    """
+    lines = ['leads and distances are in positions, the goal current is {} mA'.format(goal_current), lead_table(rows)]
+    distance = saturation_distance(rows)
+    if distance is None:
+        lines.append('the mean current did not reach {:.0f}% of the goal current within the leads tried (largest '
+                     'distance {:.1f} positions): try larger --leads'.format(WHOLE_SQUEEZE,
+                                                                             max(row.distance for row in rows)))
+    else:
+        lines.append('the squeeze is whole (at least {:.0f}% of the goal current) from {:.1f} positions between the '
+                     'goal and the gripper'.format(WHOLE_SQUEEZE, distance))
+    slope = current_per_position(rows)
+    if slope is None:
+        lines.append('fewer than two rows are below {:.0f}% of the goal current: no mA per position'.format(
+            BELOW_SATURATION))
+    else:
+        lines.append('below saturation the current grows by {:.2f} mA per position of distance'.format(slope))
+    if distance is not None:
+        lead = recommended_lead(distance)
+        lines.append('lead for the gamepad: {} positions ({:.1f} states with the positions of the yaml), that is {} '
+                     'times the distance of the whole squeeze, rounded up to {} positions'.format(
+                         lead, lead * states_per_pos, LEAD_MARGIN, LEAD_ROUNDING))
+    return '\n'.join(lines)
+
+
+def measure_lead(handler: ServoHandler, leads: Sequence[int] = DEFAULT_LEADS,
+                 current: int = DEFAULT_CALIBRATION_CURRENT, step: int = DEFAULT_STEP,
+                 max_travel: int = DEFAULT_MAX_TRAVEL, closing: str | None = None, yes: bool = False,
+                 model_limit: int = DEFAULT_CURRENT_LIMIT, sleep: Callable[[float], None] = sleep,
+                 clock: Callable[[], float] = perf_counter, ask: Callable[[str], str] = input) -> int:
+    """
+    measure how the current of a squeeze grows with the distance between the goal and the gripper, see the docstring
+    of the module; the gripper stands open with its torque off and an object between the fingers. Returns 0 when the
+    table was measured, else 1. Whatever goes wrong after the torque was enabled, the gripper holds where it is and the
+    torque is switched off.
+    :param leads: positions the goal is put beyond the contact position, whole numbers of at least 1
+    :param current: the goal current in mA while closing to the object, at most the goal current of the yaml
+    :param closing: 'up' or 'down', None for the direction of the yaml
+    :param model_limit: the current limit of the model in mA
+    :param ask: gives the answer to a question, input() for a person
+    """
+    servo = handler.get_servo(GRIPPER_ID)
+    goal_current = servo.goal_current
+    problem = check_calibration_arguments(servo, current, step, max_travel, model_limit) or \
+        check_lead_arguments(servo, leads)
+    if problem:
+        print(problem)
+        return 1
+    if goal_current is None:  # check_lead_arguments refused that, this is for the type checker
+        return 1
+    start = read_start(handler, servo, closing, sleep)
+    if start is None:
+        return 1
+    open_position, direction = start
+    print('open position {}; the gripper closes towards {} positions with {} mA until the object stops it, then it '
+          'squeezes with {} mA at leads of {} positions'.format(
+              open_position, 'higher' if direction > 0 else 'lower', current, goal_current,
+              ' '.join(str(lead) for lead in sorted(set(leads)))))
+    if not confirm_move(yes, ask):
+        print('not started')
+        return 0
+
+    contact: ContactResult | None = None
+    rows: list[LeadRow] = []
+    torque_off = True
+    enabled = False
+    written = False  # the goal current register was written, so the servo is left with something other than before
+    left_with: int | None = None  # what the register holds, None while it is not known
+    try:
+        if not (handler.set_configured_operating_mode([GRIPPER_ID]) and
+                handler.set_profile_velocity_and_acceleration([GRIPPER_ID]) and handler.set_pid([GRIPPER_ID])):
+            print('failed to set up the gripper')
+            return 1
+        # as in calibrate: the register holds the maximum of the model until it is written, so the gentle current is
+        # written and read back (the write isn't acknowledged) before the torque goes on
+        written = True
+        wrote = handler.set_goal_current(GRIPPER_ID, current)
+        left_with = read_goal_current(handler)
+        if not wrote or left_with != current:
+            print('the goal current of the gripper is not {} mA after writing it, not enabling the torque'.format(
+                current))
+            return 1
+        if not handler.hold_current_position([GRIPPER_ID]):
+            print('failed to hold the gripper')
+            return 1
+        enabled = True  # from here on the torque may be on, also when it fails to confirm
+        if not handler.set_torque(True, [GRIPPER_ID]):
+            print('failed to enable the gripper')
+            return 1
+        contact = find_closed_position(handler, open_position, direction, step, max_travel, sleep, clock)
+        goal = contact.goal
+        if contact.outcome == CONTACT:
+            print('the object stops the gripper at position {}'.format(contact.position))
+            goal = contact.position
+            write_goal(handler, goal)  # no push, before the current is raised
+            left_with = None
+            wrote = handler.set_goal_current(GRIPPER_ID, goal_current)
+            left_with = read_goal_current(handler)
+            if wrote and left_with == goal_current:
+                rows = measure_leads(handler, goal, direction, leads, goal_current, sleep, clock)
+                goal = read_position(handler)
+                write_goal(handler, goal)  # stop pushing
+            else:
+                print('the goal current of the gripper is not {} mA after writing it, not squeezing'.format(
+                    goal_current))
+        if not open_again(handler, goal, open_position, step, sleep, clock):
+            print('warning: the gripper did not get back to the open position within {:.0f} s'.format(OPEN_TIMEOUT))
+    except Stop as e:
+        print('\nstopped: {}'.format(e))
+        return 1
+    except KeyboardInterrupt:
+        print('\nstopped')
+        return 1
+    finally:
+        if enabled:
+            torque_off = shut_down(handler, sleep)
+        if written:
+            print('the gripper is left with {} (the robot writes the goal current of the yaml when it starts)'.format(
+                'a goal current of {} mA'.format(left_with) if left_with is not None else
+                'a goal current that could not be read back'))
+    if not torque_off or contact is None:
+        return 1
+
+    problem = contact_problem(contact, open_position, max_travel)
+    if problem:
+        print(problem)
+        return 1
+    if not rows:
+        print('no lead was measured')
+        return 1
+    print(lead_report(rows, goal_current, states_per_position(servo)))
     return 0
 
 
@@ -724,31 +1012,43 @@ def run_interactive_tests(handler: ServoHandler, goal_currents: Sequence[int], y
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description='test the gripper (servo 7): --calibrate finds its closed position, without it the interactive '
-                    'tests run')
+        description='test the gripper (servo 7): --calibrate finds its closed position, --measure-lead measures the '
+                    'lead a squeeze needs, without either the interactive tests run')
     parser.add_argument('--calibrate', action='store_true', help='find the closed position of the gripper')
+    parser.add_argument('--measure-lead', action='store_true',
+                        help='measure how the current of a squeeze grows with the distance between the goal and the '
+                             'gripper, with an object between the fingers')
+    parser.add_argument('--leads', type=int, nargs='+', default=None,
+                        help='--measure-lead: positions beyond the object to put the goal, default {}'.format(
+                            ' '.join(str(lead) for lead in DEFAULT_LEADS)))
     parser.add_argument('--current', type=int, default=None,
-                        help='--calibrate: goal current in mA while closing, default {}, at most the goal_current of '
-                             'the yaml'.format(DEFAULT_CALIBRATION_CURRENT))
+                        help='--calibrate, --measure-lead: goal current in mA while closing, default {}, at most the '
+                             'goal_current of the yaml'.format(DEFAULT_CALIBRATION_CURRENT))
     parser.add_argument('--step', type=int, default=None,
-                        help='--calibrate: positions the goal moves every {:.0f} ms, default {}'.format(
+                        help='--calibrate, --measure-lead: positions the goal moves every {:.0f} ms, default {}'.format(
                             1000 * STEP_TIME, DEFAULT_STEP))
     parser.add_argument('--max-travel', type=int, default=None,
-                        help='--calibrate: most positions to close from the open position, default {}'.format(
-                            DEFAULT_MAX_TRAVEL))
+                        help='--calibrate, --measure-lead: most positions to close from the open position, default '
+                             '{}'.format(DEFAULT_MAX_TRAVEL))
     parser.add_argument('--closing', choices=('up', 'down'), default=None,
-                        help='--calibrate: whether the closed position is at higher (up) or lower (down) positions, '
-                             'default the direction of the positions in the yaml')
+                        help='--calibrate, --measure-lead: whether the closed position is at higher (up) or lower '
+                             '(down) positions, default the direction of the positions in the yaml')
     parser.add_argument('--write', action='store_true', help='--calibrate: write the positions to the yaml')
     parser.add_argument('--yes', action='store_true', help="don't ask before the gripper moves or the yaml is written")
     parser.add_argument('--config', default=DEFAULT_SERVO_CONFIG_PATH, help='the yaml to read and write')
     args = parser.parse_args(argv)
-    if not args.calibrate:
-        only_calibrating = [name for name, value in (('--current', args.current), ('--step', args.step),
-                                                     ('--max-travel', args.max_travel), ('--closing', args.closing),
-                                                     ('--write', args.write or None)) if value is not None]
-        if only_calibrating:
-            parser.error('{} only work with --calibrate'.format(', '.join(only_calibrating)))
+    if args.calibrate and args.measure_lead:
+        parser.error('--calibrate and --measure-lead can not be used together')
+    if args.leads is not None and not args.measure_lead:
+        parser.error('--leads only works with --measure-lead')
+    if args.write and not args.calibrate:  # --measure-lead writes nothing
+        parser.error('--write only works with --calibrate')
+    if not (args.calibrate or args.measure_lead):
+        only_with_a_mode = [name for name, value in (('--current', args.current), ('--step', args.step),
+                                                     ('--max-travel', args.max_travel),
+                                                     ('--closing', args.closing)) if value is not None]
+        if only_with_a_mode:
+            parser.error('{} only work with --calibrate or --measure-lead'.format(', '.join(only_with_a_mode)))
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
     config = load_servo_config(args.config)
@@ -757,8 +1057,11 @@ def main(argv: list[str] | None = None) -> int:
     current = DEFAULT_CALIBRATION_CURRENT if args.current is None else args.current
     step = DEFAULT_STEP if args.step is None else args.step
     max_travel = DEFAULT_MAX_TRAVEL if args.max_travel is None else args.max_travel
-    if args.calibrate:  # refused before the port is opened
+    leads = DEFAULT_LEADS if args.leads is None else args.leads
+    if args.calibrate or args.measure_lead:  # refused before the port is opened
         problem = check_calibration_arguments(gripper, current, step, max_travel, model_limit)
+        if args.measure_lead:
+            problem = problem or check_lead_arguments(gripper, leads)
         if problem:
             print(problem)
             return 1
@@ -769,6 +1072,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.calibrate:
             return calibrate(handler, current, step, max_travel, args.closing, args.write, args.yes, args.config,
                              model_limit, sleep, perf_counter)
+        if args.measure_lead:
+            return measure_lead(handler, leads, current, step, max_travel, args.closing, args.yes, model_limit, sleep,
+                                perf_counter)
         return run_interactive_tests(handler, squeeze_currents(model_limit), args.yes)
     finally:
         port_handler.closePort()

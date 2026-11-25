@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 import unittest
@@ -108,6 +109,7 @@ class FakeRobot:
         self.overheating = {}
         self.gripper_calls = []
         self.blocked_gripper_state = None
+        self.positions_per_state = 9.51  # of the gripper, None for a robot that can not tell like the simulation
         self.moving_threads = set()
         self.calls = []
         self.poses = []  # the poses of move_to_pose
@@ -166,6 +168,9 @@ class FakeRobot:
             return min(self.gripper_calls[-1], self.blocked_gripper_state)
         return self.gripper_calls[-1] if self.gripper_calls else 0.0
 
+    def gripper_positions_per_state(self):
+        return self.positions_per_state
+
     def get_hardware_errors(self):
         return self.hardware_errors
 
@@ -180,6 +185,11 @@ def make_controller(robot, buttons=None):
     pose_updater.controller.get_buttons.side_effect = lambda: buttons() if buttons else Buttons()
     pose_updater.get_updated_pose_from_controller.side_effect = lambda pose, find_center_mode, center, dt=None: pose
     return XboxRobotController(test_config, robot, pose_updater)
+
+
+def max_lead_in_states(robot):
+    """the most the target of the gripper may be beyond its actual state, in states of this robot"""
+    return xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS / robot.positions_per_state
 
 
 def wait_for(condition, timeout=10.0):
@@ -331,15 +341,81 @@ class GripperTests(unittest.TestCase):
         for _ in range(50):
             controller.handle_buttons()
 
-        # the target stays GRIPPER_MAX_LEAD beyond the object, so the gripper keeps squeezing it
-        self.assertEqual(20 + xbox_robot_controller.GRIPPER_MAX_LEAD, controller.gripper_state)
+        # the target stays GRIPPER_MAX_LEAD_POSITIONS beyond the object, so the gripper keeps squeezing it
+        self.assertAlmostEqual(20 + max_lead_in_states(robot), controller.gripper_state)
+        self.assertAlmostEqual(xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS,
+                               (controller.gripper_state - 20) * robot.positions_per_state)
 
-        # and opening the gripper releases the object within GRIPPER_MAX_LEAD steps, instead of first undoing
-        # everything the target would have run ahead
+        # and opening the gripper releases the object within the lead, instead of first undoing everything the
+        # target would have run ahead: the target is back at the object after ceil(lead / GRIPPER_STEP) passes
         controller.pose_updater.controller.get_buttons.side_effect = lambda: Buttons(lb=True)
-        for _ in range(xbox_robot_controller.GRIPPER_MAX_LEAD + 1):
+        passes_to_release = math.ceil(max_lead_in_states(robot) / xbox_robot_controller.GRIPPER_STEP)
+        for _ in range(passes_to_release - 1):
             controller.handle_buttons()
+        self.assertGreater(robot.gripper_calls[-1], 20)
+        controller.handle_buttons()
         self.assertLess(robot.gripper_calls[-1], 20)
+
+    def test_target_stays_within_the_lead_in_positions_whatever_the_range_of_the_gripper(self):
+        for positions_per_state in (9.51, 20.0, 5.0):
+            for direction, button in ((1, 'rb'), (-1, 'lb')):
+                with self.subTest(positions_per_state=positions_per_state, button=button):
+                    robot = FakeRobot()
+                    robot.positions_per_state = positions_per_state
+                    robot.get_gripper_state = lambda: 50.0  # the gripper doesn't follow the target
+                    controller = make_controller(robot, buttons=lambda: Buttons(**{button: True}))
+                    controller.gripper_state = 50.0
+
+                    for _ in range(100):
+                        controller.handle_buttons()
+
+                    # the cap in states changes with the range, the cap in positions does not
+                    lead_in_states = xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS / positions_per_state
+                    self.assertAlmostEqual(50 + direction * lead_in_states, controller.gripper_state)
+                    self.assertAlmostEqual(50 + direction * lead_in_states, robot.gripper_calls[-1])
+                    self.assertAlmostEqual(xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS,
+                                           abs(controller.gripper_state - 50) * positions_per_state)
+
+    def test_lead_for_a_gripper_of_9_51_positions_per_state_is_8_94_states(self):
+        robot = FakeRobot()
+        robot.get_gripper_state = lambda: 50.0
+        controller = make_controller(robot, buttons=lambda: Buttons(rb=True))
+        controller.gripper_state = 50.0
+
+        for _ in range(20):
+            controller.handle_buttons()
+
+        self.assertAlmostEqual(50 + 8.94, controller.gripper_state, places=2)
+
+    def test_lead_without_the_range_of_the_gripper_is_the_default_positions_per_state(self):
+        robot = FakeRobot()
+        robot.positions_per_state = None
+        robot.get_gripper_state = lambda: 50.0
+        controller = make_controller(robot, buttons=lambda: Buttons(lb=True))
+        controller.gripper_state = 50.0
+
+        for _ in range(100):
+            controller.handle_buttons()
+
+        lead_in_states = (xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS
+                          / xbox_robot_controller.DEFAULT_GRIPPER_POSITIONS_PER_STATE)
+        self.assertAlmostEqual(50 - lead_in_states, controller.gripper_state)
+
+    def test_lead_does_not_divide_by_zero_for_an_empty_range_of_the_gripper(self):
+        for positions_per_state in (0.0, -9.51):
+            with self.subTest(positions_per_state=positions_per_state):
+                robot = FakeRobot()
+                robot.positions_per_state = positions_per_state
+                robot.get_gripper_state = lambda: 50.0
+                controller = make_controller(robot, buttons=lambda: Buttons(rb=True))
+                controller.gripper_state = 50.0
+
+                for _ in range(100):
+                    controller.handle_buttons()
+
+                lead_in_states = (xbox_robot_controller.GRIPPER_MAX_LEAD_POSITIONS
+                                  / xbox_robot_controller.DEFAULT_GRIPPER_POSITIONS_PER_STATE)
+                self.assertAlmostEqual(50 + lead_in_states, controller.gripper_state)
 
     def test_gripper_follows_the_target_when_its_state_can_not_be_read(self):
         robot = FakeRobot()
@@ -349,6 +425,17 @@ class GripperTests(unittest.TestCase):
         controller.handle_buttons()
 
         self.assertEqual([1], robot.gripper_calls)
+
+    def test_gripper_moves_one_step_when_its_state_can_not_be_read_even_beyond_the_lead(self):
+        robot = FakeRobot()
+        robot.get_gripper_state = lambda: None
+        controller = make_controller(robot, buttons=lambda: Buttons(rb=True))
+        controller.gripper_state = 60.0  # far more than the lead beyond wherever the gripper may be
+
+        controller.handle_buttons()
+        controller.handle_buttons()
+
+        self.assertEqual([61.0, 62.0], robot.gripper_calls)
 
     def test_gripper_is_not_written_beyond_its_range(self):
         robot = FakeRobot()
@@ -844,12 +931,14 @@ class MoreGripperTests(unittest.TestCase):
         controller = make_controller(robot, buttons=lambda: Buttons(lb=True))
         controller.gripper_state = 60.0
 
-        for _ in range(2 * xbox_robot_controller.GRIPPER_MAX_LEAD):
+        for _ in range(100):
             controller.handle_buttons()
 
-        self.assertEqual(60 - xbox_robot_controller.GRIPPER_MAX_LEAD, controller.gripper_state)
-        self.assertEqual(60 - xbox_robot_controller.GRIPPER_MAX_LEAD, robot.gripper_calls[-1])
-        self.assertEqual(xbox_robot_controller.GRIPPER_MAX_LEAD, len(robot.gripper_calls))
+        lead_in_states = max_lead_in_states(robot)
+        self.assertAlmostEqual(60 - lead_in_states, controller.gripper_state)
+        self.assertAlmostEqual(60 - lead_in_states, robot.gripper_calls[-1])
+        # one write per step until the target is at the lead, which is the last write, and none after that
+        self.assertEqual(math.ceil(lead_in_states / xbox_robot_controller.GRIPPER_STEP), len(robot.gripper_calls))
 
 
 class MorePlaybackTests(unittest.TestCase):
