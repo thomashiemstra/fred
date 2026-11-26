@@ -1,7 +1,8 @@
 """
 The check whether a pose of the arm is inside its workspace limits, see global_constants.WorkSpaceLimits. Robots
 expose it as AbstractRobotController.check_workspace(angles); whoever moves the robot runs it before executing a
-move, move_servos itself doesn't.
+move, move_servos itself doesn't. The checks are the reach of the wrist from the shoulder, the distance of the wrist
+from the base axis (wrist_radius_min), and the radius, heights and y of the gripper tip and the wrist.
 """
 from __future__ import annotations
 
@@ -37,6 +38,13 @@ def workspace_violation(angles: np.ndarray, robot_config: RobotConfig,
     if reach > limits.wrist_reach_max + TOLERANCE:
         return 'the wrist would move to {}, {:.1f}cm from the shoulder, farther than {}'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f
             np.round(wrist, 1), reach, limits.wrist_reach_max)
+    # limits objects of tests and scripts may not have the minimum of the wrist radius, they check nothing for it
+    wrist_radius_min = getattr(limits, 'wrist_radius_min', None)
+    if wrist_radius_min is not None:
+        wrist_radius = np.hypot(wrist[0], wrist[1])
+        if wrist_radius < wrist_radius_min - TOLERANCE:
+            return 'the wrist would move to {}, {:.1f}cm from the base, closer than {}'.format(
+                np.round(wrist, 1), wrist_radius, wrist_radius_min)
     radius = np.linalg.norm(end_effector)
     if radius < limits.radius_min - TOLERANCE:
         return 'the end effector would move to {}, {:.1f}cm from the base, closer than {}'.format(  # type: ignore[str-format]  # numpy float is fine for :.1f

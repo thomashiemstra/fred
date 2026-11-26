@@ -84,9 +84,9 @@ DEFAULT_RANGES = {4: (np.radians(-90), np.radians(90)), 5: (np.radians(-90), np.
 SAMPLING_ATTEMPTS = 50
 # reads of the servo status before a failure stops the run: a corrupt status packet now and then happens on the bus
 READ_ATTEMPTS = 3
-# where the arm lies on the table with the torque off, as read on 13 November 2026 (gripper tip x=-0.9 y=39.6 z=3.7
-# cm, alpha=-0.007 beta=-0.143 gamma=0.099), rounded to straight ahead with the gripper level and a bit over 1 cm
-# higher so the arm doesn't hit the table
+# where the arm lies on the table with the torque off, as read on 13 November 2026 with the 14 cm gripper (gripper tip
+# x=-0.9 y=39.6 z=3.7 cm, alpha=-0.007 beta=-0.143 gamma=0.099; the 15 cm gripper puts the tip at y=40.6 z=3.8),
+# rounded to straight ahead with the gripper level and a bit over 1 cm higher so the arm doesn't hit the table
 REST_POSE = Pose(0.0, 40, 5)
 REST_SPEED = 0.3  # rad/s of the joint that turns the most, for the move to the rest pose
 

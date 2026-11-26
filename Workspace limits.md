@@ -81,3 +81,34 @@ tip at 3.7 cm and the gamepad starts at 4.0 cm, so a floor above about 3.7 would
 
 The random poses of `record_static_load.py` depend on the floor (a refused pose is skipped and the later ones
 shift), so a seed gives other poses than it gave before this change; `--floor -2` gives the old ones.
+
+## The 15 cm gripper and the wrist radius, 26 November 2026
+
+Two changes, both in `WorkSpaceLimits`:
+
+- **`d6` is 15 cm and `z_min` is 1 cm.** The tip of the model is now the end of the closed fingertips (the 150 mm
+  measured on 24 November), where it was the point the gripper grips at 14 cm. The floor of the tip went from 2 to
+  1 cm with it, so the fingertips keep the floor they had: 1 cm above the table with the gripper pointing straight
+  down. `y_min` follows `d6` and is 15.1 cm. The arm rests with its tip at about 3.8 cm by the kinematics (3.7 with
+  the 14 cm gripper), its wrist centre at about 2.3 cm. The simulation model was rebuilt for the longer gripper.
+- **`wrist_radius_min` is 12.5 cm, new.** The wrist centre stays at least that far from the vertical axis through the
+  base, at any height and in any direction. Nothing kept the wrist away from the base before: `radius_min` is for
+  the tip, and on this day a tuning pose with the wrist 10 cm from the axis put the back of the wrist and gripper
+  assembly against the shoulder housing. Measured with the parts touching: the wrist centre 10.4 cm from the base
+  axis (10.7 cm from the shoulder, 13.2 cm above the table); 12.5 is that plus about 2 cm. With the gripper level
+  and pointing away from the base the tip can therefore not come closer than 27.5 cm to the axis; with the gripper
+  pointing down nothing changes, `y_min` already keeps the wrist farther out.
+
+What moved with them: four default sweeps of `record_load_sweep.py` are a few degrees narrower (three reached
+inside the wrist radius, one below `y_min` with the longer gripper; the recordings of 19 to 24 November were made
+with the wider spans), the grip height of the block stacking is 1 cm, the forward distances of
+`calibrate_board.py sink` start at 30 cm, and the warning height of the pose preview is 2 cm. The gravity and
+feedforward numbers in `servo_config.yaml` do not depend on `d6`.
+
+The gamepad's flip (the A button) has a rule of its own since the same day: it only starts with the wrist centre at
+least 12 cm above the table (`FLIP_MIN_WRIST_HEIGHT` in `xbox_robot_controller.py`), because the gripper swings down
+along the line of the forearm while the wrist turns over.
+
+Still open: `wrist_reach_max` is 41.8 cm, set when a2 + d4 was 42; since the wrist was rebuilt on 17 November it is
+41, so that limit no longer keeps the elbow bent. The speed check of the planner still refuses moves through the
+straight elbow.

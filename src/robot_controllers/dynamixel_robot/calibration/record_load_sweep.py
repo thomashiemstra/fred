@@ -112,12 +112,16 @@ DISAGREEMENT = 1.0
 # either way changes the lever of the gripper on joint 3 and joint 4 turns it about the forearm; the spans are as wide
 # as the planner allows (WorkSpaceLimits and the ranges of servo_config.yaml, a test checks every sweep): the wrist
 # bent 60 degrees puts the tip closer than y_min to the base beyond 35 degrees of joint 3 (bent one way) or below -35
-# (the other way), and joint 5 may not go beyond 55 degrees with the upper arm raised 40 degrees
+# (the other way). Since 26 November 2026 the wrist centre has to stay 12.5cm from the base axis (wrist_radius_min) and
+# the gripper is 15cm (y_min 15.1): the spans of joint 2 at 45 and at -30 degrees of joint 3, of joint 3 at the
+# upright upper arm, and of joint 5 with the upper arm raised 40 degrees are narrower than the recordings of 19 to 24
+# November were made with (40 to 100, 70 to 120, -60 to 60 and -80 to 55 degrees), by a few degrees short of what the
+# planner refuses now (joint 2 beyond about 94 and 115 degrees, joint 3 beyond about 54, joint 5 beyond about 53)
 DEFAULT_SWEEPS: dict[int, list[tuple[tuple[float, ...], tuple[float, float]]]] = {
     2: [((90, 0, 0, 0, 0, 0), (50, 110)),
-        ((90, 0, 45, 0, 0, 0), (40, 100)),
-        ((90, 0, -30, 0, 0, 0), (70, 120))],
-    3: [((90, 90, 0, 0, 0, 0), (-60, 60)),
+        ((90, 0, 45, 0, 0, 0), (40, 90)),
+        ((90, 0, -30, 0, 0, 0), (70, 110))],
+    3: [((90, 90, 0, 0, 0, 0), (-50, 50)),
         ((90, 60, 0, 0, 0, 0), (-20, 70)),
         ((90, 90, 0, 0, 60, 0), (-45, 35)),
         ((90, 90, 0, 0, -60, 0), (-35, 45))],
@@ -125,7 +129,7 @@ DEFAULT_SWEEPS: dict[int, list[tuple[tuple[float, ...], tuple[float, float]]]] =
         ((90, 90, 0, 0, -60, 0), (-80, 80))],
     5: [((90, 90, 0, 0, 0, 0), (-80, 80)),
         ((90, 90, 0, 60, 0, 0), (-80, 80)),
-        ((90, 90, 40, 0, 0, 0), (-80, 55))],
+        ((90, 90, 40, 0, 0, 0), (-80, 50))],
 }
 
 

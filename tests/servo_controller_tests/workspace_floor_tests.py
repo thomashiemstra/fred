@@ -21,10 +21,13 @@ from src.utils.movement_exception import MovementException
 from src.xbox_control.xbox_robot_controller import XboxRobotController
 from tests.servo_controller_tests.static_load_scripts_tests import RESTING_ANGLES, FakeHandler, RestRobot
 
-# the floors of the tip and the wrist centre in cm, written out here on purpose: the tests below have to fail when
-# WorkSpaceLimits goes higher than the poses of the scripts, not follow it
-TIP_FLOOR = 2.0
+# the floors of the tip and the wrist centre in cm and the distance of the wrist centre from the base axis, written out
+# here on purpose: the tests below have to fail when WorkSpaceLimits goes higher than the poses of the scripts, not
+# follow it. The tip is the end of the closed fingertips (d6 15 cm), the same 1 cm floor the fingertips had with the
+# 14 cm gripper and a floor of 2 cm for its tip
+TIP_FLOOR = 1.0
 WRIST_FLOOR = 1.0
+WRIST_RADIUS_MIN = 12.5
 # the command line of the recordings of 21 to 24 November 2026
 RECORDING = ['--poses', '30', '--joints', '2', '3', '4', '5', '--range', '2=45:115', '3=-60:60', '4=-60:60',
              '5=-60:60']
@@ -58,12 +61,17 @@ def heights(angles):
 class TheLimitsTests(unittest.TestCase):
 
     def test_the_floors_are_where_the_fingertips_and_the_wrist_servo_stay_off_the_table(self):
-        self.assertEqual(TIP_FLOOR, WorkSpaceLimits.z_min, 'the closed fingertips reach 1 cm beyond the tip')
+        self.assertEqual(TIP_FLOOR, WorkSpaceLimits.z_min, 'the tip is the end of the closed fingertips')
         self.assertEqual(WRIST_FLOOR, WorkSpaceLimits.wrist_z_min)
+
+    def test_the_wrist_centre_stays_off_the_base_column(self):
+        self.assertEqual(WRIST_RADIUS_MIN, WorkSpaceLimits.wrist_radius_min)
+        self.assertEqual(dynamixel_robot_config.d6 + 0.1, WorkSpaceLimits.y_min)
 
     def test_the_arm_rests_above_both_floors_so_a_move_can_start_from_rest(self):
         wrist, tip = heights(RESTING_ANGLES)
-        self.assertAlmostEqual(3.7, tip, delta=0.3, msg='the tip at rest, 24 November 2026')
+        # 3.7 cm was read with the 14 cm gripper on 24 November 2026, the 15 cm gripper puts its tip 0.1 cm higher
+        self.assertAlmostEqual(3.8, tip, delta=0.2, msg='the tip at rest')
         self.assertAlmostEqual(2.3, wrist, delta=0.3, msg='the wrist centre at rest')
         self.assertGreater(tip, WorkSpaceLimits.z_min)
         self.assertGreater(wrist, WorkSpaceLimits.wrist_z_min)
@@ -73,12 +81,12 @@ class TheLimitsTests(unittest.TestCase):
         robot = RealRobot()
         self.assertIs(WorkSpaceLimits, robot.workspace_limits)
         self.assertEqual(dynamixel_robot_config, robot.robot_config)
-        self.assertEqual(14, dynamixel_robot_config.d6, 'the gripper length stays 14 cm')
+        self.assertEqual(15, dynamixel_robot_config.d6, 'the gripper length stays 15 cm')
 
     def test_the_planner_refuses_a_tip_under_the_floor_and_accepts_one_over_it_with_the_gripper_pointing_down(self):
         robot = RealRobot()
         down = forward_kinematics(np.radians([0, 90, 90, -12, 0, -90, 0]), dynamixel_robot_config)
-        for z, accepted in ((1.9, False), (2.1, True), (4.0, True)):
+        for z, accepted in ((0.9, False), (1.1, True), (4.0, True)):
             pose = copy(down)
             pose.z = z
             angles = inverse_kinematics(pose, dynamixel_robot_config)

@@ -247,7 +247,7 @@ Gravity blocks for joints 4 and 5, 23 November 2026. Both are fitted on poses AT
 - A run with `--floor 3` failed that evening: the floor also raises the floor of the wrist, which lies at 2.4 cm
   when the arm rests, so the planner refused every move, the lowering included, with the torque already on.
   `lower_arm.py` put the arm down. A floor has to stay below where the arm rests; neither the recorder nor the
-  preview checks that yet. Since 24 November the limit of the tip itself is 2 cm (it was -2, from the old wrist,
+  preview checks that yet. Since 26 November the limit of the tip itself is 1 cm (with d6 15 the tip is the end of the fingertips; 2 cm with d6 14 from 24 November) (it was -2, from the old wrist,
   see `Workspace limits.md`), so the recorder no longer picks poses with the fingertips at table level and a
   `--floor` is not needed; a seed gives other poses than before that change.
 
@@ -340,7 +340,7 @@ path.
   ambiguous and predate the 2024 rebuild (PETG-CF lower arm). Servo weights from the manuals: XM430-W350 82 g,
   XM540-W270 165 g, XC430 65 g, XL330-M288 23 g.
 - Geometry: `src/kinematics/kinematics.py` is the kinematics to use, with the link lengths from
-  `src/robot_config.yaml` (d1 = 15.7, a2 = 20, d4 = 22, d6 = 12 cm, conventions in the rework handover). The URDFs
+  `src/robot_config.yaml` (d1 = 15.7, a2 = 20, d4 = 21, d6 = 15 cm since November 2026 (22 and 12 before the wrist was rebuilt), conventions in the rework handover). The URDFs
   `src/simulation/urdf/fred_new.urdf` and `fred_with_spheres_new.urdf` are built from `fred.xacro` with the same
   lengths (`python -m src.simulation.build_urdf`, a test checks the chain against the yaml); their masses and
   inertias are placeholders (0.05-0.3 kg) and their joint axes have different signs from the kinematics; `fred.urdf`

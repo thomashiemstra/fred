@@ -714,6 +714,31 @@ horizontal and 1.5 at 57 degrees up or down, the same at both speeds, and the fi
 without a lead the joint trails by 1.9, 2.6 and 3.5 positions, with this one by 0.9, 0.6 and 0.5, no rougher.
 The lead is small here, 3 positions at 30 degrees/s. The recording of 18 November gave 2.60, the pwm 2.98
 
+26 November 2026, P 4710 D 350 became P 1420 D 640. With the gamepad the joint oscillated after stops, worst with
+the gripper straight in front of the base and the upper arm hanging straight down. There gravity puts no load on
+the joint (holding pwm -3) and it floats in its gear play; the poses of 17 November had the upper arm 60 and 90
+degrees from vertical, loaded. Sweeps at pose 90 35 -35 0 90 0 (runs tune_joint3_20261126_2229 and _2231):
+
+| P | D | at the hanging pose |
+|---|---|---|
+| 4710 | 350 | oscillates by itself, 8 positions at 10 Hz, pwm +-170 |
+| 2400 | 350, 640, 1000 | still at rest, a step of 18 positions starts an oscillation of 7 positions that stays |
+| 2400 | 1600, 2500 | settles, 12 to 13 rings, overshoot 4.5 to 5.6 positions |
+| 1850 | 350 to 2500 | 5 to 6 positions of ripple at rest |
+| 1420 | 350 to 2500 | quiet at rest, about 10 rings, overshoot 3.5 to 5.4 |
+| 1090 | 350 to 2500 | quiet at rest, 6 to 8 rings, overshoot 3.3 to 4.3 |
+
+No gains pass the sweep there: the ringing hardly changes with D, so it is the play and not the loop. 1420 is the
+highest P that is quiet at rest and settles; D 640 lowered the overshoot against D 350 without adding pwm noise.
+Tried with the gamepad the same evening: the oscillation is gone. The cost is a softer joint: what the gravity
+model and the feedforward predict is unchanged (they are in pwm units), what they leave is corrected 3.3 times
+more weakly, so the friction band at rest (48 pwm) is up to 4.3 positions where it was 1.3. Not measured again at
+the loaded poses. A first run at pose 90 60 -60 0 90 0 put the back of the wrist assembly against the shoulder
+housing (the wrist 10 cm from the base axis), which is why `wrist_radius_min` exists; its samples
+(tune_joint3_20261126_2150) are of a joint held by that contact and say nothing. Not built: gains that follow the
+load of the joint (stiff where it is loaded, soft where it floats); the P knee between 0 and 60 degrees from
+vertical is not measured.
+
 ### Servo 4 (wrist 1)
 
 `offset: 3`: measured in the jig at 0 degrees, raw 2051

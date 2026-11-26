@@ -187,14 +187,15 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
 
 - Units: cm and radians in the kinematics and the planner, degrees only in `servo_config.yaml`. Link lengths come
   from `src/robot_config.yaml` (`src/robot_config.py` loads it into `global_constants.dynamixel_robot_config` and
-  `simulated_robot_config`): d1 = 15.7 ground to shoulder, a2 = 20, d4 = 22, d6 = 12 wrist centre to gripper tip.
+  `simulated_robot_config`): d1 = 15.7 ground to shoulder, a2 = 20, d4 = 21, d6 = 15 wrist centre to the end of the closed
+  fingertips (d4 22 and d6 12 until the wrist was rebuilt on 17 November 2026, d6 14 until 26 November).
   `WorkSpaceLimits.y_min` follows d6. The kinematics tests use their own `RobotConfig(d1=13.92, ...)`.
 - Angles: arrays of length 7 in radians, index 0 unused, index 1-6 = servo id 1-6. 1 = base yaw. 2 = shoulder, 0 =
   lower arm horizontal, pi/2 = straight up. 3 = elbow, pi/2 = upper arm in line with the lower arm, 0 = upper arm
   turned 90 degrees towards the base. 4 = wrist roll around the upper arm (no effect on the position when 5 = 0).
   5 = wrist bend, its sign is the flip. 6 = gripper roll, orientation only.
 - `Pose`: `alpha` turns around world z, `beta` around y, `gamma` around x; at alpha = beta = gamma = 0 the gripper
-  points along +y, so the wrist centre is 12 cm behind the tip (start pose (30, 22, 4): wrist at (30, 10, 4)).
+  points along +y, so the wrist centre is d6 = 15 cm behind the tip (start pose (30, 22, 4): wrist at (30, 7, 4)).
   `Pose.time` is ignored by the planner. `calculate_angles_from_euler_matrix` (behind `forward_kinematics` and
   `get_current_pose`) is ambiguous at beta = +-pi/2: it returns gamma = 0 and puts the whole turn in alpha. The
   matrix is exact, so compare `get_euler_matrix()`, not alpha/gamma.
@@ -205,14 +206,16 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   and returns the stretched arm pointing at the target. Check the result with `forward_position_kinematics`, as
   `plan_straight_line` does (`MAX_POSITION_ERROR` = 0.1 cm).
 - `WorkSpaceLimits` (`src/global_constants.py`): the gripper tip stays at least `radius_min` = 10 cm from the origin
-  on the ground under the base, at `y_min` = d6 + 0.1 = 12.1 (keeps the wrist at y > 0.1, y = 0 breaks the IK) and
-  at `z_min` = -2 (the fingers may rest on the table; the arm dropped onto its fingertips puts the tip at -1.3 by
-  the kinematics, measured 25 October 2026, so moves can start from there; -1 until then); the wrist centre stays within `wrist_reach_max` = 41.8 cm of
-  the shoulder (the elbow bent at least about 11 degrees, away from the straight elbow) and at `wrist_z_min` = 1.5,
-  which keeps the wrist servo body (about 1.8 cm around its axis) off the table while the gripper points up. The arm
-  starts from rest with the wrist servo lying on the table, so `wrist_z_min` can't be higher than that resting
-  height. There is no maximum height; until 25 October 2026 a sphere of 57, later 60 cm around the origin on the
-  ground limited the tip instead, see `Workspace limits.md`.
+  on the ground under the base, at `y_min` = d6 + 0.1 = 15.1 (keeps the wrist at y > 0.1, y = 0 breaks the IK) and
+  at `z_min` = 1 (the fingertips 1 cm above the table with the gripper pointing down; -2 with the old wrist until 24
+  November 2026, then 2 with d6 14 until 26 November); the wrist centre stays within `wrist_reach_max` = 41.8 cm of
+  the shoulder (meant to keep the elbow bent, but a2 + d4 is 41 since the wrist was rebuilt, so it no longer
+  bites), at least `wrist_radius_min` = 12.5 cm from the vertical axis through the base at any height (since 26
+  November 2026: closer, the back of the wrist assembly touches the shoulder housing) and at `wrist_z_min` = 1,
+  which keeps the wrist servo body off the table while the gripper points up. The arm starts from rest with the
+  wrist servo lying on the table, so `wrist_z_min` can't be higher than that resting height. There is no maximum
+  height; until 25 October 2026 a sphere of 57, later 60 cm around the origin on the ground limited the tip
+  instead, see `Workspace limits.md`.
 - The check is one place: `robot.check_workspace(angles)` (`AbstractRobotController`, `src/utils/workspace.py`),
   with `robot.workspace_limits` (the class above by default, a robot can be given other limits) and the robot's
   link lengths. `move_servos` checks nothing, so it stays fast; whoever moves the robot checks first. The planner
@@ -222,8 +225,9 @@ Gripper (`gripper_test.py`, see the results in the comment of servo 7 in `servo_
   (1e-6 cm tolerance for the kinematics).
 - `movement.plan_move_to_pose(robot, current_angles, target_pose)` plans a straight line with a slerp of
   the orientation and a minimum jerk profile, keeping the current flip (the flip of the target pose is ignored; the
-  tip is `d6` = 12 cm from the wrist centre, a flip turns the wrist through straight and swings the tip on that
-  radius, 15 cm at the start pose). It takes the robot for its link lengths, its workspace check and its joint
+  tip is `d6` = 15 cm from the wrist centre, a flip turns the wrist through straight and swings the tip on that
+  radius; the gamepad's A button therefore only flips with the wrist centre at least 12 cm up, and its B button
+  resets the orientation with the wrist centre staying where it is, since 26 November 2026). It takes the robot for its link lengths, its workspace check and its joint
   ranges (`robot.get_angle_limits()`, None skips the range check). It raises `MovementException` when any step
   can't be reached, fails the workspace check, is outside a joint range (1e-6 rad tolerance), is faster than
   `recommended_max_servo_speed`, or doesn't start at the current angles. `plan_move_to_angles(robot,

@@ -40,8 +40,8 @@ from src.robot_controllers.dynamixel_robot.dynamixel_robot_controller import ARM
 from src.robot_controllers.dynamixel_robot.servo_config import ServoConfig, load_servo_config
 
 # cm: a tip or wrist lower than this at any of a pose's three stops is marked. 1 cm above the limit of the tip
-# (WorkSpaceLimits.z_min, 2 cm), so the marked poses are the ones that come within 1 cm of what the planner refuses
-DEFAULT_WARN = 3.0
+# (WorkSpaceLimits.z_min, 1 cm), so the marked poses are the ones that come within 1 cm of what the planner refuses
+DEFAULT_WARN = 2.0
 # the three stops at every pose, in the order of the columns
 STOPS = ('at the pose', 'at the overshoot above (+delta)', 'at the overshoot below (-delta)')
 # the indices into the points forward_position_kinematics returns: shoulder, elbow, forearm middle, wrist, tip
@@ -206,10 +206,10 @@ def print_report(args: argparse.Namespace, robot: OfflineRobot, poses: Sequence[
     print('{} poses with the tip or the wrist under {:g} cm (marked LOW)'.format(low, args.warn))
     # the numbers are those of the limits in force (WorkSpaceLimits, or --floor), its docstring says what they mean
     print('Heights are cm above the table: the planner lets the gripper tip down to {} cm and the wrist centre to {} '
-          'cm (the tip of the model is the point where the gripper grips and the closed fingers reach 1 cm beyond it, '
-          'so with the gripper pointing down the fingertips are 1 cm lower than the tip; the wrist servo hangs below '
-          'the wrist centre when the gripper points up, see WorkSpaceLimits in src/global_constants.py), and it does '
-          'not check the gripper fingers or the elbow.'.format(limits.z_min, limits.wrist_z_min))
+          'cm (the tip of the model is the end of the closed fingertips, so with the gripper pointing down the '
+          'fingertips are at the height of the tip; the wrist servo hangs below the wrist centre when the gripper '
+          'points up, see WorkSpaceLimits in src/global_constants.py), and it does not check the gripper fingers or '
+          'the elbow.'.format(limits.z_min, limits.wrist_z_min))
 
 
 def build_parser() -> argparse.ArgumentParser:
