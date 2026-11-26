@@ -1,0 +1,106 @@
+# Configuration of the block stacking: the camera sees 3 cm blocks with aruco markers on the table and the arm stacks
+# them into a tower. Loaded by stacking_config.py, which refuses unknown and missing keys and values that make no sense.
+#
+# Lengths are in cm, angles in degrees. Every position is in the robot frame: the origin is on the table under the
+# base, x points to the right, y forward and z up.
+#
+#   board                  the charuco board that lies flat on the table, printed by
+#                          src/camera/aruco_generation/block_sheet.py. It gives the camera the position of the table
+#     dictionary             the aruco dictionary of its markers (a DICT_ name of cv2.aruco)
+#     squares: [x, y]        squares along the x and the y arrow printed on the board
+#     square_length          the edge of a square
+#     marker_length          the edge of a marker in a square, less than square_length
+#     position: [x, y]       of the bottom-right corner of the board, the one marked as origin on the print
+#     rotation               of the x arrow printed on the board relative to the x axis of the robot, counter
+#                            clockwise seen from above
+#   blocks
+#     dictionary             the aruco dictionary of the markers on the blocks
+#     marker_ids             the ids that are used on blocks, none of the ids the board uses when both have the same
+#                            dictionary (the board uses 0 up to squares x * squares y // 2 - 1)
+#     marker_length          the edge of the marker on a block, less than size
+#     size                   the edge of a block
+#   tower
+#     position: [x, y]       of the centre of the tower
+#     rotation               of the edges of the blocks in the tower
+#     clear_radius           no block may lie this close to the centre of the tower when a run starts
+#   gripper
+#     finger_gap             between the fingers when open, more than the size of a block
+#     open_width             over the outside of the fingers when open, more than finger_gap
+#     finger_depth           of a finger across the direction it closes in
+#     open_state             the gripper state (0 open to 100 closed, as in servo_config.yaml) where it is open
+#     closed_state           the state where the fingers touch
+#     empty_state            a gripper that closes beyond this state holds nothing
+#     max_lead_positions     the target stays this many servo positions beyond where the block stopped the gripper
+#     settle_time            seconds without movement before the gripper counts as stopped
+#     timeout                seconds to wait for the gripper at most
+#   motion
+#     grip_height            of the fingertips above the surface the block stands on, at least the lowest height the
+#                            workspace limits allow (WorkSpaceLimits.z_min) and less than the size of a block + 1
+#     hover_height           of the grip point above the table while it approaches a block, more than grip_height +
+#                            the size of a block
+#     tower_clearance        a carried block arrives this far above its place before it goes straight down
+#     release_height         a block is let go this far above the block below it
+#     park: [x, y, z]        of the grip point where the arm waits, gripper down, while the camera looks
+#     linear_speed           cm/s of the straight moves
+#     joint_speed            rad/s of the joint that turns the most in the other moves, joints 1 and 2 must not go
+#                            fast
+#     joint_margin           degrees a joint has to stay away from the ends of its range
+#     block_clearance        cm the open fingers have to stay away from the other blocks
+#     rest_clear_width       blocks have to stay this far from the line where the arm rests on the table
+#   scan
+#     frames                 pictures a block has to be seen in
+#     timeout                seconds to wait for them
+#     max_spread             cm the positions of a block may differ between the pictures
+#   click_mode              the mode in which a click on a block in the camera window sends that block to the tower
+#     idle_timeout           seconds the arm waits at the park pose for a click before it lays itself down
+
+board:
+  dictionary: DICT_4X4_50
+  squares: [5, 3]
+  square_length: 3.0
+  marker_length: 2.2
+  # placed with the jig on 26 November 2026: the origin corner is 8 cm to the left of and 8 cm in front of the origin
+  # of the robot, the board square to the robot. The camera agrees within about 1 cm (the centre of the base flange
+  # and a block between the fingers of the resting arm, both seen in the frame of the board)
+  position: [-8.0, 8.0]
+  rotation: 0.0
+blocks:
+  dictionary: DICT_5X5_50
+  marker_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # ids 43-46 of this dictionary are on the arm and the table already
+  marker_length: 2.4
+  size: 3.0
+tower:
+  # on the left, where the camera sees it (it stands to the left of the robot and the right side is hidden behind the
+  # shoulder), clear of the board and of the line the arm rests on
+  position: [-20.0, 30.0]
+  rotation: 0.0
+  clear_radius: 6.0
+gripper:
+  finger_gap: 6.0  # measured 26 November 2026
+  open_width: 8.0
+  finger_depth: 3.0  # not measured
+  open_state: 0
+  closed_state: 100
+  empty_state: 95
+  max_lead_positions: 85  # the gamepad keeps its target within 85 positions too, measured for this servo
+  settle_time: 0.3
+  timeout: 4.0
+motion:
+  grip_height: 1.0  # of the fingertips above the surface the block stands on, the table limit of the arm is 1
+  hover_height: 10.0
+  tower_clearance: 5.0
+  release_height: 0.3
+  park: [0.0, 16.0, 30.0]
+  linear_speed: 5.0
+  joint_speed: 0.3
+  joint_margin: 5.0
+  block_clearance: 0.5
+  rest_clear_width: 6.0
+scan:
+  frames: 10
+  timeout: 5.0
+  # with the small 5 x 3 board a single picture moves a block that is far from the board by up to about 0.5 cm at
+  # 0.2 pixel of noise on the corners of the board, the median over the scan is what is used
+  max_spread: 0.8
+click_mode:
+  idle_timeout: 120.0
