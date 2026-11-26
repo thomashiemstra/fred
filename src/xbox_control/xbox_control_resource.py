@@ -43,6 +43,9 @@ def test() -> Response:
 
 @xbox_api.route('/start', methods=['POST'])
 def start() -> str | Response:
+    # one controller at a time moves the arm
+    if global_objects.block_stacker_running():
+        raise InvalidRequest('the block stacking is running, stop it first', 409)
     # the xbox robot controller keeps track of whether it is running, and makes sure it only starts once
     xbox_robot_controller = global_objects.get_xbox_robot_controller()
     if xbox_robot_controller.is_running():

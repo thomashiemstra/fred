@@ -4,6 +4,7 @@ from flask import Flask, render_template, request, Response
 
 from src import global_objects
 from src.xbox_control.xbox_control_resource import xbox_api
+from src.block_stacking.block_stacking_resource import block_api
 from src.camera_control.camera_control_resource import camera_api
 
 from flask_cors import CORS
@@ -21,6 +22,7 @@ app = Flask(__name__)
 CORS(app, origins=UI_ORIGINS)
 app.register_blueprint(xbox_api, url_prefix='/xbox')
 app.register_blueprint(camera_api, url_prefix='/camera')
+app.register_blueprint(block_api, url_prefix='/blocks')
 CDN(app)
 
 
@@ -53,6 +55,11 @@ def xbox() -> str:
 @app.route('/camera')
 def camera() -> str:
     return render_template('camera_control.html')
+
+
+@app.route('/blocks')
+def blocks() -> str:
+    return render_template('block_stacking.html')
 
 
 @app.route('/getJsonList', methods=['GET'])

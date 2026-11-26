@@ -55,6 +55,30 @@ class XboxControlResourceTests(unittest.TestCase):
         self.assertEqual(b'already started', response.data)
         self.controller.start.assert_not_called()
 
+    def test_start_is_refused_while_the_block_stacking_runs(self):
+        with mock.patch.object(global_objects, 'block_stacker_running', return_value=True):
+            response = self.post('/start')
+
+        self.assertEqual(409, response.status_code)
+        self.assertEqual({'success': False, 'error': 'the block stacking is running, stop it first'},
+                         response.get_json())
+        self.controller.start.assert_not_called()
+
+    def test_start_is_not_refused_when_the_block_stacking_is_idle(self):
+        self.controller.start.return_value = True
+        with mock.patch.object(global_objects, 'block_stacker_running', return_value=False):
+            response = self.post('/start')
+
+        self.assertEqual({'success': True}, response.get_json())
+
+    def test_start_does_not_build_the_block_stacker(self):
+        # the real helper asks without building: no stacker means the gamepad may start
+        self.controller.start.return_value = True
+        global_objects.get_block_stacker.cache_clear()
+        with mock.patch.object(global_objects, 'get_block_stacker', wraps=global_objects.get_block_stacker) as getter:
+            self.assertEqual({'success': True}, self.post('/start').get_json())
+        getter.assert_not_called()
+
     def test_stop(self):
         self.controller.stop.return_value = True
 

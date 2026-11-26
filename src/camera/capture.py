@@ -1,10 +1,16 @@
+import logging
+import threading
+
 import cv2
 import numpy as np
-import threading
 
 from src.camera.image_handlers import ImageHandler
 from src.camera.util import CaptureConfig
 from src.utils.decorators import synchronized_with_lock
+
+logger = logging.getLogger(__name__)
+
+WINDOW_NAME = 'frame'
 
 
 class CameraCapture:
@@ -85,6 +91,10 @@ class CameraCapture:
         self._thread.join()
 
     def __capture_camera(self) -> None:
+        # the window exists before the first frame is shown, so that it can have its mouse callback: OpenCV calls it
+        # from inside waitKey, which is on this thread
+        cv2.namedWindow(WINDOW_NAME)
+        cv2.setMouseCallback(WINDOW_NAME, self._on_mouse)
         while self.__is_running():
             # Capture frame-by-frame
             assert self._cap is not None
@@ -96,7 +106,7 @@ class CameraCapture:
             self.use_image_handlers(frame, gray)
 
             # Display the resulting frame
-            cv2.imshow('frame', frame)
+            cv2.imshow(WINDOW_NAME, frame)
             cv2.waitKey(1)
 
         for image_handler in self._image_handlers:
@@ -114,6 +124,19 @@ class CameraCapture:
     def use_image_handlers(self, frame: np.ndarray, gray: np.ndarray) -> None:
         for image_handler in self._image_handlers:
             image_handler.handle_frame(frame, gray)
+
+    def _on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.use_click_handlers(x, y)
+
+    @synchronized_with_lock("image_handlers_lock")
+    def use_click_handlers(self, x: int, y: int) -> None:
+        for image_handler in self._image_handlers:
+            try:
+                image_handler.handle_click(x, y)
+            except Exception:
+                # a handler that fails on a click must not stop the other handlers or the capture thread
+                logger.exception('%s failed to handle a click at %d, %d', type(image_handler).__name__, x, y)
 
     @synchronized_with_lock("image_handlers_lock")
     def add_image_handler(self, image_handler: ImageHandler) -> None:

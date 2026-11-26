@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% set active_page = "blocks" %}
+
+
+{% block title -%}
+    <h1>Block stacking</h1>
+{%- endblock title %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="row">
+            <div class="col-sm-4">
+                <h2>Instructions:</h2>
+                <ol>
+                    <li>Tape the board down and put its position in <code>src/block_stacking/stacking_config.yaml</code>.</li>
+                    <li>Camera on: the picture opens in its own window.</li>
+                    <li>Look: shows the blocks and the plan, nothing moves.</li>
+                    <li>Check tip: with the torque off, hold the gripper on a block and compare.</li>
+                    <li>Rehearse: the arm moves above every block and above the tower, without going down or gripping.</li>
+                    <li>Stack.</li>
+                    <li>Or switch on Click to stack: the arm waits, and puts the block you click in the camera window on
+                        the tower.</li>
+                </ol>
+                <p>Stop lays the arm down on the table.</p>
+            </div>
+            <div class="col-sm-8">
+                <h2>Controls</h2>
+                <h6>Camera</h6>
+                <div class="btn-group">
+                    <button id="cameraOn" type="button" class="btn btn-success">Camera On</button>
+                    <button id="cameraOff" type="button" class="btn btn-secondary">Camera Off</button>
+                </div>
+                <br>
+                <br>
+                <h6>Steps</h6>
+                <div class="btn-group">
+                    <button id="look" type="button" class="btn btn-primary">Look</button>
+                    <button id="checkTip" type="button" class="btn btn-primary">Check tip</button>
+                    <button id="rehearse" type="button" class="btn btn-warning">Rehearse</button>
+                    <button id="stack" type="button" class="btn btn-success">Stack</button>
+                </div>
+                <br>
+                <br>
+                <h6>Click to stack</h6>
+                <input id="clickMode" type="checkbox" aria-label="Click to stack" data-on="On" data-off="Off"
+                       data-onstyle="success" data-offstyle="secondary">
+                <p class="small text-muted">On: the arm moves to its waiting pose. Click a block in the camera window and
+                    the arm puts it on the tower. Off, or Stop, lays the arm down. The camera has to be on.</p>
+                <br>
+                <h6>Stop</h6>
+                <button id="stop" type="button" class="btn btn-danger">Stop</button>
+                <button id="layDown" type="button" class="btn btn-secondary">Lay the arm down</button>
+                <button id="torqueOff" type="button" class="btn btn-danger">Torque off</button>
+                <br>
+                <br>
+                <div id="answer" class="font-weight-bold"></div>
+                <div id="tipResult"></div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-12"/>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-sm-12">
+                <h2>Status</h2>
+                <p>State: <strong id="state">no answer yet</strong> <span id="activity"></span></p>
+                <p id="clickMessage" hidden></p>
+                <p id="error" class="text-danger font-weight-bold"></p>
+                <ul id="warnings" class="text-dark font-weight-bold"></ul>
+                <p>The board is in the picture: <strong id="board">?</strong></p>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-sm-6">
+                <h4>Blocks</h4>
+                <table class="table table-sm">
+                    <thead>
+                        <tr><th>id</th><th>x (cm)</th><th>y (cm)</th><th>rotation (degrees)</th><th>steady</th></tr>
+                    </thead>
+                    <tbody id="blocks"></tbody>
+                </table>
+                <p id="noBlocks">No blocks in the picture.</p>
+            </div>
+            <div class="col-sm-6">
+                <h4>Plan</h4>
+                <table class="table table-sm">
+                    <thead>
+                        <tr><th>order</th><th>block</th><th>level (0 = on the table)</th></tr>
+                    </thead>
+                    <tbody id="plan"></tbody>
+                </table>
+                <p id="noPlan">Nothing is planned.</p>
+                <h4>Skipped</h4>
+                <ul id="skipped"></ul>
+                <h4>Tower</h4>
+                <p id="tower"></p>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block scripts %}
+    <script type="text/javascript" src="{{ url_for('static', filename='blocks.js') }}"></script>
+{% endblock %}

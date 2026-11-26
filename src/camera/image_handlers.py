@@ -23,6 +23,9 @@ class ImageHandler(ABC):
     def deactivate_handler(self) -> None:
         pass
 
+    def handle_click(self, x: int, y: int) -> None:
+        """a left click on the picture at pixel x, y of the frame, most handlers have no use for it"""
+
 
 class ImageRecorder(ImageHandler):
 

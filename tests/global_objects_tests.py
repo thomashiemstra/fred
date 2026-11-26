@@ -1,7 +1,13 @@
+import subprocess
+import sys
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from src import global_constants, global_objects
+from src.block_stacking import block_stacker, stacking_config
+from src.camera import block_detection
 from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
 from src.robot_controllers.dynamixel_robot import dynamixel_robot_controller, dynamixel_utils
 from src.robot_controllers.dynamixel_robot.dynamixel_utils import DynamixelError
@@ -87,6 +93,120 @@ class GetRobotTests(unittest.TestCase):
             global_objects.configure(show_simulation=True)
         # the robot that exists is kept as it is
         self.assertIs(self.simulated, global_objects.get_robot().simulated_robot)
+
+
+class BlockStackingObjectsTests(unittest.TestCase):
+    """the block image handler and the block stacker open nothing before they are used"""
+
+    def setUp(self):
+        for getter in (global_objects.get_block_image_handler, global_objects.get_block_stacker,
+                       global_objects.get_xbox_robot_controller):
+            getter.cache_clear()
+            self.addCleanup(getter.cache_clear)
+        # nothing may open the real robot
+        patcher = mock.patch.object(global_objects, 'get_robot', side_effect=AssertionError('real robot'))
+        self.get_robot = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_importing_the_module_opens_nothing(self):
+        # a fresh interpreter, this one has imported everything already
+        code = ('import sys\n'
+                'from src import global_objects\n'
+                'for getter in (global_objects.get_robot, global_objects.get_camera, global_objects.get_block_stacker,\n'
+                '               global_objects.get_block_image_handler, global_objects.get_xbox_robot_controller):\n'
+                '    assert getter.cache_info().currsize == 0, getter\n'
+                'for name in ("src.camera.block_detection", "src.block_stacking.block_stacker", "src.camera.capture"):\n'
+                '    assert name not in sys.modules, name\n')
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run([sys.executable, '-c', code], cwd=root, capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_the_handler_is_made_from_the_stacking_config_once(self):
+        config = object()
+        handler = object()
+        with mock.patch.object(stacking_config, 'load_stacking_config', return_value=config) as load, \
+                mock.patch.object(block_detection, 'get_default_block_image_handler',
+                                  return_value=handler) as make_handler:
+            self.assertIs(handler, global_objects.get_block_image_handler())
+            self.assertIs(handler, global_objects.get_block_image_handler())
+        load.assert_called_once_with()
+        make_handler.assert_called_once_with(config)
+
+    def test_a_missing_calibration_file_is_raised_and_the_next_call_tries_again(self):
+        with mock.patch.object(block_detection, 'get_default_block_image_handler',
+                               side_effect=[FileNotFoundError('no calibration'), 'handler']):
+            with self.assertRaises(FileNotFoundError):
+                global_objects.get_block_image_handler()
+            self.assertEqual('handler', global_objects.get_block_image_handler())
+
+    def test_the_stacker_gets_the_function_that_gives_the_robot_and_does_not_call_it(self):
+        handler = mock.Mock(name='handler')
+        config = object()
+        with mock.patch.object(global_objects, 'get_block_image_handler', return_value=handler), \
+                mock.patch.object(stacking_config, 'load_stacking_config', return_value=config), \
+                mock.patch.object(block_stacker, 'BlockStacker') as stacker_class:
+            stacker = global_objects.get_block_stacker()
+            self.assertIs(stacker, global_objects.get_block_stacker())
+        stacker_class.assert_called_once_with(self.get_robot, handler, config)
+        self.get_robot.assert_not_called()
+
+    def test_the_clicks_on_the_camera_window_go_to_the_stacker(self):
+        handler = mock.Mock(name='handler')
+        with mock.patch.object(global_objects, 'get_block_image_handler', return_value=handler), \
+                mock.patch.object(stacking_config, 'load_stacking_config', return_value=object()), \
+                mock.patch.object(block_stacker, 'BlockStacker') as stacker_class:
+            stacker = global_objects.get_block_stacker()
+            global_objects.get_block_stacker()
+        handler.set_click_listener.assert_called_once_with(stacker_class.return_value.click)
+        self.assertIs(stacker_class.return_value, stacker)
+        self.get_robot.assert_not_called()
+
+    def test_a_real_stacker_is_the_click_listener_of_a_real_handler(self):
+        handler = mock.Mock(name='handler')
+        with mock.patch.object(global_objects, 'get_block_image_handler', return_value=handler):
+            stacker = global_objects.get_block_stacker()
+        handler.set_click_listener.assert_called_once_with(stacker.click)
+
+    def test_a_stacker_that_can_not_be_built_leaves_the_click_listener_alone(self):
+        handler = mock.Mock(name='handler')
+        with mock.patch.object(global_objects, 'get_block_image_handler', return_value=handler), \
+                mock.patch.object(stacking_config, 'load_stacking_config',
+                                  side_effect=stacking_config.StackingConfigError('bad')):
+            with self.assertRaises(stacking_config.StackingConfigError):
+                global_objects.get_block_stacker()
+        handler.set_click_listener.assert_not_called()
+
+    def test_a_real_stacker_is_built_without_the_robot(self):
+        handler = mock.Mock(name='handler')
+        with mock.patch.object(global_objects, 'get_block_image_handler', return_value=handler):
+            stacker = global_objects.get_block_stacker()
+        self.assertIsInstance(stacker, block_stacker.BlockStacker)
+        self.assertFalse(stacker.is_running())
+        self.get_robot.assert_not_called()
+
+    def test_the_running_helpers_do_not_build_anything(self):
+        self.assertFalse(global_objects.xbox_controller_running())
+        self.assertFalse(global_objects.block_stacker_running())
+        for getter in (global_objects.get_xbox_robot_controller, global_objects.get_block_stacker):
+            self.assertEqual(0, getter.cache_info().currsize)
+        self.get_robot.assert_not_called()
+
+    def test_the_running_helpers_do_not_call_the_getters_when_nothing_is_built(self):
+        for helper, name in ((global_objects.xbox_controller_running, 'get_xbox_robot_controller'),
+                             (global_objects.block_stacker_running, 'get_block_stacker')):
+            with self.subTest(helper=name), mock.patch.object(global_objects, name) as getter:
+                getter.cache_info.return_value = SimpleNamespace(currsize=0)
+                self.assertFalse(helper())
+            getter.assert_not_called()
+
+    def test_the_running_helpers_ask_what_is_built(self):
+        for helper, name in ((global_objects.xbox_controller_running, 'get_xbox_robot_controller'),
+                             (global_objects.block_stacker_running, 'get_block_stacker')):
+            for running in (True, False):
+                with self.subTest(helper=name, running=running), mock.patch.object(global_objects, name) as getter:
+                    getter.cache_info.return_value = SimpleNamespace(currsize=1)
+                    getter.return_value.is_running.return_value = running
+                    self.assertIs(running, helper())
 
 
 if __name__ == '__main__':

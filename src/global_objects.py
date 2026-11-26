@@ -17,6 +17,8 @@ from src import global_constants
 from src.robot_controllers.dynamixel_robot.servo_config import load_servo_config
 
 if TYPE_CHECKING:
+    from src.block_stacking.block_stacker import BlockStacker
+    from src.camera.block_detection import BlockImageHandler
     from src.camera.capture import CameraCapture
     from src.robot_controllers.combined_robot.combined_robot import CombinedRobot
     from src.robot_controllers.simulated_robot.simulated_robot_controller import SimulatedRobotController
@@ -80,3 +82,47 @@ def get_xbox_robot_controller() -> XboxRobotController:
 def get_camera(camera: int = 0) -> CameraCapture:
     from src.camera.capture import CameraCapture
     return CameraCapture(camera, [])
+
+
+@lru_cache(maxsize=1)
+def get_block_image_handler() -> BlockImageHandler:
+    """
+    the finder of the blocks that the camera and the block stacker share
+    :raises FileNotFoundError: when the calibration file of the camera is missing
+    :raises StackingConfigError: when the stacking configuration is not valid
+    """
+    from src.block_stacking.stacking_config import load_stacking_config
+    from src.camera.block_detection import get_default_block_image_handler
+    return get_default_block_image_handler(load_stacking_config())
+
+
+@lru_cache(maxsize=1)
+def get_block_stacker() -> BlockStacker:
+    """
+    the block stacker, the robot is passed as the function that gives it: the serial port opens when the stacker
+    first needs the arm, not when it is built
+    :raises FileNotFoundError: when the calibration file of the camera is missing
+    :raises StackingConfigError: when the stacking configuration is not valid
+    """
+    from src.block_stacking.block_stacker import BlockStacker
+    from src.block_stacking.stacking_config import load_stacking_config
+    handler = get_block_image_handler()
+    stacker = BlockStacker(get_robot, handler, load_stacking_config())
+    # a click on a block in the camera window goes to the stacker for the life of the process, the stacker itself
+    # ignores it unless the click mode is on
+    handler.set_click_listener(stacker.click)
+    return stacker
+
+
+def xbox_controller_running() -> bool:
+    """whether the gamepad controls the robot, without building the controller just to ask"""
+    if get_xbox_robot_controller.cache_info().currsize == 0:
+        return False
+    return get_xbox_robot_controller().is_running()
+
+
+def block_stacker_running() -> bool:
+    """whether the block stacker is busy with the arm, without building the stacker just to ask"""
+    if get_block_stacker.cache_info().currsize == 0:
+        return False
+    return get_block_stacker().is_running()
