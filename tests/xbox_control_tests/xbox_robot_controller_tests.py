@@ -304,7 +304,7 @@ class CommandTests(unittest.TestCase):
         controller = make_controller(robot)
         reset_threads = []
 
-        def fake_reset_orientation(pose, robot_config, reset_robot):
+        def fake_reset_orientation(pose, robot_config, reset_robot, angles=None):
             reset_threads.append(threading.current_thread())
             return pose
 
@@ -452,7 +452,7 @@ class ButtonTests(unittest.TestCase):
     def test_every_pressed_button_is_handled(self):
         robot = FakeRobot()
         controller = make_controller(robot, buttons=lambda: Buttons(rb=True, a=True, y=True))
-        controller.current_pose = Pose(30, 22, 4)
+        controller.current_pose = Pose(30, 22, 15)  # high enough for the a button to flip
         controller.pose_updater.maximum_speed = 20
 
         controller.handle_buttons()
@@ -476,7 +476,7 @@ class ButtonTests(unittest.TestCase):
         robot = FakeRobot()
         pressed = [Buttons(rb=True), Buttons(rb=True, a=True), Buttons(rb=True), Buttons(rb=True, pad_up=True)]
         controller = make_controller(robot, buttons=lambda: pressed.pop(0))
-        controller.current_pose = Pose(30, 22, 4)
+        controller.current_pose = Pose(30, 22, 15)  # high enough for the a button to flip
         controller.pose_updater.maximum_speed = 20
 
         for _ in range(4):
@@ -500,11 +500,107 @@ class ButtonTests(unittest.TestCase):
 
     def test_a_toggles_the_flip(self):
         controller = make_controller(FakeRobot(), buttons=lambda: Buttons(a=True))
-        controller.current_pose = Pose(30, 22, 4)
+        controller.current_pose = Pose(30, 22, 15)  # high enough for the a button to flip
 
         controller.handle_buttons()
 
         self.assertTrue(controller.current_pose.flip)
+
+    def controller_with_wrist_at(self, height, robot=None):
+        """a controller that has sent its robot to a pose with the wrist centre at this height (cm above the table)"""
+        robot = robot or FakeRobot()
+        controller = make_controller(robot, buttons=lambda: Buttons(a=True))
+        # the default orientation points the gripper horizontally, so the wrist centre is as high as the tip
+        controller.current_pose = Pose(30, 22, height)
+        controller._take_step(copy(controller.current_pose), 0.01)
+        wrist = forward_position_kinematics(controller._step_angles(), test_config)[3]
+        self.assertAlmostEqual(height, wrist[2], places=6)
+        return controller
+
+    def test_a_does_not_flip_with_the_wrist_centre_below_the_minimum(self):
+        robot = FakeRobot()
+        controller = self.controller_with_wrist_at(xbox_robot_controller.FLIP_MIN_WRIST_HEIGHT - 2, robot)
+        step = controller._step
+        sent = len(robot.sent_angles)
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller.handle_buttons()
+
+        self.assertFalse(controller.current_pose.flip)
+        self.assertIs(step, controller._step, 'no step is prepared')
+        self.assertEqual(sent, len(robot.sent_angles))
+        self.assertEqual([], robot.poses)
+        self.assertEqual(1, len(logs.output))
+        self.assertIn('10.0 cm', logs.output[0], 'the height of the wrist centre')
+        self.assertIn('12.0 cm', logs.output[0], 'the minimum')
+        self.assertIn('raise the arm', logs.output[0])
+
+    def test_a_does_not_prepare_a_step_at_a_pose_that_was_not_stepped_to(self):
+        # a pose some other part set (a move, a reset) has no step; refusing the flip leaves it that way
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(a=True))
+        controller.current_pose = Pose(30, 22, 4)
+        self.assertIsNone(controller._step)
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller.handle_buttons()
+
+        self.assertFalse(controller.current_pose.flip)
+        self.assertIsNone(controller._step)
+
+    def test_a_flips_with_the_wrist_centre_above_the_minimum(self):
+        controller = self.controller_with_wrist_at(xbox_robot_controller.FLIP_MIN_WRIST_HEIGHT + 2)
+
+        with self.assertNoLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller.handle_buttons()
+
+        self.assertTrue(controller.current_pose.flip)
+        self.assertIs(controller.current_pose, controller._step[0])
+        np.testing.assert_array_equal(np.zeros(7), controller._step[2])
+
+    def test_a_flips_with_the_wrist_centre_exactly_at_the_minimum(self):
+        controller = self.controller_with_wrist_at(15)
+        wrist_height = forward_position_kinematics(controller._step_angles(), test_config)[3][2]
+
+        with mock.patch.object(xbox_robot_controller, 'FLIP_MIN_WRIST_HEIGHT', float(wrist_height)):
+            with self.assertNoLogs(xbox_robot_controller.logger, 'WARNING'):
+                controller.handle_buttons()
+
+        self.assertTrue(controller.current_pose.flip)
+
+    def test_a_does_not_flip_with_the_wrist_centre_just_below_the_minimum(self):
+        controller = self.controller_with_wrist_at(15)
+        wrist_height = forward_position_kinematics(controller._step_angles(), test_config)[3][2]
+
+        with mock.patch.object(xbox_robot_controller, 'FLIP_MIN_WRIST_HEIGHT', float(wrist_height) + 0.01):
+            with self.assertLogs(xbox_robot_controller.logger, 'WARNING'):
+                controller.handle_buttons()
+
+        self.assertFalse(controller.current_pose.flip)
+
+    def test_the_minimum_wrist_height_can_be_changed(self):
+        controller = self.controller_with_wrist_at(15)
+
+        with mock.patch.object(xbox_robot_controller, 'FLIP_MIN_WRIST_HEIGHT', 20.0):
+            with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+                controller.handle_buttons()
+        self.assertFalse(controller.current_pose.flip)
+        self.assertIn('15.0 cm', logs.output[0])
+        self.assertIn('20.0 cm', logs.output[0])
+
+        with mock.patch.object(xbox_robot_controller, 'FLIP_MIN_WRIST_HEIGHT', 10.0):
+            controller.handle_buttons()
+        self.assertTrue(controller.current_pose.flip)
+
+    def test_the_height_is_that_of_the_wrist_centre_not_of_the_tip(self):
+        # points of the arm: shoulder, elbow, elbow of the wrist, wrist centre at 20 cm, the tip at 1 cm
+        points = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 20], [0, 0, 1]], dtype=np.float64)
+        controller = make_controller(FakeRobot(), buttons=lambda: Buttons(a=True))
+        controller.current_pose = Pose(30, 22, 15)
+
+        with mock.patch.object(xbox_robot_controller, 'forward_position_kinematics', return_value=points):
+            controller.handle_buttons()
+
+        self.assertTrue(controller.current_pose.flip, 'the fourth point decides, not the last one')
 
     def test_d_pad_changes_the_maximum_speed_within_its_range(self):
         pressed = []
@@ -656,7 +752,7 @@ class ConcurrencyTests(unittest.TestCase):
         controller = make_controller(robot)
         reset_calls = []
 
-        def fake_reset_orientation(pose, robot_config, reset_robot):
+        def fake_reset_orientation(pose, robot_config, reset_robot, angles=None):
             reset_calls.append(pose)
             return pose
 
@@ -721,6 +817,209 @@ class ConcurrencyTests(unittest.TestCase):
         controller.stop()
 
 
+class FloorAtNineLimits(TestWorkspaceLimits):
+    """the tip may not go below 9 cm, the wrist still may go to the floor of the other tests"""
+    z_min = 9
+
+
+class ResetOrientationTests(unittest.TestCase):
+    """the b button turns the gripper around the wrist centre, which stays where it is; the tip goes to its height"""
+
+    def setUp(self):
+        patcher = mock.patch.object(movement, 'sleep')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def press_b_at(self, pose, limits=None):
+        """the controller and robot of an arm at the pose after the b button was pressed, and the angles it started at"""
+        start_angles = inverse_kinematics(pose, test_config)
+        robot = FakeRobot(start_angles)
+        if limits is not None:
+            robot.workspace_limits = limits
+        controller = make_controller(robot, buttons=lambda: Buttons(b=True))
+        controller.current_pose = pose
+        controller.handle_buttons()
+        return controller, robot, start_angles
+
+    def assert_wrist_stays_and_tip_is_level(self, pose):
+        """
+        presses b with the arm at the pose and checks the whole move: the wrist centre stays on its place in every
+        step, joints 1 to 3 keep their angles, the gripper ends level (along +y) at the height of the wrist centre
+        """
+        wrist = forward_position_kinematics(inverse_kinematics(pose, test_config), test_config)[3]
+        with self.assertNoLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller, robot, start_angles = self.press_b_at(pose)
+
+        self.assertGreater(len(robot.sent_angles), 1)
+        for angles in robot.sent_angles:
+            np.testing.assert_allclose(forward_position_kinematics(angles, test_config)[3], wrist, atol=1e-6)
+            np.testing.assert_allclose(angles[1:4], start_angles[1:4], atol=1e-9)
+        tip = forward_position_kinematics(robot.sent_angles[-1], test_config)[4]
+        np.testing.assert_allclose(tip, wrist + [0, test_config.d6, 0], atol=1e-6)
+        new_pose = controller.current_pose
+        np.testing.assert_allclose([new_pose.x, new_pose.y, new_pose.z], tip, atol=1e-6)
+        self.assertAlmostEqual(wrist[2], new_pose.z, places=6, msg='the tip is at the height of the wrist centre')
+        self.assertEqual((0, 0, 0), (new_pose.alpha, new_pose.beta, new_pose.gamma))
+        self.assertIsNone(new_pose.euler_matrix)
+        self.assertEqual(pose.flip, new_pose.flip)
+        np.testing.assert_allclose(inverse_kinematics(new_pose, test_config), robot.sent_angles[-1], atol=1e-6)
+        return controller, robot, start_angles
+
+    def test_pointing_down_the_tip_comes_up_to_the_wrist_and_the_wrist_stays(self):
+        pose = Pose(0, 25, 3, gamma=-pi / 2)  # the gripper points down, the wrist centre is 12 cm above the tip
+        wrist = forward_position_kinematics(inverse_kinematics(pose, test_config), test_config)[3]
+        np.testing.assert_allclose([0, 25, 15], wrist, atol=1e-9)
+
+        controller, robot, start_angles = self.assert_wrist_stays_and_tip_is_level(pose)
+
+        self.assertAlmostEqual(15, controller.current_pose.z, places=6)
+        self.assertAlmostEqual(37, controller.current_pose.y, places=6)
+        # the tip never goes below where it started, and the wrist centre never moves: nothing comes near the table
+        for angles in robot.sent_angles:
+            _, _, _, step_wrist, step_tip = forward_position_kinematics(angles, test_config)
+            self.assertGreaterEqual(step_tip[2], 3 - 1e-6)
+            self.assertGreaterEqual(step_tip[2], TestWorkspaceLimits.z_min)
+            self.assertGreaterEqual(step_wrist[2], TestWorkspaceLimits.wrist_z_min)
+        # only the wrist joints turn: joints 4 and 6 by pi (the straight down pose has them opposite), joint 5 a little
+        turned = np.abs(robot.sent_angles[-1] - start_angles)
+        np.testing.assert_allclose([0, 0, 0], turned[1:4], atol=1e-9)
+        self.assertGreater(turned[4], 3)
+        self.assertGreater(turned[6], 3)
+
+    def test_the_move_goes_from_where_the_robot_is_and_ends_at_the_new_pose(self):
+        controller, robot, start_angles = self.assert_wrist_stays_and_tip_is_level(Pose(0, 25, 3, gamma=-pi / 2))
+
+        np.testing.assert_allclose(start_angles, robot.sent_angles[0], atol=1e-6)
+        self.assertEqual([], robot.calls)  # nothing else was asked of the robot
+        self.assertEqual([], robot.poses)
+
+    def test_a_gripper_that_is_level_already_does_not_move(self):
+        pose = Pose(0, 25, 10)  # the neutral orientation, the move is planned all the same and has no distance
+        with self.assertNoLogs(xbox_robot_controller.logger, 'WARNING'):
+            controller, robot, start_angles = self.press_b_at(pose)
+
+        for angles in robot.sent_angles:
+            np.testing.assert_allclose(start_angles, angles, atol=1e-9)
+        self.assertAlmostEqual(0, controller.current_pose.x, places=9)
+        self.assertAlmostEqual(25, controller.current_pose.y, places=9)
+        self.assertAlmostEqual(10, controller.current_pose.z, places=9)
+        self.assertEqual((0, 0, 0), (controller.current_pose.alpha, controller.current_pose.beta,
+                                     controller.current_pose.gamma))
+
+    def test_pointing_up_the_tip_comes_down_to_the_wrist(self):
+        pose = Pose(0, 25, 20, gamma=pi / 2)
+        wrist = forward_position_kinematics(inverse_kinematics(pose, test_config), test_config)[3]
+        np.testing.assert_allclose([0, 25, 8], wrist, atol=1e-9)
+
+        controller, _, _ = self.assert_wrist_stays_and_tip_is_level(pose)
+
+        self.assertAlmostEqual(8, controller.current_pose.z, places=6)
+
+    def test_tilted_sideways_and_turned_the_wrist_stays_and_the_tip_goes_along_the_neutral_direction(self):
+        pose = Pose(5, 25, 12, alpha=0.4, gamma=-0.6)
+        wrist = forward_position_kinematics(inverse_kinematics(pose, test_config), test_config)[3]
+        self.assertGreater(abs(pose.alpha), 0)
+        self.assertGreater(abs(pose.gamma), 0)
+
+        controller, _, _ = self.assert_wrist_stays_and_tip_is_level(pose)
+
+        expected = wrist + test_config.d6 * np.array([0, 1, 0])  # the third column of the neutral matrix
+        np.testing.assert_allclose(Pose(0, 0, 0).get_euler_matrix()[:, 2], [0, 1, 0], atol=1e-12)
+        np.testing.assert_allclose(expected, [controller.current_pose.x, controller.current_pose.y,
+                                              controller.current_pose.z], atol=1e-6)
+
+    def test_an_orientation_matrix_of_the_pose_is_dropped(self):
+        matrix = Pose(0, 25, 3, gamma=-pi / 2).get_euler_matrix()
+        pose = Pose(0, 25, 3, euler_matrix=matrix.copy())
+
+        controller, _, _ = self.assert_wrist_stays_and_tip_is_level(pose)
+
+        self.assertIsNone(controller.current_pose.euler_matrix)
+
+    def test_the_flip_of_the_pose_is_kept(self):
+        for flip in (False, True):
+            with self.subTest(flip=flip):
+                controller, _, _ = self.assert_wrist_stays_and_tip_is_level(
+                    Pose(5, 25, 12, alpha=0.4, gamma=-0.6, flip=flip))
+
+                self.assertEqual(flip, controller.current_pose.flip)
+
+    def test_the_wrist_centre_is_that_of_the_angles_the_arm_was_sent_to(self):
+        # after a stick step the controller knows the angles it sent; the pose is what the sticks asked for
+        pose = Pose(0, 25, 3, gamma=-pi / 2)
+        robot = FakeRobot(inverse_kinematics(pose, test_config))
+        controller = make_controller(robot, buttons=lambda: Buttons(b=True))
+        controller.current_pose = pose
+        controller._take_step(copy(pose), 0.01)
+        sent = controller._step_angles().copy()
+        wrist = forward_position_kinematics(sent, test_config)[3]
+        robot.sent_angles.clear()
+
+        controller.handle_buttons()
+
+        np.testing.assert_allclose(forward_position_kinematics(robot.sent_angles[-1], test_config)[3], wrist, atol=1e-6)
+        self.assertAlmostEqual(wrist[2], controller.current_pose.z, places=6)
+
+    def test_a_turn_that_leaves_the_workspace_is_refused_and_the_pose_stays(self):
+        # the gripper points back to the base and the tip swings down 3 cm below where it starts and ends
+        pose = Pose(0, 25, 10, alpha=-pi, flip=True)
+        start_angles = inverse_kinematics(pose, test_config)
+        self.assertGreaterEqual(forward_position_kinematics(start_angles, test_config)[4][2], FloorAtNineLimits.z_min)
+        before = copy(pose)
+        robot = FakeRobot(start_angles)
+        robot.workspace_limits = FloorAtNineLimits
+        controller = make_controller(robot, buttons=lambda: Buttons(b=True))
+        controller.current_pose = pose
+        step = controller._step
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller.handle_buttons()
+
+        self.assertIs(pose, controller.current_pose)
+        self.assertEqual(before, controller.current_pose)
+        self.assertIs(step, controller._step)
+        self.assertEqual([], robot.sent_angles, 'a move that is not possible is refused before the first step')
+        self.assertEqual(1, len(logs.output))
+        self.assertIn('can not reset the orientation', logs.output[0])
+        self.assertIn('below the minimum height of 9', logs.output[0])
+
+    def test_a_new_tip_inside_y_min_is_refused_and_the_pose_stays(self):
+        # the tip swings in towards the base while the gripper turns, to y 12.0 with a minimum of 12.1
+        pose = Pose(0, 25, 10, alpha=pi, gamma=2 * pi / 3, flip=True)
+        start_angles = inverse_kinematics(pose, test_config)
+        robot = FakeRobot(start_angles)
+        robot.check_workspace(start_angles)  # the pose itself is fine
+        before = copy(pose)
+        controller = make_controller(robot, buttons=lambda: Buttons(b=True))
+        controller.current_pose = pose
+
+        with self.assertLogs(xbox_robot_controller.logger, 'WARNING') as logs:
+            controller.handle_buttons()
+
+        self.assertEqual(before, controller.current_pose)
+        self.assertEqual([], robot.sent_angles)
+        self.assertIn('closer than y=12.1', logs.output[0])
+
+    def test_without_angles_the_function_finds_the_wrist_centre_from_the_pose(self):
+        pose = Pose(5, 25, 12, alpha=0.4, gamma=-0.6)
+        robot = FakeRobot(inverse_kinematics(pose, test_config))
+
+        new_pose = xbox_robot_controller.reset_orientation(pose, test_config, robot)
+
+        wrist = forward_position_kinematics(inverse_kinematics(pose, test_config), test_config)[3]
+        np.testing.assert_allclose(wrist + [0, test_config.d6, 0], [new_pose.x, new_pose.y, new_pose.z], atol=1e-6)
+
+    def test_the_link_lengths_are_restored_before_the_move(self):
+        pose = Pose(0, 25, 3, gamma=-pi / 2)
+        robot = FakeRobot(inverse_kinematics(pose, test_config))
+        config = mock.Mock(wraps=test_config)
+
+        with mock.patch.object(test_config, 'restore_initial_values') as restore:
+            xbox_robot_controller.reset_orientation(pose, config, robot, inverse_kinematics(pose, test_config))
+
+        restore.assert_called_once_with()
+
+
 class MoreButtonTests(unittest.TestCase):
 
     def setUp(self):
@@ -734,10 +1033,15 @@ class MoreButtonTests(unittest.TestCase):
         controller.current_pose = Pose(30, 22, 4, alpha=0.5)
         reset_pose = Pose(30, 22, 4)
 
+        sent_angles = controller._step_angles()
+
         with mock.patch.object(xbox_robot_controller, 'reset_orientation', return_value=reset_pose) as reset:
             controller.handle_buttons()
 
-        reset.assert_called_once_with(Pose(30, 22, 4, alpha=0.5), test_config, robot)
+        # the wrist centre comes from the angles the arm was sent to, not from a read of the bus
+        reset.assert_called_once()
+        self.assertEqual((Pose(30, 22, 4, alpha=0.5), test_config, robot), reset.call_args.args[:3])
+        np.testing.assert_array_equal(sent_angles, reset.call_args.args[3])
         self.assertIs(reset_pose, controller.current_pose)
 
     def test_y_records_the_position(self):
@@ -1081,8 +1385,10 @@ class StickStepTests(unittest.TestCase):
         np.testing.assert_allclose(inverse_kinematics(Pose(30, 22, 15, flip=True), test_config), sent_angles[-1],
                                    atol=1e-6)
 
+    @mock.patch.object(xbox_robot_controller, 'FLIP_MIN_WRIST_HEIGHT', 0.0)
     def test_a_flip_that_would_swing_below_the_floor_holds_and_the_a_button_turns_it_back(self):
-        # 4cm above the table the gripper would swing through the floor of the workspace on the way
+        # 4cm above the table the gripper would swing through the floor of the workspace on the way; the minimum wrist
+        # height of the a button is off here, this is the check of the steps behind it
         controller = self.controller_at(Pose(30, 22, 4))
         before = controller._step_angles().copy()
 

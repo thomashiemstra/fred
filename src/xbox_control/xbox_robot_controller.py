@@ -60,6 +60,10 @@ GRIPPER_MAX_LEAD_POSITIONS = 85
 DEFAULT_GRIPPER_POSITIONS_PER_STATE = 9.5
 # a stick step that is too fast is slowed down to this fraction of recommended_max_servo_speed, below the speed check
 SLOW_DOWN_MARGIN = 0.95
+# the a button only flips the wrist when the wrist centre is at least this high above the table. Halfway the flip the
+# wrist is straight and the gripper swings down along the line of the forearm, so with the arm low it would hit the
+# table. Adjust this value by hand: more is safer, less allows the flip closer to the table
+FLIP_MIN_WRIST_HEIGHT = 12.0  # cm
 # set to False the gamepad sends its steps without velocities, as before 21 November 2026, to compare by hand how the
 # arm follows the sticks with and without the velocity lead of the servos
 SEND_VELOCITIES = True
@@ -493,17 +497,29 @@ class XboxRobotController:
         self.__move_gripper(GRIPPER_STEP)
 
     def _reset_orientation(self) -> None:
-        """turn the end effector to the neutral orientation, in place; the pose stays when the turn is not possible"""
+        """
+        turn the gripper to the neutral orientation around the wrist centre, which stays where it is: the tip moves
+        to the height of the wrist centre. The pose stays when the turn is not possible.
+        """
         try:
-            self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config, self.robot)
+            # the wrist centre of the angles the arm was sent to, there is no bus read in a button press
+            self.current_pose = reset_orientation(self.current_pose, self.dynamixel_robot_config, self.robot,
+                                                  self._step_angles())
         except MovementException as e:
             logger.warning('can not reset the orientation: %s', e)
 
     def _toggle_flip(self) -> None:
+        angles = self._step_angles()
+        # halfway the flip the gripper swings down along the forearm, so the wrist centre has to be high enough above
+        # the table; the angles are the ones the arm was sent to, there is no bus read in a button press
+        wrist_height = float(forward_position_kinematics(angles, self.robot.robot_config)[3][2])
+        if wrist_height < FLIP_MIN_WRIST_HEIGHT:
+            logger.warning('not flipping the wrist: the wrist centre is %.1f cm above the table, the minimum is '
+                           '%.1f cm; raise the arm first', wrist_height, FLIP_MIN_WRIST_HEIGHT)
+            return
         # the next steps turn the wrist over at the joint speed limit, starting from the angles it was sent with; a step
         # set by hand has no speed, the next step measures its own velocities
-        angles = self._step_angles()
-        self._step = (self.current_pose, angles, np.zeros_like(angles))
+        self._step =(self.current_pose, angles, np.zeros_like(angles))
         self.current_pose.flip = not self.current_pose.flip
 
     def _recording_flip(self) -> bool | None:
@@ -729,10 +745,29 @@ def determine_time(poses: list[Pose], speed: float) -> float:
 
 
 def reset_orientation(current_pose: Pose, dynamixel_robot_config: RobotConfig,
-                      dynamixel_servo_controller: AbstractRobotController) -> Pose:
-    # the wrist keeps its flip, changing it in place would make the wrist turn around
+                      dynamixel_servo_controller: AbstractRobotController,
+                      angles: np.ndarray | None = None) -> Pose:
+    """
+    Turn the gripper to the neutral orientation (level, pointing along +y of the robot) in a planned move of a second.
+    The wrist centre stays where it is and only the wrist joints turn: the new tip is the wrist centre plus the length
+    of the gripper along the neutral direction, so the tip ends at the height of the wrist centre. Keeping the tip in
+    place instead would swing the wrist centre down around it, into the table when the gripper points down.
+    :param angles: the angles the robot was sent to, they give the wrist centre; when None the angles of the current
+        pose
+    :return: the new pose, which has the flip of the current pose
+    :raises MovementException: if the move is not possible, the robot then has not moved
+    """
     dynamixel_robot_config.restore_initial_values()
+    robot_config = dynamixel_servo_controller.robot_config
+    if angles is None:
+        angles = dynamixel_servo_controller.pose_to_angles(current_pose)
+    wrist_centre = forward_position_kinematics(angles, robot_config)[3]
+    # the wrist keeps its flip, changing it in place would make the wrist turn around
     new_orientation = copy(current_pose)
     new_orientation.reset_orientation()
+    # the inverse kinematics finds the wrist centre as the tip minus d6 along the third column of the orientation
+    direction = new_orientation.get_euler_matrix()[:3, 2]
+    tip = wrist_centre + robot_config.d6 * direction
+    new_orientation.x, new_orientation.y, new_orientation.z = float(tip[0]), float(tip[1]), float(tip[2])
     return move_between_poses(dynamixel_servo_controller, current_pose, new_orientation, duration=1)
 
