@@ -23,6 +23,7 @@ from src.utils.decorators import synchronized_with_lock
 from src.utils.linalg_utils import get_center
 from src.utils.movement import PoseToPoseMovement, SplineMovement
 from src.utils.movement_exception import MovementException
+from src.utils import workspace
 from src.utils.os_utils import get_project_root
 from src.xbox_control.xbox360controller.xbox_pose_updater import MAX_STEP_TIME
 from time import sleep, perf_counter
@@ -60,10 +61,17 @@ GRIPPER_MAX_LEAD_POSITIONS = 85
 DEFAULT_GRIPPER_POSITIONS_PER_STATE = 9.5
 # a stick step that is too fast is slowed down to this fraction of recommended_max_servo_speed, below the speed check
 SLOW_DOWN_MARGIN = 0.95
-# the a button only flips the wrist when the wrist centre is at least this high above the table. Halfway the flip the
-# wrist is straight and the gripper swings down along the line of the forearm, so with the arm low it would hit the
-# table. Adjust this value by hand: more is safer, less allows the flip closer to the table
-FLIP_MIN_WRIST_HEIGHT = 12.0  # cm
+# the a button flips the wrist with the wrist centre at least this high above the table. Halfway the flip the wrist is
+# straight and the gripper swings down along the line of the forearm, around the wrist centre. The gripper is 15 cm
+# long, so with the wrist centre 15 cm up it clears the table. Below this height the a button first raises the arm
+# straight up to it, and then flips; the arm stays there. Adjust this value by hand: more is safer, less allows the
+# flip closer to the table
+FLIP_MIN_WRIST_HEIGHT = 15.0  # cm
+# the speed of the joint that turns the most while the wrist turns over after the a button, a half turn takes about 2
+# seconds. The general limit of the steps of the gamepad (SLOW_DOWN_MARGIN of recommended_max_servo_speed) stays what it
+# is: it still holds when this is set above it, and everything else that walks the angles keeps it. Adjust this value
+# by hand: less is gentler for the motors, more is quicker
+FLIP_JOINT_SPEED = 1.5  # rad/s
 # set to False the gamepad sends its steps without velocities, as before 21 November 2026, to compare by hand how the
 # arm follows the sticks with and without the velocity lead of the servos
 SEND_VELOCITIES = True
@@ -97,6 +105,10 @@ class XboxRobotController:
         self._crashed = False
         self._start_move: PlannedMove | None = None
         self._step_skipped = False  # the gamepad asks for a step that fails a check, the robot holds
+        # the current pose the a button turned the wrist over for, at FLIP_JOINT_SPEED, until the angles arrive at it.
+        # It is the pose object itself: a pose that some other part sets (a reset, a move, a start) is another object,
+        # so nothing else is ever slowed by accident
+        self._flip_turn_pose: Pose | None = None
         # the pose, the angles and the velocities of the last step of the sticks, what the control loop sends. The
         # velocities are in rad/s like the angles, indexed by servo id, index 0 unused. The step belongs to the
         # current pose only while the pose is this very object, a pose some other part set is not a step
@@ -174,6 +186,7 @@ class XboxRobotController:
 
             self._stop_requested.clear()
             self._crashed = False
+            self._flip_turn_pose = None
             # the gripper opens after the start move, whatever the target was when the previous run stopped
             self.gripper_state = 0
             self._clear_commands()
@@ -198,6 +211,7 @@ class XboxRobotController:
                 # the control loop didn't get the chance to move back to the start pose and disable the servos
                 self.robot.disable_servos()
             self.thread = None
+            self._flip_turn_pose = None
             self._clear_commands()
             return True
 
@@ -345,6 +359,8 @@ class XboxRobotController:
         The step is refused when the position can't be reached (the inverse
         kinematics then gives the stretched arm), or the angles are outside the workspace limits or the ranges of the
         servos (the checks of check_move).
+        The turn of the wrist after the a button is slower: the angles of that walk turn at most at FLIP_JOINT_SPEED,
+        until they have arrived at the flipped pose.
         :param step_time: the seconds the step takes
         :raises MovementException: if the step is not safe
         """
@@ -354,12 +370,17 @@ class XboxRobotController:
             # still on the way to the commanded pose, the gamepad waits
             best_pose, best_angles = self.current_pose, commanded_angles
         else:
+            # the angles arrived at the pose, the turn of the wrist after the a button is over
+            self._flip_turn_pose = None
             best_pose = _with_flip(new_pose, self.current_pose.flip)
             best_angles = self._angles_of(best_pose)
 
         # a step that would turn a joint faster than recommended_max_servo_speed goes part of the way, at that speed
         step_time = min(step_time, MAX_STEP_TIME)
-        max_change = SLOW_DOWN_MARGIN * src.global_constants.recommended_max_servo_speed * step_time
+        max_speed = SLOW_DOWN_MARGIN * src.global_constants.recommended_max_servo_speed
+        if self._flip_turn_pose is not None and self._flip_turn_pose is self.current_pose:
+            max_speed = min(max_speed, FLIP_JOINT_SPEED)
+        max_change = max_speed * step_time
         change = np.abs(best_angles[1:] - current_angles[1:]).max()
         if change > max_change:
             best_angles = current_angles + (max_change / change) * (best_angles - current_angles)
@@ -513,14 +534,67 @@ class XboxRobotController:
         # halfway the flip the gripper swings down along the forearm, so the wrist centre has to be high enough above
         # the table; the angles are the ones the arm was sent to, there is no bus read in a button press
         wrist_height = float(forward_position_kinematics(angles, self.robot.robot_config)[3][2])
-        if wrist_height < FLIP_MIN_WRIST_HEIGHT:
-            logger.warning('not flipping the wrist: the wrist centre is %.1f cm above the table, the minimum is '
-                           '%.1f cm; raise the arm first', wrist_height, FLIP_MIN_WRIST_HEIGHT)
-            return
+        # after a raise the wrist centre is at the minimum give or take rounding, and the next press must not raise
+        # again by a rounding error: a wrist centre that close below the minimum is high enough, like the workspace
+        # limits accept a pose that close beyond them
+        if wrist_height < FLIP_MIN_WRIST_HEIGHT - workspace.TOLERANCE:
+            raised_angles = self._raise_for_flip(angles, wrist_height)
+            if raised_angles is None:
+                return
+            angles = raised_angles
         # the next steps turn the wrist over at the joint speed limit, starting from the angles it was sent with; a step
         # set by hand has no speed, the next step measures its own velocities
         self._step =(self.current_pose, angles, np.zeros_like(angles))
         self.current_pose.flip = not self.current_pose.flip
+        # the turn of the wrist is slow, also when the a button is pressed again during the turn, to turn back
+        self._flip_turn_pose = self.current_pose
+
+    def _raise_for_flip(self, angles: np.ndarray, wrist_height: float) -> np.ndarray | None:
+        """
+        Raise the arm in a straight line straight up until the wrist centre is FLIP_MIN_WRIST_HEIGHT above the table:
+        the tip rises by the missing height, and x, y, the orientation and the flip stay. The move is planned and
+        checked like the start move and can be stopped like it. The current pose becomes the pose the arm ended at, the
+        flip of the current pose is not changed here.
+        :param angles: the angles the arm was sent to, the raise starts there; there is no bus read in a button press
+        :param wrist_height: the height of the wrist centre at these angles
+        :return: the angles the raise ended at, or None when the wrist must not be flipped: the raise is not possible
+            (nothing moved) or it was stopped half way (the current pose is where the arm stopped)
+        """
+        missing = FLIP_MIN_WRIST_HEIGHT - wrist_height
+        robot_config = self.robot.robot_config
+        target = forward_kinematics(angles, robot_config)
+        target.z += missing
+        try:
+            move = plan_move_to_pose(self.robot, angles, target)
+        except MovementException as e:
+            logger.warning('not flipping the wrist: the wrist centre is %.1f cm above the table, the minimum is '
+                           '%.1f cm, and the arm can not go straight up by %.1f cm: %s. Move the arm to where it can '
+                           'go up first', wrist_height, FLIP_MIN_WRIST_HEIGHT, missing, e)
+            return None
+        logger.info('raising the arm by %.1f cm for the flip of the wrist: the wrist centre is %.1f cm above the '
+                    'table, the minimum is %.1f cm', missing, wrist_height, FLIP_MIN_WRIST_HEIGHT)
+
+        # execute_move checks should_stop before every step and sends the step when it is False, so the count is the
+        # number of steps that were sent
+        steps_sent = 0
+
+        def should_stop() -> bool:
+            nonlocal steps_sent
+            if self.is_done():
+                return True
+            steps_sent += 1
+            return False
+
+        completed = execute_move(self.robot, move, should_stop=should_stop)
+        if steps_sent > 0:
+            # the wrist keeps the flip the current pose is meant to have, also when it was between the solutions
+            reached = forward_kinematics(move.angles[steps_sent - 1], robot_config)
+            reached.flip = self.current_pose.flip
+            self.current_pose = reached
+        if not completed:
+            logger.info('the raise of the arm for the flip was stopped, not flipping the wrist')
+            return None
+        return move.angles[-1]
 
     def _recording_flip(self) -> bool | None:
         """the flip of the first pose of the recording, None when nothing is recorded"""
